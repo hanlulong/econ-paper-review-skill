@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openecon.ai/econ-review/tables.schema.json",
+  "title": "econ-review separate rendered-table audit",
+  "type": "object",
+  "$defs": {
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "result"],
+      "properties": {
+        "status": {"enum": ["clear", "issue", "bounded", "not_applicable"]},
+        "result": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": ["schema_version", "review_id", "source", "inventory_complete_within_assessment_boundary", "no_tables_confirmed", "tables", "boundary_notes"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "review_id": {"type": "string", "minLength": 1},
+    "source": {"type": "string", "minLength": 1},
+    "inventory_complete_within_assessment_boundary": {"const": true},
+    "no_tables_confirmed": {"type": "boolean"},
+    "boundary_notes": {"type": "string", "minLength": 1},
+    "tables": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "coverage_unit_id", "label", "pdf_pages", "source_locator", "render_paths",
+          "render_status", "extraction_status", "visual_status", "claim_correspondence_status",
+          "checks", "finding_ids", "notes"
+        ],
+        "properties": {
+          "id": {"type": "string", "pattern": "^TBL-[0-9]{2,}$"},
+          "coverage_unit_id": {"type": "string", "minLength": 1},
+          "label": {"type": "string", "minLength": 1},
+          "pdf_pages": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
+          "source_locator": {"type": "string", "minLength": 1},
+          "render_paths": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "render_status": {"enum": ["inspected", "bounded"]},
+          "extraction_status": {"enum": ["consistent", "conflict_resolved_from_render", "conflict_unresolved", "not_applicable", "bounded"]},
+          "visual_status": {"enum": ["clear", "issue", "bounded"]},
+          "claim_correspondence_status": {"enum": ["consistent", "issue", "bounded", "not_applicable"]},
+          "checks": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "number_title_panels", "row_column_alignment", "cell_completeness",
+              "units_transformations", "sample_denominator_support", "uncertainty_inference",
+              "definitions_sources", "cross_table_consistency", "calculation_traceability",
+              "text_claim_reconciliation"
+            ],
+            "properties": {
+              "number_title_panels": {"$ref": "#/$defs/check"},
+              "row_column_alignment": {"$ref": "#/$defs/check"},
+              "cell_completeness": {"$ref": "#/$defs/check"},
+              "units_transformations": {"$ref": "#/$defs/check"},
+              "sample_denominator_support": {"$ref": "#/$defs/check"},
+              "uncertainty_inference": {"$ref": "#/$defs/check"},
+              "definitions_sources": {"$ref": "#/$defs/check"},
+              "cross_table_consistency": {"$ref": "#/$defs/check"},
+              "calculation_traceability": {"$ref": "#/$defs/check"},
+              "text_claim_reconciliation": {"$ref": "#/$defs/check"}
+            }
+          },
+          "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+          "notes": {"type": "string", "minLength": 1}
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"render_status": {"const": "inspected"}}},
+            "then": {"properties": {"render_paths": {"minItems": 1}}}
+          }
+        ]
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"no_tables_confirmed": {"const": true}}},
+      "then": {"properties": {"tables": {"maxItems": 0}}},
+      "else": {"properties": {"tables": {"minItems": 1}}}
+    }
+  ]
+}

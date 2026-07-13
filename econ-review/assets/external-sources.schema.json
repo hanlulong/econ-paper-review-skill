@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openecon.ai/econ-review/external-sources.schema.json",
+  "title": "econ-review external source ledger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "review_id", "search_confidentiality", "sources"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "review_id": {"type": "string", "minLength": 1},
+    "search_confidentiality": {"enum": ["forbidden", "deidentified", "exact_allowed"]},
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "stable_id", "url", "accessed_at", "supported_propositions", "snapshot_path", "snapshot_sha256"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^EXT-[0-9]{2,}$"},
+          "title": {"type": "string", "minLength": 1},
+          "stable_id": {"type": "string", "minLength": 1},
+          "url": {"type": "string", "format": "uri"},
+          "accessed_at": {"type": "string", "format": "date"},
+          "supported_propositions": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "snapshot_path": {"type": "string", "minLength": 1},
+          "snapshot_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+        }
+      }
+    }
+  }
+}

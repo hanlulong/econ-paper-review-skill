@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openecon.ai/econ-review/coverage.schema.json",
+  "title": "econ-review exhaustive coverage state",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "review_id", "branches_applied", "units", "dimensions", "second_sweep"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "review_id": {"type": "string", "minLength": 1},
+    "branches_applied": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": {"enum": ["universal", "empirical", "descriptive", "structural", "macro", "theory", "mixed"]}
+    },
+    "units": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "type", "label", "status", "finding_ids", "notes"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "type": {"enum": ["title", "abstract", "section", "subsection", "table", "figure", "equation", "assumption", "definition", "lemma", "proposition", "theorem", "corollary", "proof", "example", "algorithm", "calibration", "moment", "counterfactual", "welfare", "footnote_cluster", "reference_list", "availability_statement", "appendix", "code", "other"]},
+          "label": {"type": "string", "minLength": 1},
+          "status": {"enum": ["checked_no_issue", "findings", "bounded", "not_applicable"]},
+          "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+          "notes": {"type": "string"}
+        }
+      }
+    },
+    "dimensions": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "label", "branch", "status", "finding_ids", "notes"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "label": {"type": "string", "minLength": 1},
+          "branch": {"enum": ["universal", "empirical", "descriptive", "structural", "macro", "theory", "mixed"]},
+          "status": {"enum": ["checked_no_issue", "findings", "bounded", "not_applicable"]},
+          "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+          "notes": {"type": "string"}
+        }
+      }
+    },
+    "second_sweep": {
+      "type": "object", "additionalProperties": false,
+      "required": ["required", "completed", "rejected_candidate_count", "new_finding_ids", "shortfall_explanation"],
+      "properties": {
+        "required": {"type": "boolean"},
+        "completed": {"type": "boolean"},
+        "rejected_candidate_count": {"type": "integer", "minimum": 0},
+        "new_finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "shortfall_explanation": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

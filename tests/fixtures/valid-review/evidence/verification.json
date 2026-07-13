@@ -1,0 +1,36 @@
+{
+  "schema_version": "0.1",
+  "review_id": "synthetic-valid-001",
+  "records": [
+    {
+      "finding_id": "LOGIC-01",
+      "status": "passed",
+      "checks": [
+        {
+          "evidence_id": "EVD-LOGIC-01-A",
+          "check_type": "exact_source_span",
+          "result": "passed",
+          "anchor_id": "ANC-01",
+          "computation_id": null,
+          "source_record_id": null,
+          "notes": "Exact UTF-8 source span and source hash match."
+        }
+      ]
+    },
+    {
+      "finding_id": "WRT-01",
+      "status": "passed",
+      "checks": [
+        {
+          "evidence_id": "EVD-WRT-01-A",
+          "check_type": "exact_source_span",
+          "result": "passed",
+          "anchor_id": "ANC-02",
+          "computation_id": null,
+          "source_record_id": null,
+          "notes": "Exact UTF-8 source span and source hash match."
+        }
+      ]
+    }
+  ]
+}

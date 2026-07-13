@@ -1,0 +1,249 @@
+{
+  "schema_version": "0.1",
+  "review_id": "synthetic-valid-001",
+  "branches_applied": [
+    "universal",
+    "theory"
+  ],
+  "units": [
+    {
+      "id": "paper",
+      "type": "section",
+      "label": "Complete synthetic manuscript",
+      "status": "findings",
+      "finding_ids": [
+        "LOGIC-01",
+        "WRT-01"
+      ],
+      "notes": "The fixture contains one short proposition and its interpretation."
+    }
+  ],
+  "dimensions": [
+    {
+      "id": "contribution-literature",
+      "label": "Contribution and literature positioning",
+      "branch": "universal",
+      "status": "bounded",
+      "finding_ids": [],
+      "notes": "The synthetic fixture contains no contribution or literature claims; the audit is bounded to internal logic."
+    },
+    {
+      "id": "data-provenance-sample",
+      "label": "Data provenance, sample, linkage, and missingness",
+      "branch": "universal",
+      "status": "bounded",
+      "finding_ids": [],
+      "notes": "The synthetic theory fixture contains no data or sample."
+    },
+    {
+      "id": "measurement-variables",
+      "label": "Measurement and constructed variables",
+      "branch": "universal",
+      "status": "checked_no_issue",
+      "finding_ids": [],
+      "notes": "The payoff and action objects are defined directly and no constructed measure is used."
+    },
+    {
+      "id": "identification-assumptions-estimand",
+      "label": "Identification, assumptions, and estimand or theoretical object",
+      "branch": "universal",
+      "status": "findings",
+      "finding_ids": [
+        "LOGIC-01"
+      ],
+      "notes": "The equality boundary changes the theoretical object from unique to set-valued."
+    },
+    {
+      "id": "estimation-computation-inference",
+      "label": "Estimation, computation, and inference",
+      "branch": "universal",
+      "status": "bounded",
+      "finding_ids": [],
+      "notes": "No estimation or computation appears in the synthetic theory fixture."
+    },
+    {
+      "id": "equations-logic-units",
+      "label": "Equations, logic, internal consistency, and units",
+      "branch": "universal",
+      "status": "findings",
+      "finding_ids": [
+        "LOGIC-01"
+      ],
+      "notes": "The equality boundary contradicts global strict uniqueness."
+    },
+    {
+      "id": "results-magnitudes-exhibits",
+      "label": "Results, magnitudes, tables, and figures",
+      "branch": "universal",
+      "status": "bounded",
+      "finding_ids": [],
+      "notes": "The fixture has one qualitative proposition and no exhibits."
+    },
+    {
+      "id": "robustness-mechanisms-policy",
+      "label": "Robustness, heterogeneity, mechanisms, and policy claims",
+      "branch": "universal",
+      "status": "bounded",
+      "finding_ids": [],
+      "notes": "These claim types do not appear in the synthetic fixture."
+    },
+    {
+      "id": "reproducibility-documentation",
+      "label": "Reproducibility, documentation, and availability",
+      "branch": "universal",
+      "status": "checked_no_issue",
+      "finding_ids": [],
+      "notes": "The complete synthetic manuscript source is recorded and fully read."
+    },
+    {
+      "id": "theory-logic",
+      "label": "Proposition logic and boundary cases",
+      "branch": "theory",
+      "status": "findings",
+      "finding_ids": [
+        "LOGIC-01"
+      ],
+      "notes": "The equality boundary defeats strict uniqueness."
+    },
+    {
+      "id": "reader-clarity",
+      "label": "One-pass reader comprehension",
+      "branch": "universal",
+      "status": "findings",
+      "finding_ids": [
+        "LOGIC-01"
+      ],
+      "notes": "A reader is led to understand uniqueness as global."
+    },
+    {
+      "id": "claim-consistency",
+      "label": "Cross-section claim consistency and calibration",
+      "branch": "universal",
+      "status": "findings",
+      "finding_ids": [
+        "LOGIC-01"
+      ],
+      "notes": "The global wording exceeds the boundary result."
+    },
+    {
+      "id": "terms-variables",
+      "label": "Terminology and variable definitions",
+      "branch": "universal",
+      "status": "checked_no_issue",
+      "finding_ids": [],
+      "notes": "The equilibrium action and parameter domain are locally defined."
+    },
+    {
+      "id": "data-limitation-fairness",
+      "label": "Data-limitation fairness",
+      "branch": "universal",
+      "status": "not_applicable",
+      "finding_ids": [],
+      "notes": "The synthetic theory fixture uses no data."
+    },
+    {
+      "id": "review-tone",
+      "label": "Author-facing report tone",
+      "branch": "universal",
+      "status": "checked_no_issue",
+      "finding_ids": [],
+      "notes": "Feedback is neutral, evidence-led, and proportionate."
+    },
+    {
+      "id": "writing-typography",
+      "label": "Writing, clarity, consistency, and typography",
+      "branch": "universal",
+      "status": "findings",
+      "finding_ids": [
+        "LOGIC-01",
+        "WRT-01"
+      ],
+      "notes": "The global uniqueness wording needs correction; no typo was found."
+    },
+    {
+      "id": "language-mechanics",
+      "label": "Grammar, articles, usage, and copyediting",
+      "branch": "universal",
+      "status": "findings",
+      "finding_ids": [
+        "WRT-01"
+      ],
+      "notes": "The complete synthetic paragraph was checked for language mechanics."
+    },
+    {
+      "id": "rendered-table-integrity",
+      "label": "Rendered table integrity and extraction conflict resolution",
+      "branch": "universal",
+      "status": "not_applicable",
+      "finding_ids": [],
+      "notes": "No applicable object appears in this synthetic fixture."
+    },
+    {
+      "id": "partition-regime",
+      "label": "Partition, subgroup, regime, type, and case assignment",
+      "branch": "universal",
+      "status": "not_applicable",
+      "finding_ids": [],
+      "notes": "No applicable object appears in this synthetic fixture."
+    },
+    {
+      "id": "measure-algebra",
+      "label": "Measure algebra, denominators, support, indices, and transformations",
+      "branch": "universal",
+      "status": "findings",
+      "finding_ids": [
+        "LOGIC-01"
+      ],
+      "notes": "The structured analytical or rendered-table audit records the applicable objects."
+    },
+    {
+      "id": "assumption-implementation",
+      "label": "Assumption to estimator, proof, model, and algorithm implementation",
+      "branch": "universal",
+      "status": "findings",
+      "finding_ids": [
+        "LOGIC-01"
+      ],
+      "notes": "The structured analytical or rendered-table audit records the applicable objects."
+    },
+    {
+      "id": "derived-number-traceability",
+      "label": "Derived-number and back-of-envelope traceability",
+      "branch": "universal",
+      "status": "not_applicable",
+      "finding_ids": [],
+      "notes": "No applicable object appears in this synthetic fixture."
+    },
+    {
+      "id": "comparison-harmonization",
+      "label": "Cross-method, sample, model, and robustness comparison harmonization",
+      "branch": "universal",
+      "status": "not_applicable",
+      "finding_ids": [],
+      "notes": "No applicable object appears in this synthetic fixture."
+    },
+    {
+      "id": "timing-test-semantics",
+      "label": "Timing fields, information sets, test restrictions, covariance, and labels",
+      "branch": "universal",
+      "status": "not_applicable",
+      "finding_ids": [],
+      "notes": "No applicable object appears in this synthetic fixture."
+    },
+    {
+      "id": "availability-exclusivity",
+      "label": "Availability, first, only, cannot, and exclusivity claims",
+      "branch": "universal",
+      "status": "not_applicable",
+      "finding_ids": [],
+      "notes": "No applicable object appears in this synthetic fixture."
+    }
+  ],
+  "second_sweep": {
+    "required": true,
+    "completed": true,
+    "rejected_candidate_count": 0,
+    "new_finding_ids": [],
+    "shortfall_explanation": "The fixture is one paragraph with one proposition; a second sweep found no additional defensible issue."
+  }
+}

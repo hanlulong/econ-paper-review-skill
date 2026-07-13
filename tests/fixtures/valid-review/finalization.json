@@ -1,0 +1,42 @@
+{
+  "schema_version": "0.1",
+  "review_id": "synthetic-valid-001",
+  "contract_version": "0.4",
+  "artifacts": {
+    "README.md": "56f997c7d2792c3d3a7d91a4ef1c633eb0922e8a2ac9b1e98ab8770bb115499c",
+    "evidence/analytical-audit.json": "9fc29ccf95b0a8d0d878f1f39702b795c964355c064f8efad7cb8fbebd5e7eff",
+    "evidence/analytical-audit.md": "6aa5534411a79a14084d8f64c14fbf81aca2f862bef62b9a149193312502220c",
+    "evidence/claims.json": "9f6744569a4c01853f67eed8e00048afe56c2e1f0400a7f80e61861d92b9a3b6",
+    "evidence/computations.json": "23e23ea1b0c171aeabc716dd58dfae3696746ac382169feabb1378922ffaca35",
+    "evidence/coverage.json": "7a03e08999fae005e10a10d6e812501fa6d21c24af70756ff6ec779d7535c26c",
+    "evidence/coverage.md": "e35473acdcec7dee7e05e95af6b6ee43a7324f1c44d513992e8f7e7bcba7b984",
+    "evidence/external-sources.json": "cd824186ee9ce6affb90a3cb324993ba05eea188807598e5c184415297c29d2d",
+    "evidence/figures.json": "383f5b142e4d7b49ce8e395f0f11251e3b8e3374abd2ad3da5e22f8df6cb6431",
+    "evidence/figures.md": "1a8b8b736ca92b1a204d9df1a250a2fab44e9cd89d136ca4bde910c6d7312350",
+    "evidence/reader-claim-audit.md": "f439e938c1981b01c81894c6cac9e03cc4ee9e9f73d0395da27e7db3d9317d21",
+    "evidence/reconstruction.md": "d645a7085c28fa28195220c17249d58d3ec630a6e7b30b630c061c2e50ff91aa",
+    "evidence/source-manifest.json": "02182c1b33c12537fa3aac00e67103476b0297ab808855c4b2047f184ec71747",
+    "evidence/sources.md": "02a51096847f6875e72a2f68fea2c229ce417b7ce0db7aa9deedf444c58a7bc4",
+    "evidence/tables.json": "f94a1ddf61575535e88edecadf6ea188736adfabbb3906c2a097df2f1c43190f",
+    "evidence/tables.md": "6377113baba94a92369e4e132ea1f7674f38a8dbe250982b04494044362ee643",
+    "evidence/verification.json": "0810f25091bf4f724cedbcae74e4a1d1b59b27ee4f52fff7349b332bbb9637c9",
+    "evidence/verification.md": "3c9f6477aeda97529476e4510013c6c4b92c0ddfefc1787e4ed31165a03b3e62",
+    "evidence/writing.json": "f6cfcb348728b8b4f56fb20561f0b3cbdd73592cc759df711199692d8f1bb675",
+    "evidence/writing.md": "99c55172ceaa9b9f1013ad0352fb2ae287d44db1d209b8e7a0b4dea6abb53c78",
+    "findings.json": "0fb69ced5095c2ac3544a90289d15985a9fa8b866b9fa4e34f9bad1b32a2f07a",
+    "fix-plan.md": "70d05ea0d1987ef63ee9e733c605b04821299fd1ed654728e894683139a03772",
+    "report.md": "635f828616b8163a1dd6c29ca75356cfa64831d81d201755df0e080ef473645b",
+    "review-manifest.json": "ee35012769a1e573b6df1addeb76f93b169d82779e72194757d0df07f97d5093",
+    "run.json": "ef888febfe9de486103a11a7706fd01c0964c3f23d21b5f4bb08a78bafecfc81",
+    "synthesis.json": "ecd161958adde8dfe409c441fce84e5686ac6563dc0a48486dae84890670f798",
+    "synthetic-paper.md": "393cc4d5f9701fab039c77807fe6b47aaef9618fec9ee942652ad218fe5e53e5",
+    "writing-report.md": "0e9515df13d7ae942cc2dd8b31de3c8ad503b8598135e21065dac2469f6083fe"
+  },
+  "gates": [
+    "source_integrity",
+    "structured_verification",
+    "report_generation",
+    "fix_plan_generation",
+    "contract_validation"
+  ]
+}

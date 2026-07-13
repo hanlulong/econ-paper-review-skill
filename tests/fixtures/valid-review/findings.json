@@ -1,0 +1,156 @@
+{
+  "schema_version": "0.4",
+  "review_id": "synthetic-valid-001",
+  "findings": [
+    {
+      "id": "LOGIC-01",
+      "title": "The global uniqueness claim fails at the equality boundary",
+      "decision_role": "potentially_dispositive",
+      "repairability": "within_current_design",
+      "importance_rank": 1,
+      "report_channel": "substance",
+      "paper_position": {"source_id": "SRC-01", "anchor_id": "ANC-01", "ordinal": 1},
+      "evidence_boundary": "The quoted proposition and setup establish the boundary conflict; the fixture contains no separate appendix proof.",
+      "minimum_repair": "Add a tie-breaking rule or state a set-valued equilibrium at the boundary.",
+      "display_evidence_id": "EVD-LOGIC-01-A",
+      "related_evidence_ids": [],
+      "related_locations": ["Section 2 boundary case", "Section 3 proposition"],
+      "dimension": "logic",
+      "critique_basis": "internal_inconsistency",
+      "data_limitation": "not_data_related",
+      "claim_ids": [
+        "CLM-01"
+      ],
+      "reader_effect": "The proposition and comparative static therefore overstate what the model establishes.",
+      "severity": "major",
+      "essential": true,
+      "status": "open",
+      "support_state": "in_conflict",
+      "issue": "The proposition asserts strict uniqueness although the stated payoff permits a tie.",
+      "why_it_matters": "The claim is global, but the equality boundary permits two actions.",
+      "evidence": [
+        {
+          "id": "EVD-LOGIC-01-A",
+          "type": "quote",
+          "representation": "verbatim",
+          "anchor_id": "ANC-01",
+          "computation_id": null,
+          "source_record_id": null,
+          "source": "synthetic-paper.md",
+          "locator": {
+            "section": "3.1",
+            "page": null,
+            "paragraph": "2",
+            "lines": null,
+            "exhibit": null,
+            "equation": null,
+            "file": "synthetic-paper.md"
+          },
+          "content": "The equilibrium action is unique for every parameter value.",
+          "scope_checked": null
+        }
+      ],
+      "confidence": {
+        "level": "high",
+        "would_change_my_mind": "A stated tie-breaking rule or a proof that the equality case is outside the parameter domain."
+      },
+      "counterargument": {
+        "author_reply": "The equality case may be ruled out implicitly by the parameter restriction.",
+        "search_scope": "Assumptions 1-3, Proposition 1, its proof, and the available appendix text.",
+        "result": "survived",
+        "notes": "The stated domain includes the equality case and no tie-breaking rule appears."
+      },
+      "fix": {
+        "what": "Add a tie-breaking rule or state a set-valued equilibrium at the boundary.",
+        "how": "Align Proposition 1, its proof, and the comparative static.",
+        "strategy": "correct_error",
+        "patch": {
+          "before": "unique for every parameter value",
+          "after": "unique away from the boundary; at equality both actions are optimal"
+        },
+        "effort": "hours",
+        "publishability": "Preempts a direct logical objection to the headline proposition.",
+        "dependencies": [],
+        "requires_new_data": false,
+        "current_design_can_support_primary_fix": true,
+        "claim_narrowing_alternative": "Limit the proposition to parameter values away from the equality boundary.",
+        "resolved_when": "Proposition 1 and its proof either supply a tie-breaking rule or state set-valued equilibrium at equality, and the comparative-static summary uses the same boundary qualification."
+      },
+      "verification": "passed"
+    },
+    {
+      "id": "WRT-01",
+      "title": "The proposition summary has a subject-verb agreement error",
+      "decision_role": "polish",
+      "repairability": "within_current_design",
+      "importance_rank": 2,
+      "report_channel": "writing",
+      "paper_position": {"source_id": "SRC-01", "anchor_id": "ANC-02", "ordinal": 2},
+      "evidence_boundary": "The exact source span establishes the agreement error; it does not imply a broader prose problem.",
+      "minimum_repair": "Replace “characterize” with “characterizes.”",
+      "display_evidence_id": "EVD-WRT-01-A",
+      "related_evidence_ids": [],
+      "related_locations": ["Section 3 proposition summary"],
+      "dimension": "writing mechanics",
+      "critique_basis": "reader_clarity",
+      "data_limitation": "not_data_related",
+      "claim_ids": [],
+      "reader_effect": "The agreement error is therefore unusually visible.",
+      "severity": "minor",
+      "essential": false,
+      "status": "open",
+      "support_state": "supported",
+      "issue": "A singular subject takes a plural verb in the proposition summary.",
+      "why_it_matters": "The sentence states the paper's main proposition.",
+      "evidence": [
+        {
+          "id": "EVD-WRT-01-A",
+          "type": "quote",
+          "representation": "verbatim",
+          "anchor_id": "ANC-02",
+          "computation_id": null,
+          "source_record_id": null,
+          "source": "synthetic-paper.md",
+          "locator": {
+            "section": "3.1",
+            "page": null,
+            "paragraph": "3",
+            "lines": null,
+            "exhibit": null,
+            "equation": null,
+            "file": "synthetic-paper.md"
+          },
+          "content": "The proposition characterize the model's comparative static.",
+          "scope_checked": null
+        }
+      ],
+      "confidence": {
+        "level": "high",
+        "would_change_my_mind": "Evidence that the intended grammatical subject is plural rather than the singular noun 'proposition'."
+      },
+      "counterargument": {
+        "author_reply": "The sentence may have been intended to refer to multiple results rather than one proposition.",
+        "search_scope": "The complete sentence, the surrounding paragraph, and the statement of Proposition 1.",
+        "result": "not_applicable",
+        "notes": "Objective source-verified subject-verb agreement correction; no substantive counterargument is applicable."
+      },
+      "fix": {
+        "what": "Replace “characterize” with “characterizes.”",
+        "how": "Replace “characterize” with “characterizes.”",
+        "strategy": "correct_error",
+        "patch": {
+          "before": "The proposition characterize the model's comparative static.",
+          "after": "The proposition characterizes the model's comparative static."
+        },
+        "effort": "hours",
+        "publishability": "Removes an objective grammar error from the proposition summary.",
+        "dependencies": [],
+        "requires_new_data": false,
+        "current_design_can_support_primary_fix": true,
+        "claim_narrowing_alternative": null,
+        "resolved_when": "The proposition summary uses 'characterizes' with the singular subject and no duplicate occurrence remains."
+      },
+      "verification": "passed"
+    }
+  ]
+}

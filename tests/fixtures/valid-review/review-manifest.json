@@ -1,0 +1,97 @@
+{
+  "schema_version": "0.1",
+  "review_id": "synthetic-valid-001",
+  "documents": [
+    {
+      "id": "start-here",
+      "title": "Start here",
+      "group": "overview",
+      "path": "README.md",
+      "order": 0
+    },
+    {
+      "id": "referee-report",
+      "title": "Referee report",
+      "group": "overview",
+      "path": "report.md",
+      "order": 10
+    },
+    {
+      "id": "writing-report",
+      "title": "Writing report",
+      "group": "reports",
+      "path": "writing-report.md",
+      "order": 10
+    },
+    {
+      "id": "revision-plan",
+      "title": "Revision plan",
+      "group": "plan",
+      "path": "fix-plan.md",
+      "order": 10
+    },
+    {
+      "id": "paper-reconstruction",
+      "title": "Paper reconstruction",
+      "group": "audit",
+      "path": "evidence/reconstruction.md",
+      "order": 10
+    },
+    {
+      "id": "reader-claim-audit",
+      "title": "Reader and claim audit",
+      "group": "audit",
+      "path": "evidence/reader-claim-audit.md",
+      "order": 20
+    },
+    {
+      "id": "analytical-audit",
+      "title": "Analytical audit",
+      "group": "audit",
+      "path": "evidence/analytical-audit.md",
+      "order": 30
+    },
+    {
+      "id": "figure-audit",
+      "title": "Figure audit",
+      "group": "audit",
+      "path": "evidence/figures.md",
+      "order": 40
+    },
+    {
+      "id": "table-audit",
+      "title": "Table audit",
+      "group": "audit",
+      "path": "evidence/tables.md",
+      "order": 50
+    },
+    {
+      "id": "writing-audit",
+      "title": "Writing audit",
+      "group": "audit",
+      "path": "evidence/writing.md",
+      "order": 60
+    },
+    {
+      "id": "coverage-audit",
+      "title": "Coverage audit",
+      "group": "audit",
+      "path": "evidence/coverage.md",
+      "order": 70
+    },
+    {
+      "id": "source-verification",
+      "title": "Source verification",
+      "group": "audit",
+      "path": "evidence/sources.md",
+      "order": 80
+    },
+    {
+      "id": "package-verification",
+      "title": "Package verification",
+      "group": "audit",
+      "path": "evidence/verification.md",
+      "order": 90
+    }
+  ]
+}

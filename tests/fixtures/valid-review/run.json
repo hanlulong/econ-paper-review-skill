@@ -1,0 +1,143 @@
+{
+  "schema_version": "0.4",
+  "review_id": "synthetic-valid-001",
+  "status": "complete",
+  "mode": "full",
+  "target": {
+    "venue": null,
+    "tier": "unspecified"
+  },
+  "paper_family": "theory",
+  "designs": [
+    "static signaling model"
+  ],
+  "identity_handling": "identity_minimized",
+  "assessment_boundary": {
+    "sources": [
+      {
+        "path": "synthetic-paper.md",
+        "status": "fully_read",
+        "notes": "Synthetic fixture",
+        "sha256": null
+      }
+    ],
+    "figures": "not_present",
+    "equations": "source_preserved",
+    "appendix": "not_available",
+    "notes": "No external literature claim was made."
+  },
+  "capabilities": {
+    "live_literature_search": false,
+    "replication_code": "not_supplied"
+  },
+  "comment_policy": {
+    "minimum_target": 1,
+    "maximum": 100,
+    "exhaustive": true
+  },
+  "stage_status": {
+    "intake": "passed",
+    "reconstruction": "passed",
+    "frontier": "bounded",
+    "audit": "passed",
+    "counterargument": "passed",
+    "synthesis": "passed",
+    "verification": "passed",
+    "delivery": "passed"
+  },
+  "gates_loaded": [],
+  "counts": {
+    "critical": 0,
+    "major": 1,
+    "minor": 1,
+    "info": 0,
+    "essential": 1
+  },
+  "verification_passed": true,
+  "activated_burdens": [
+    {
+      "id": "claim_consistency",
+      "object_type": "claim",
+      "status": "active",
+      "activation_basis": "observed",
+      "triggers": [
+        {
+          "kind": "anchor",
+          "ref": "ANC-01",
+          "rationale": "The global uniqueness claim conflicts with the stated boundary case."
+        }
+      ],
+      "nonactivation_reason": null
+    },
+    {
+      "id": "logical_validity",
+      "object_type": "claim",
+      "status": "active",
+      "activation_basis": "observed",
+      "triggers": [
+        {
+          "kind": "anchor",
+          "ref": "ANC-01",
+          "rationale": "The proposition must be logically consistent with the boundary case."
+        }
+      ],
+      "nonactivation_reason": null
+    },
+    {
+      "id": "technical_validity",
+      "object_type": "theory",
+      "status": "active",
+      "activation_basis": "observed",
+      "triggers": [
+        {
+          "kind": "anchor",
+          "ref": "ANC-01",
+          "rationale": "The equilibrium statement requires a technically valid treatment of equality."
+        }
+      ],
+      "nonactivation_reason": null
+    },
+    {
+      "id": "methodological_validity",
+      "object_type": "design",
+      "status": "not_applicable",
+      "activation_basis": "not_applicable",
+      "triggers": [],
+      "nonactivation_reason": "The synthetic note contains no empirical estimator, calibration method, or numerical procedure."
+    },
+    {
+      "id": "writing_mechanics",
+      "object_type": "writing",
+      "status": "active",
+      "activation_basis": "observed",
+      "triggers": [
+        {
+          "kind": "anchor",
+          "ref": "ANC-02",
+          "rationale": "The proposition summary contains a subject-verb agreement error."
+        }
+      ],
+      "nonactivation_reason": null
+    },
+    {
+      "id": "sampling_or_randomization_uncertainty",
+      "object_type": "inference",
+      "status": "not_applicable",
+      "activation_basis": "not_applicable",
+      "triggers": [],
+      "nonactivation_reason": "The manuscript is a deterministic static model with no sampling or randomization object."
+    }
+  ],
+  "telemetry": {
+    "passes": [
+      "reconstruction",
+      "substance audit",
+      "writing audit",
+      "verification"
+    ],
+    "agents_spawned": 0,
+    "wall_clock_seconds": null,
+    "input_tokens": null,
+    "output_tokens": null
+  }
+}

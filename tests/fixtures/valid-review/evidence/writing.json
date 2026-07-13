@@ -1,0 +1,74 @@
+{
+  "schema_version": "0.3",
+  "review_id": "synthetic-valid-001",
+  "paper_type_lens": "Concise formal-theory paper with a proposition and boundary case.",
+  "strengths": [
+    "The synthetic manuscript states its model and proposition compactly."
+  ],
+  "section_audit": [
+    {
+      "section": "Complete synthetic manuscript",
+      "current_job": "State the model, proposition, and boundary prediction.",
+      "what_works": "The economic object and boundary case are easy to locate.",
+      "reader_friction": "One subject-verb agreement error interrupts the proposition summary.",
+      "revision_direction": "Correct the verb while preserving the concise structure.",
+      "finding_ids": ["WRT-01"]
+    }
+  ],
+  "redundancy_map": [],
+  "highest_return_finding_ids": ["WRT-01"],
+  "finding_links": [
+    {"finding_id": "WRT-01", "sources": ["mechanics", "section"]}
+  ],
+  "scope": {
+    "inventory_complete_within_assessment_boundary": true,
+    "sources_checked": ["Complete synthetic manuscript and rendered fixture"],
+    "render_checked": true,
+    "boundary_notes": "The fixture is one paragraph with no citations, bibliography, or submission context."
+  },
+  "mechanics": [
+    {
+      "id": "WRT-01",
+      "kind": "grammar",
+      "status": "issue",
+      "locator": "Section 3.1, proposition summary",
+      "quote": "The proposition characterize the model's comparative static.",
+      "correction": "The proposition characterizes the model's comparative static.",
+      "occurrences": [
+        {
+          "locator": "Section 3.1, proposition summary",
+          "quote": "The proposition characterize the model's comparative static.",
+          "correction": "The proposition characterizes the model's comparative static.",
+          "render_verification": "verified_render",
+          "source_provenance": "main_manuscript"
+        }
+      ],
+      "reader_consequence": "The sentence states the paper's main proposition, making the agreement error unusually visible.",
+      "priority": "required_copyedit",
+      "render_verification": "verified_render",
+      "notes": "The singular grammatical subject is visible in the source and rendered fixture.",
+      "finding_ids": ["WRT-01"]
+    }
+  ],
+  "consistency_groups": [
+    {
+      "id": "CON-01",
+      "object": "equilibrium action",
+      "variants": ["equilibrium action"],
+      "preferred": "equilibrium action",
+      "status": "consistent",
+      "locations_checked": "Complete synthetic manuscript",
+      "finding_ids": []
+    }
+  ],
+  "style_suggestions": [],
+  "venue_fit": {
+    "status": "not_requested",
+    "as_of_date": null,
+    "current_contribution_bar": "Venue analysis was not requested for this fixture.",
+    "revision_contingent_bar": "Venue analysis was not requested for this fixture.",
+    "recommended_strategy": "Do not infer or display journal fit unless a user requests it.",
+    "candidates": [],
+    "finding_ids": []
+  }
+}

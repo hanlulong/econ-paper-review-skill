@@ -1,0 +1,65 @@
+{
+  "schema_version": "0.1",
+  "review_contract_version": "0.4",
+  "review_id": "synthetic-valid-001",
+  "overall_assessment": "The synthetic paper isolates a clear comparative-static mechanism, but its global uniqueness conclusion is not supported at the equality boundary.",
+  "strengths": [
+    "The model is concise and the comparative-static object is easy to reconstruct."
+  ],
+  "review_posture": "weak_r_and_r",
+  "posture_rationale": "The headline proposition requires correction, but the current design can support the repair.",
+  "upgrade_conditions": [
+    "State a tie-breaking rule or weaken the proposition at the equality boundary."
+  ],
+  "principal_concerns": [
+    {
+      "id": "PC-01",
+      "title": "The headline uniqueness result includes an unresolved boundary case",
+      "finding_ids": ["LOGIC-01"],
+      "decision_effect": "potentially_dispositive",
+      "repairability": "within_current_design",
+      "rationale": "The paper presents a unique prediction on a domain that permits two optimal actions.",
+      "upgrade_condition": "Revise the proposition, proof, and comparative-static language consistently at the equality boundary."
+    }
+  ],
+  "other_major_finding_ids": [],
+  "convincingness": "The mechanism is clear away from the boundary, but the strict global conclusion is not convincing until the equality case is handled.",
+  "writing_finding_count": 1,
+  "support_mappings": [
+    {
+      "target_type": "overall_assessment", "target_id": null, "target_index": null,
+      "statement": "The synthetic paper isolates a clear comparative-static mechanism, but its global uniqueness conclusion is not supported at the equality boundary.",
+      "claim_ids": ["CLM-01"], "finding_ids": ["LOGIC-01"], "evidence_ids": ["EVD-LOGIC-01-A"]
+    },
+    {
+      "target_type": "strength", "target_id": null, "target_index": 0,
+      "statement": "The model is concise and the comparative-static object is easy to reconstruct.",
+      "claim_ids": ["CLM-01"], "finding_ids": [], "evidence_ids": []
+    },
+    {
+      "target_type": "posture_rationale", "target_id": null, "target_index": null,
+      "statement": "The headline proposition requires correction, but the current design can support the repair.",
+      "claim_ids": [], "finding_ids": ["LOGIC-01"], "evidence_ids": ["EVD-LOGIC-01-A"]
+    },
+    {
+      "target_type": "upgrade_condition", "target_id": null, "target_index": 0,
+      "statement": "State a tie-breaking rule or weaken the proposition at the equality boundary.",
+      "claim_ids": [], "finding_ids": ["LOGIC-01"], "evidence_ids": []
+    },
+    {
+      "target_type": "principal_concern_rationale", "target_id": "PC-01", "target_index": null,
+      "statement": "The paper presents a unique prediction on a domain that permits two optimal actions.",
+      "claim_ids": ["CLM-01"], "finding_ids": ["LOGIC-01"], "evidence_ids": ["EVD-LOGIC-01-A"]
+    },
+    {
+      "target_type": "principal_concern_upgrade", "target_id": "PC-01", "target_index": null,
+      "statement": "Revise the proposition, proof, and comparative-static language consistently at the equality boundary.",
+      "claim_ids": [], "finding_ids": ["LOGIC-01"], "evidence_ids": []
+    },
+    {
+      "target_type": "convincingness", "target_id": null, "target_index": null,
+      "statement": "The mechanism is clear away from the boundary, but the strict global conclusion is not convincing until the equality case is handled.",
+      "claim_ids": ["CLM-01"], "finding_ids": ["LOGIC-01"], "evidence_ids": ["EVD-LOGIC-01-A"]
+    }
+  ]
+}

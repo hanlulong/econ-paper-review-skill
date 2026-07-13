@@ -1,0 +1,86 @@
+{
+  "schema_version": "0.1",
+  "review_id": "synthetic-valid-001",
+  "audit_scope": {
+    "inventory_complete_within_assessment_boundary": true,
+    "coverage_unit_ids": ["paper"],
+    "headline_claim_ids": ["CLM-01"],
+    "terminology_scope_checked": ["Complete synthetic manuscript, including its proposition and parameter-domain wording"],
+    "boundary_notes": "The fixture contains one short proposition and no exhibits or appendix."
+  },
+  "claim_families": [
+    {
+      "id": "CLM-01",
+      "is_headline": true,
+      "canonical_supported_claim": "The equilibrium action is unique away from the equality boundary; both actions are optimal at equality absent a tie-breaking rule.",
+      "load_bearing_qualifiers": ["away from the equality boundary", "absent a tie-breaking rule"],
+      "finding_ids": ["LOGIC-01"],
+      "occurrences": [
+        {
+          "id": "CLM-01-O1",
+          "coverage_unit_id": "paper",
+          "locator": "Section 3.1",
+          "text": "The equilibrium action is unique for every parameter value.",
+          "claim_vector": {
+            "object": "equilibrium action",
+            "relation": "formal result",
+            "direction": null,
+            "magnitude": null,
+            "benchmark": null,
+            "population_scope": "every parameter value",
+            "time_scope": null,
+            "equilibrium_scope": "static equilibrium",
+            "evidentiary_status": "asserted proposition",
+            "certainty": "formal proof",
+            "qualifiers": []
+          },
+          "relation_to_canonical": "scope_expansion",
+          "evidence": "Proposition 1 and its equality boundary"
+        }
+      ]
+    }
+  ],
+  "reader_map": [
+    {
+      "id": "main-result",
+      "coverage_unit_id": "paper",
+      "label": "Main proposition",
+      "takeaway": "The paper claims a unique equilibrium action throughout the parameter domain.",
+      "status": "inconsistent",
+      "reader_questions": ["What selects an action at the equality boundary?"],
+      "finding_ids": ["LOGIC-01"],
+      "bounded_reason": null
+    }
+  ],
+  "terms": [
+    {
+      "id": "TERM-01",
+      "label": "equilibrium action",
+      "kind": "economic_term",
+      "coverage_unit_ids": ["paper"],
+      "first_use": "Section 3.1",
+      "definition": "The action selected in the static signaling equilibrium.",
+      "unit_or_domain": "The stated parameter domain",
+      "variants": [],
+      "status": "defined_clear",
+      "finding_ids": []
+    }
+  ],
+  "central_argument_assessment": {
+    "status": "partially_convincing",
+    "convincing_links": ["The payoff comparison identifies the preferred action away from equality."],
+    "provisional_or_unsupported_links": ["Strict uniqueness is unsupported at the equality boundary."],
+    "smallest_changes": ["State a tie-breaking rule or narrow uniqueness away from equality."],
+    "finding_ids": ["LOGIC-01"]
+  },
+  "writing_audit": {
+    "status": "issues_found",
+    "question_benchmark_result_contribution": "The proposition and comparison are clear, but the global uniqueness wording exceeds the result at equality.",
+    "structure_and_prose": "The one-paragraph fixture is otherwise direct and well organized.",
+    "exhibit_readability": "No exhibits are present in the fixture.",
+    "terminology": "The equilibrium action and parameter domain are locally defined.",
+    "typography_groups": [],
+    "strengths": ["The economic object and payoff comparison are stated compactly."],
+    "finding_ids": ["LOGIC-01"]
+  }
+}

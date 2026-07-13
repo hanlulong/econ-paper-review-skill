@@ -1,0 +1,153 @@
+{
+  "schema_version": "0.1",
+  "review_id": "synthetic-valid-001",
+  "scope": {
+    "inventory_complete_within_assessment_boundary": true,
+    "coverage_unit_ids": [
+      "paper"
+    ],
+    "boundary_notes": "The complete synthetic manuscript is one coverage unit."
+  },
+  "domains": [
+    {
+      "kind": "partition-regime",
+      "status": "not_applicable",
+      "coverage_unit_ids": [],
+      "entries": [],
+      "notes": "The synthetic one-paragraph theory fixture has no partitioned cases or regimes."
+    },
+    {
+      "kind": "measure-algebra",
+      "status": "complete",
+      "coverage_unit_ids": [
+        "paper"
+      ],
+      "entries": [
+        {
+          "id": "ANA-MEA-01",
+          "object": "Boundary payoff comparison",
+          "status": "issue",
+          "coverage_unit_ids": [
+            "paper"
+          ],
+          "evidence_locators": [
+            {
+              "source": "manuscript coverage inventory",
+              "locator": "paper",
+              "content": "The equality case permits two optimal actions."
+            }
+          ],
+          "evidence": "The equality case permits two optimal actions.",
+          "checks": [
+            {
+              "id": "boundary-domain",
+              "name": "domain and boundary",
+              "status": "issue",
+              "result": "The equality case permits two optimal actions."
+            }
+          ],
+          "finding_ids": [
+            "LOGIC-01"
+          ],
+          "notes": "The linked findings contain the full evidence, fairness analysis, and repair."
+        }
+      ],
+      "notes": "The payoff comparison and boundary were audited."
+    },
+    {
+      "kind": "assumption-implementation",
+      "status": "complete",
+      "coverage_unit_ids": [
+        "paper"
+      ],
+      "entries": [
+        {
+          "id": "ANA-ASS-01",
+          "object": "Uniqueness assumption and Proposition 1",
+          "status": "issue",
+          "coverage_unit_ids": [
+            "paper"
+          ],
+          "evidence_locators": [
+            {
+              "source": "manuscript coverage inventory",
+              "locator": "paper",
+              "content": "The stated domain includes equality, but the proposition asserts strict uniqueness."
+            }
+          ],
+          "evidence": "The stated domain includes equality, but the proposition asserts strict uniqueness.",
+          "checks": [
+            {
+              "id": "assumption-crosswalk",
+              "name": "assumption to proposition",
+              "status": "issue",
+              "result": "The stated domain includes equality, but the proposition asserts strict uniqueness."
+            }
+          ],
+          "finding_ids": [
+            "LOGIC-01"
+          ],
+          "notes": "The linked findings contain the full evidence, fairness analysis, and repair."
+        }
+      ],
+      "notes": "The assumption-to-proof crosswalk was audited."
+    },
+    {
+      "kind": "derived-number",
+      "status": "not_applicable",
+      "coverage_unit_ids": [],
+      "entries": [],
+      "notes": "The synthetic fixture reports no derived numerical claims."
+    },
+    {
+      "kind": "comparison-harmonization",
+      "status": "not_applicable",
+      "coverage_unit_ids": [],
+      "entries": [],
+      "notes": "The synthetic fixture compares no methods, samples, or model versions."
+    },
+    {
+      "kind": "timing-test",
+      "status": "complete",
+      "coverage_unit_ids": [
+        "paper"
+      ],
+      "entries": [
+        {
+          "id": "ANA-TIM-01",
+          "object": "Static equilibrium statement",
+          "status": "clear",
+          "coverage_unit_ids": [
+            "paper"
+          ],
+          "evidence_locators": [
+            {
+              "source": "manuscript coverage inventory",
+              "locator": "paper",
+              "content": "The static timing is explicit; the unresolved issue is the equality boundary rather than timing."
+            }
+          ],
+          "evidence": "The static timing is explicit; the unresolved issue is the equality boundary rather than timing.",
+          "checks": [
+            {
+              "id": "timing-label",
+              "name": "timing and formal label",
+              "status": "clear",
+              "result": "The static timing is explicit; the unresolved issue is the equality boundary rather than timing."
+            }
+          ],
+          "finding_ids": [],
+          "notes": "Checked clean within the assessment boundary."
+        }
+      ],
+      "notes": "The static timing and proposition label were checked."
+    },
+    {
+      "kind": "availability-exclusivity",
+      "status": "not_applicable",
+      "coverage_unit_ids": [],
+      "entries": [],
+      "notes": "The synthetic fixture makes no data, literature, or method exclusivity claim."
+    }
+  ]
+}

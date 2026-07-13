@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openecon.ai/econ-review/analytical-audit.schema.json",
+  "title": "econ-review analytical ledgers",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "review_id", "scope", "domains"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "review_id": {"type": "string", "minLength": 1},
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inventory_complete_within_assessment_boundary", "coverage_unit_ids", "boundary_notes"],
+      "properties": {
+        "inventory_complete_within_assessment_boundary": {"const": true},
+        "coverage_unit_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "boundary_notes": {"type": "string", "minLength": 1}
+      }
+    },
+    "domains": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "status", "coverage_unit_ids", "entries", "notes"],
+        "properties": {
+          "kind": {
+            "enum": [
+              "partition-regime",
+              "measure-algebra",
+              "assumption-implementation",
+              "derived-number",
+              "comparison-harmonization",
+              "timing-test",
+              "availability-exclusivity"
+            ]
+          },
+          "status": {"enum": ["complete", "bounded", "not_applicable"]},
+          "coverage_unit_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "object", "status", "coverage_unit_ids", "evidence_locators", "evidence", "checks", "finding_ids", "notes"],
+              "properties": {
+                "id": {"type": "string", "pattern": "^ANA-[A-Z]+-[0-9]{2,}$"},
+                "object": {"type": "string", "minLength": 1},
+                "status": {"enum": ["clear", "issue", "bounded"]},
+                "coverage_unit_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+                "evidence_locators": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["source", "locator", "content"],
+                    "properties": {
+                      "source": {"type": "string", "minLength": 1},
+                      "locator": {"type": "string", "minLength": 1},
+                      "content": {"type": "string", "minLength": 1}
+                    }
+                  }
+                },
+                "evidence": {"type": "string", "minLength": 1},
+                "checks": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["id", "name", "status", "result"],
+                    "properties": {
+                      "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]+$"},
+                      "name": {"type": "string", "minLength": 1},
+                      "status": {"enum": ["clear", "issue", "bounded", "not_applicable"]},
+                      "result": {"type": "string", "minLength": 1}
+                    }
+                  }
+                },
+                "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+                "notes": {"type": "string", "minLength": 1}
+              }
+            }
+          },
+          "notes": {"type": "string", "minLength": 1}
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"status": {"const": "complete"}}},
+            "then": {
+              "properties": {
+                "coverage_unit_ids": {"minItems": 1},
+                "entries": {"minItems": 1}
+              }
+            }
+          },
+          {
+            "if": {"properties": {"status": {"const": "not_applicable"}}},
+            "then": {
+              "properties": {
+                "coverage_unit_ids": {"maxItems": 0},
+                "entries": {"maxItems": 0}
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

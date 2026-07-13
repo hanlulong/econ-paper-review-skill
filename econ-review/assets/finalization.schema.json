@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openecon.ai/econ-review/finalization.schema.json",
+  "title": "econ-review finalization receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "review_id", "contract_version", "artifacts", "gates"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "review_id": {"type": "string", "minLength": 1},
+    "contract_version": {"const": "0.4"},
+    "artifacts": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+    },
+    "gates": {
+      "type": "array",
+      "minItems": 3,
+      "uniqueItems": true,
+      "items": {"enum": ["source_integrity", "source_ingestion", "structured_verification", "report_generation", "fix_plan_generation", "contract_validation"]}
+    }
+  }
+}

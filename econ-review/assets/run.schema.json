@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openecon.ai/econ-review/run.schema.json",
+  "title": "econ-review run state",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "review_id", "status", "mode", "target", "paper_family",
+    "designs", "identity_handling", "assessment_boundary", "capabilities", "comment_policy",
+    "stage_status", "gates_loaded", "counts", "verification_passed"
+  ],
+  "properties": {
+    "schema_version": {"enum": ["0.1", "0.2", "0.3", "0.4"]},
+    "review_id": {"type": "string", "minLength": 1},
+    "status": {"enum": ["draft", "awaiting_checkpoint", "blocked", "verification_failed", "complete"]},
+    "mode": {"enum": ["quick", "full"]},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["venue", "tier"],
+      "properties": {
+        "venue": {"type": ["string", "null"]},
+        "tier": {"enum": ["top-general", "leading-field", "standard-field", "regional-specialized", "unspecified"]}
+      }
+    },
+    "paper_family": {"enum": ["empirical", "descriptive", "structural-quantitative", "macro", "theory", "hybrid", "unclassified"]},
+    "designs": {"type": "array", "items": {"type": "string"}},
+    "identity_handling": {"enum": ["identity_minimized", "blinded", "not_applied"]},
+    "assessment_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sources", "figures", "equations", "appendix", "notes"],
+      "properties": {
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "status", "notes"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "status": {"enum": ["fully_read", "partially_read", "unreadable", "not_opened"]},
+              "notes": {"type": "string"},
+              "sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"}
+            }
+          }
+        },
+        "figures": {"enum": ["visually_inspected", "captions_only", "partial", "not_present", "not_assessed"]},
+        "equations": {"enum": ["source_preserved", "render_verified", "partial", "not_present", "not_assessed"]},
+        "appendix": {"enum": ["fully_read", "partially_read", "not_available", "not_assessed"]},
+        "notes": {"type": "string"}
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["live_literature_search", "replication_code"],
+      "properties": {
+        "live_literature_search": {"type": "boolean"},
+        "replication_code": {"enum": ["not_supplied", "not_permitted", "static_only", "executed"]}
+      }
+    },
+    "comment_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum_target", "maximum", "exhaustive"],
+      "properties": {
+        "minimum_target": {"type": "integer", "minimum": 0},
+        "maximum": {"type": ["integer", "null"], "minimum": 1},
+        "exhaustive": {"type": "boolean"}
+      }
+    },
+    "stage_status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intake", "reconstruction", "frontier", "audit", "counterargument", "synthesis", "verification", "delivery"],
+      "properties": {
+        "intake": {"$ref": "#/$defs/stage"},
+        "reconstruction": {"$ref": "#/$defs/stage"},
+        "frontier": {"$ref": "#/$defs/stage"},
+        "audit": {"$ref": "#/$defs/stage"},
+        "counterargument": {"$ref": "#/$defs/stage"},
+        "synthesis": {"$ref": "#/$defs/stage"},
+        "verification": {"$ref": "#/$defs/stage"},
+        "delivery": {"$ref": "#/$defs/stage"}
+      }
+    },
+    "gates_loaded": {"type": "array", "items": {"type": "string"}},
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["critical", "major", "minor", "info", "essential"],
+      "properties": {
+        "critical": {"type": "integer", "minimum": 0},
+        "major": {"type": "integer", "minimum": 0},
+        "minor": {"type": "integer", "minimum": 0},
+        "info": {"type": "integer", "minimum": 0},
+        "essential": {"type": "integer", "minimum": 0}
+      }
+    },
+    "verification_passed": {"type": "boolean"},
+    "activated_burdens": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/burden"}
+    },
+    "telemetry": {
+      "type": "object",
+      "description": "Observed execution metadata for completed v0.2/v0.3 reviews. Do not estimate unavailable timing or token counts.",
+      "additionalProperties": false,
+      "required": ["passes", "agents_spawned", "wall_clock_seconds", "input_tokens", "output_tokens"],
+      "properties": {
+        "passes": {
+          "type": "array",
+          "description": "Human-readable names of review passes actually completed.",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "agents_spawned": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of subagents actually started during this review run."
+        },
+        "wall_clock_seconds": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "Observed elapsed seconds, or null when the runtime does not expose a trustworthy value."
+        },
+        "input_tokens": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Observed input-token count, or null when unavailable."
+        },
+        "output_tokens": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Observed output-token count, or null when unavailable."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "stage": {"enum": ["pending", "in_progress", "passed", "bounded", "failed", "not_applicable"]},
+    "burden": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "object_type", "status", "activation_basis", "triggers", "nonactivation_reason"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]{2,79}$"},
+        "object_type": {"enum": ["claim", "design", "measurement", "inference", "theory", "computation", "literature", "writing", "exhibit", "reproducibility", "other"]},
+        "status": {"enum": ["active", "not_applicable"]},
+        "activation_basis": {"enum": ["observed", "missing_required", "mixed", "not_applicable"]},
+        "triggers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "ref", "rationale"],
+            "properties": {
+              "kind": {"enum": ["anchor", "claim", "required_omission"]},
+              "ref": {"type": "string", "minLength": 1},
+              "rationale": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "nonactivation_reason": {"type": ["string", "null"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "active"}}, "required": ["status"]},
+          "then": {"properties": {"triggers": {"minItems": 1}, "nonactivation_reason": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"status": {"const": "not_applicable"}}, "required": ["status"]},
+          "then": {"properties": {"triggers": {"maxItems": 0}, "nonactivation_reason": {"type": "string", "minLength": 1}}}
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"schema_version": {"const": "0.4"}}, "required": ["schema_version"]},
+      "then": {"required": ["activated_burdens"]}
+    }
+  ]
+}

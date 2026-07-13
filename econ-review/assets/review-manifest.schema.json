@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openecon.ai/econ-review/review-manifest.schema.json",
+  "title": "econ-review document manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "review_id", "documents"],
+  "properties": {
+    "schema_version": {"enum": ["0.1", "0.2"]},
+    "review_id": {"type": "string", "minLength": 1, "pattern": "^\\S(?:[\\s\\S]*\\S)?$"},
+    "documents": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/document"}
+    }
+  },
+  "$defs": {
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "group", "path", "order"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,79}$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^\\S(?:[^\\r\\n]*\\S)?$"
+        },
+        "group": {
+          "enum": ["overview", "reports", "plan", "audit"]
+        },
+        "path": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 500,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._ ()-]*(/[A-Za-z0-9][A-Za-z0-9._ ()-]*)*\\.md$"
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      }
+    }
+  }
+}

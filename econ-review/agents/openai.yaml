@@ -1,0 +1,4 @@
+interface:
+  display_name: "Econ Review"
+  short_description: "Source-grounded, constructive economics paper review"
+  default_prompt: "Use $econ-review in full mode to reconstruct this economics paper, audit its logical, technical, and methodological foundations, and produce a fair referee-style assessment with every verified improvement and a prioritized revision plan."

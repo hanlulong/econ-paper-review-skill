@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openecon.ai/econ-review/pdf-ingestion.schema.json",
+  "title": "econ-review verified PDF transcription package",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "review_id", "source_id", "source_role", "pipeline_fingerprint", "parser_repairs", "source",
+    "toolchain", "configuration", "markdown", "pages", "blocks", "tables", "figures",
+    "equations", "symbols", "proposal", "quality"
+  ],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "review_id": {"type": "string", "minLength": 1},
+    "source_id": {"type": "string", "pattern": "^SRC-[0-9]{2,}$"},
+    "source_role": {"enum": ["manuscript", "appendix", "supplement"]},
+    "pipeline_fingerprint": {"$ref": "#/$defs/sha256"},
+    "parser_repairs": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "xml_forbidden_control_count", "xml_forbidden_codepoints", "raw_xhtml_sha256",
+        "parser_input_sha256", "action"
+      ],
+      "properties": {
+        "xml_forbidden_control_count": {"type": "integer", "minimum": 0},
+        "xml_forbidden_codepoints": {
+          "type": "array", "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^U\\+[0-9A-F]{4,6}$"}
+        },
+        "raw_xhtml_sha256": {"$ref": "#/$defs/sha256"},
+        "parser_input_sha256": {"$ref": "#/$defs/sha256"},
+        "action": {"const": "removed_xml_forbidden_controls_from_parser_input"}
+      }
+    },
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["original_name", "package_path", "sha256", "page_count", "encrypted"],
+      "properties": {
+        "original_name": {"type": "string", "minLength": 1},
+        "package_path": {"$ref": "#/$defs/safePath"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "page_count": {"type": "integer", "minimum": 1},
+        "encrypted": {"type": "boolean"}
+      }
+    },
+    "toolchain": {
+      "type": "object", "additionalProperties": false,
+      "required": ["primary", "renderer", "table_extractor", "ocr", "proposal"],
+      "properties": {
+        "primary": {"$ref": "#/$defs/tool"},
+        "renderer": {"$ref": "#/$defs/tool"},
+        "table_extractor": {"$ref": "#/$defs/toolOrNull"},
+        "ocr": {"$ref": "#/$defs/toolOrNull"},
+        "proposal": {"$ref": "#/$defs/toolOrNull"}
+      }
+    },
+    "configuration": {
+      "type": "object", "additionalProperties": false,
+      "required": ["dpi", "ocr", "max_pages", "max_bytes", "markitdown_proposal", "network_services"],
+      "properties": {
+        "dpi": {"type": "integer", "minimum": 150, "maximum": 400},
+        "ocr": {"enum": ["auto", "never", "always"]},
+        "max_pages": {"type": "integer", "minimum": 1},
+        "max_bytes": {"type": "integer", "minimum": 1},
+        "markitdown_proposal": {"type": "boolean"},
+        "network_services": {"const": "forbidden"}
+      }
+    },
+    "markdown": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256", "normalization"],
+      "properties": {
+        "path": {"$ref": "#/$defs/safePath"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "normalization": {"const": "none"}
+      }
+    },
+    "pages": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": [
+          "page", "width_points", "height_points", "text_method", "text_path",
+          "text_sha256", "native_text_path", "native_text_sha256", "ocr_text_path",
+          "ocr_text_sha256", "render_path", "render_sha256", "character_count",
+          "replacement_character_count", "private_use_character_count", "status", "warnings"
+        ],
+        "properties": {
+          "page": {"type": "integer", "minimum": 1},
+          "width_points": {"type": "number", "exclusiveMinimum": 0},
+          "height_points": {"type": "number", "exclusiveMinimum": 0},
+          "text_method": {"enum": ["pdf_text_layer", "ocr", "none"]},
+          "text_path": {"$ref": "#/$defs/safePath"},
+          "text_sha256": {"$ref": "#/$defs/sha256"},
+          "native_text_path": {"$ref": "#/$defs/safePath"},
+          "native_text_sha256": {"$ref": "#/$defs/sha256"},
+          "ocr_text_path": {"oneOf": [{"$ref": "#/$defs/safePath"}, {"type": "null"}]},
+          "ocr_text_sha256": {"oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+          "render_path": {"$ref": "#/$defs/safePath"},
+          "render_sha256": {"$ref": "#/$defs/sha256"},
+          "character_count": {"type": "integer", "minimum": 0},
+          "replacement_character_count": {"type": "integer", "minimum": 0},
+          "private_use_character_count": {"type": "integer", "minimum": 0},
+          "status": {"enum": ["extracted", "ocr_fallback", "bounded"]},
+          "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "blocks": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "page", "bbox", "kind", "raw_text", "markdown_start", "markdown_end", "sha256", "confidence"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^SRC-[0-9]{2,}-PDF-B[0-9]{4,}$"},
+          "page": {"type": "integer", "minimum": 1},
+          "bbox": {"$ref": "#/$defs/bbox"},
+          "kind": {"enum": ["heading", "paragraph", "caption_table", "caption_figure", "equation_candidate", "footnote", "header_footer", "ocr_text", "bounded_page"]},
+          "raw_text": {"type": "string"},
+          "markdown_start": {"type": "integer", "minimum": 0},
+          "markdown_end": {"type": "integer", "minimum": 0},
+          "sha256": {"$ref": "#/$defs/sha256"},
+          "confidence": {"enum": ["high", "medium", "low"]}
+        }
+      }
+    },
+    "tables": {"type": "array", "items": {"$ref": "#/$defs/object"}},
+    "figures": {"type": "array", "items": {"$ref": "#/$defs/object"}},
+    "equations": {"type": "array", "items": {"$ref": "#/$defs/object"}},
+    "proposal": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/proposal"}
+      ]
+    },
+    "symbols": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["symbol", "codepoints", "normalized", "occurrences", "definition_candidates", "warnings"],
+        "properties": {
+          "symbol": {"type": "string", "minLength": 1},
+          "codepoints": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^U\\+[0-9A-F]{4,6}$"}},
+          "normalized": {"type": "string", "minLength": 1},
+          "occurrences": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/occurrence"}},
+          "definition_candidates": {"type": "array", "items": {"$ref": "#/$defs/occurrence"}},
+          "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "quality": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "status", "page_count_match", "all_pages_rendered", "all_pages_have_text_or_boundary",
+        "object_crops_hashed", "anchor_spans_valid", "requires_visual_verification", "warnings"
+      ],
+      "properties": {
+        "status": {"enum": ["ready_for_review", "bounded", "failed"]},
+        "page_count_match": {"type": "boolean"},
+        "all_pages_rendered": {"type": "boolean"},
+        "all_pages_have_text_or_boundary": {"type": "boolean"},
+        "object_crops_hashed": {"type": "boolean"},
+        "anchor_spans_valid": {"type": "boolean"},
+        "requires_visual_verification": {"const": true},
+        "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    }
+  },
+  "$defs": {
+    "safePath": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "bbox": {
+      "type": "array", "minItems": 4, "maxItems": 4,
+      "items": {"type": "number", "minimum": 0}
+    },
+    "tool": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {"name": {"type": "string", "minLength": 1}, "version": {"type": "string", "minLength": 1}}
+    },
+    "toolOrNull": {"oneOf": [{"$ref": "#/$defs/tool"}, {"type": "null"}]},
+    "occurrence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["page", "block_id", "bbox", "context"],
+      "properties": {
+        "page": {"type": "integer", "minimum": 1},
+        "block_id": {"type": "string", "pattern": "^SRC-[0-9]{2,}-PDF-B[0-9]{4,}$"},
+        "bbox": {"$ref": "#/$defs/bbox"},
+        "context": {"type": "string"}
+      }
+    },
+    "object": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "page", "bbox", "caption", "crop_path", "crop_sha256", "transcription", "status", "warnings"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^SRC-[0-9]{2,}-PDF-(TBL|FIG|EQ)-[0-9]{3,}$"},
+        "page": {"type": "integer", "minimum": 1},
+        "bbox": {"$ref": "#/$defs/bbox"},
+        "caption": {"type": ["string", "null"]},
+        "crop_path": {"$ref": "#/$defs/safePath"},
+        "crop_sha256": {"$ref": "#/$defs/sha256"},
+        "transcription": {"type": ["object", "null"]},
+        "status": {"enum": ["candidate_needs_visual_verification", "strategies_agree_needs_visual_verification", "conflict_needs_visual_verification", "bounded"]},
+        "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "proposal": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256", "engine", "version", "authoritative", "warnings"],
+      "properties": {
+        "path": {"$ref": "#/$defs/safePath"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "engine": {"const": "markitdown"},
+        "version": {"type": "string", "minLength": 1},
+        "authoritative": {"const": false},
+        "warnings": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+      }
+    }
+  }
+}

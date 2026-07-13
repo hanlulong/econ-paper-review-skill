@@ -1,0 +1,34 @@
+{
+  "schema_version": "0.1",
+  "review_id": "synthetic-valid-001",
+  "sources": [
+    {
+      "id": "SRC-01",
+      "role": "manuscript",
+      "path": "synthetic-paper.md",
+      "media_type": "text/markdown",
+      "sha256": "393cc4d5f9701fab039c77807fe6b47aaef9618fec9ee942652ad218fe5e53e5",
+      "extraction": null
+    }
+  ],
+  "anchors": [
+    {
+      "id": "ANC-01",
+      "source_id": "SRC-01",
+      "kind": "text_span",
+      "start_char": 359,
+      "end_char": 418,
+      "content_sha256": "c1806691379bb5ea10c467842c3b7d8e0f6b3c28ba1004c1a9cf0a6bf2e46220",
+      "locator": "Section 3, paragraph 1"
+    },
+    {
+      "id": "ANC-02",
+      "source_id": "SRC-01",
+      "kind": "text_span",
+      "start_char": 420,
+      "end_char": 480,
+      "content_sha256": "c495cbeaabccf3876e6f425e5790ea3de6a4e148497bb4e0f04ffb5a22fbcc0d",
+      "locator": "Section 3, paragraph 2"
+    }
+  ]
+}

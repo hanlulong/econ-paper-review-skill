@@ -1,0 +1,251 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openecon.ai/econ-review/writing.schema.json",
+  "title": "econ-review writing audit",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "review_id", "scope", "mechanics", "consistency_groups", "style_suggestions"],
+  "properties": {
+    "schema_version": {
+      "enum": ["0.1", "0.2", "0.3"],
+      "description": "Writing-audit version, independent of the review-contract version. Version 0.3 is current and excludes routine bibliography and citation-accuracy auditing."
+    },
+    "review_id": {"type": "string", "minLength": 1},
+    "paper_type_lens": {"type": "string", "minLength": 1},
+    "strengths": {
+      "type": "array", "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "section_audit": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["section", "current_job", "what_works", "reader_friction", "revision_direction", "finding_ids"],
+        "properties": {
+          "section": {"type": "string", "minLength": 1},
+          "current_job": {"type": "string", "minLength": 1},
+          "what_works": {"type": "string", "minLength": 1},
+          "reader_friction": {"type": "string", "minLength": 1},
+          "revision_direction": {"type": "string", "minLength": 1},
+          "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+        }
+      }
+    },
+    "redundancy_map": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["idea", "locations", "recommended_home", "finding_ids"],
+        "properties": {
+          "idea": {"type": "string", "minLength": 1},
+          "locations": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "recommended_home": {"type": "string", "minLength": 1},
+          "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+        }
+      }
+    },
+    "highest_return_finding_ids": {
+      "type": "array", "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]*-[0-9]{2,}$"}
+    },
+    "finding_links": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["finding_id", "sources"],
+        "properties": {
+          "finding_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]*-[0-9]{2,}$"},
+          "sources": {
+            "type": "array", "minItems": 1, "uniqueItems": true,
+            "items": {"enum": ["mechanics", "consistency", "style", "section", "redundancy", "reference", "venue"]}
+          }
+        }
+      }
+    },
+    "scope": {
+      "type": "object", "additionalProperties": false,
+      "required": ["inventory_complete_within_assessment_boundary", "sources_checked", "render_checked", "boundary_notes"],
+      "properties": {
+        "inventory_complete_within_assessment_boundary": {"const": true},
+        "sources_checked": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "render_checked": {"type": "boolean"},
+        "boundary_notes": {"type": "string", "minLength": 1}
+      }
+    },
+    "mechanics": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "kind", "status", "locator", "quote", "correction", "occurrences", "reader_consequence", "priority", "render_verification", "notes", "finding_ids"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^WRT-[0-9]{2,}$"},
+          "kind": {"enum": ["grammar", "article_usage", "spelling_typo", "agreement", "preposition_idiom", "punctuation", "hyphenation", "capitalization", "tense_voice", "pronoun_antecedent", "sentence_structure", "cross_reference", "other"]},
+          "status": {"enum": ["issue", "checked_clean_group", "bounded"]},
+          "locator": {"type": "string", "minLength": 1},
+          "quote": {"type": ["string", "null"]},
+          "correction": {"type": ["string", "null"]},
+          "occurrences": {
+            "type": "array",
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["locator", "quote", "correction"],
+              "properties": {
+                "locator": {"type": "string", "minLength": 1},
+                "quote": {"type": "string", "minLength": 1},
+                "correction": {"type": "string", "minLength": 1},
+                "render_verification": {"enum": ["verified_render", "not_needed", "bounded", "extraction_artifact_rejected"]},
+                "source_provenance": {"enum": ["main_manuscript", "author_appendix", "fielded_instrument", "transcription", "unresolved"]}
+              }
+            }
+          },
+          "reader_consequence": {"type": "string", "minLength": 1},
+          "priority": {"enum": ["required_copyedit", "recommended_copyedit", "optional_style", "not_applicable"]},
+          "render_verification": {"enum": ["verified_render", "not_needed", "bounded"]},
+          "notes": {"type": "string", "minLength": 1},
+          "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"status": {"const": "issue"}}},
+            "then": {"properties": {"occurrences": {"minItems": 1}}}
+          }
+        ]
+      }
+    },
+    "consistency_groups": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "object", "variants", "preferred", "status", "locations_checked", "finding_ids"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^CON-[0-9]{2,}$"},
+          "object": {"type": "string", "minLength": 1},
+          "variants": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+          "preferred": {"type": "string", "minLength": 1},
+          "status": {"enum": ["consistent", "issue", "bounded"]},
+          "locations_checked": {"type": "string", "minLength": 1},
+          "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+        }
+      }
+    },
+    "style_suggestions": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "locator", "current_problem", "suggested_revision", "priority", "finding_ids"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^STYLE-[0-9]{2,}$"},
+          "locator": {"type": "string", "minLength": 1},
+          "current_problem": {"type": "string", "minLength": 1},
+          "suggested_revision": {"type": "string", "minLength": 1},
+          "priority": {"enum": ["substantive", "recommended", "optional"]},
+          "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+        }
+      }
+    },
+    "reference_audit": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "in_text_citation_count", "bibliography_record_count", "records_checked", "records", "citation_reference_consistency", "load_bearing_support_check", "access_date", "finding_ids"],
+      "properties": {
+        "status": {"enum": ["complete", "bounded", "not_assessed"]},
+        "in_text_citation_count": {"type": "integer", "minimum": 0},
+        "bibliography_record_count": {"type": "integer", "minimum": 0},
+        "records_checked": {"type": "integer", "minimum": 0},
+        "records_verified": {"type": "integer", "minimum": 0},
+        "records_adverse": {"type": "integer", "minimum": 0},
+        "records_unresolved": {"type": "integer", "minimum": 0},
+        "citation_reference_consistency": {"type": "string", "minLength": 1},
+        "load_bearing_support_check": {"type": "string", "minLength": 1},
+        "access_date": {"type": ["string", "null"], "format": "date"},
+        "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "records": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["id", "manuscript_record", "status", "verified_record", "authoritative_url", "support_note", "finding_ids"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "manuscript_record": {"type": "string", "minLength": 1},
+              "status": {"enum": ["verified", "metadata_issue", "version_issue", "citation_reference_mismatch", "support_issue", "unresolved"]},
+              "verified_record": {"type": ["string", "null"]},
+              "authoritative_url": {"type": ["string", "null"], "format": "uri"},
+              "support_note": {"type": "string", "minLength": 1},
+              "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+            }
+          }
+        }
+      }
+    },
+    "venue_fit": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "as_of_date", "current_contribution_bar", "revision_contingent_bar", "recommended_strategy", "candidates", "finding_ids"],
+      "properties": {
+        "status": {"enum": ["assessed", "bounded", "not_assessed", "not_requested"]},
+        "as_of_date": {"type": ["string", "null"], "format": "date"},
+        "current_contribution_bar": {"type": "string", "minLength": 1},
+        "revision_contingent_bar": {"type": "string", "minLength": 1},
+        "recommended_strategy": {"type": "string", "minLength": 1},
+        "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["journal", "category", "official_scope_url", "recent_comparator_urls", "fit", "mismatch", "required_changes", "evidence_date"],
+            "properties": {
+              "journal": {"type": "string", "minLength": 1},
+              "category": {"enum": ["stretch_after_major_revision", "credible_target_after_revision", "credible_current_scope_target", "poor_fit"]},
+              "official_scope_url": {"type": "string", "format": "uri"},
+              "recent_comparator_urls": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "format": "uri"}},
+              "fit": {"type": "string", "minLength": 1},
+              "mismatch": {"type": "string", "minLength": 1},
+              "required_changes": {"type": "string", "minLength": 1},
+              "evidence_date": {"type": "string", "format": "date"}
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"schema_version": {"enum": ["0.1", "0.2"]}},
+        "required": ["schema_version"]
+      },
+      "then": {"required": ["reference_audit"]}
+    },
+    {
+      "if": {"properties": {"schema_version": {"const": "0.2"}}, "required": ["schema_version"]},
+      "then": {
+        "required": ["paper_type_lens", "strengths", "section_audit", "redundancy_map", "highest_return_finding_ids", "finding_links"],
+        "properties": {
+          "strengths": {"minItems": 1},
+          "section_audit": {"minItems": 1},
+          "reference_audit": {
+            "required": ["records_verified", "records_adverse", "records_unresolved"]
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"schema_version": {"const": "0.3"}}, "required": ["schema_version"]},
+      "then": {
+        "required": ["paper_type_lens", "strengths", "section_audit", "redundancy_map", "highest_return_finding_ids", "finding_links"],
+        "not": {"required": ["reference_audit"]},
+        "properties": {
+          "strengths": {"minItems": 1},
+          "section_audit": {"minItems": 1},
+          "finding_links": {
+            "items": {
+              "properties": {
+                "sources": {
+                  "items": {"enum": ["mechanics", "consistency", "style", "section", "redundancy", "venue"]}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

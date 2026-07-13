@@ -1,0 +1,95 @@
+{
+  "schema_version": "0.1",
+  "cases": [
+    {
+      "id": "empirical-randomized",
+      "family": "empirical",
+      "paper": "papers/empirical-randomized.md",
+      "required_active_burdens": ["logical_validity", "technical_validity", "methodological_validity", "causal_identification", "measurement", "sampling_or_randomization_uncertainty", "external_validity", "reproducibility"],
+      "required_not_applicable_burdens": ["formal_proof", "structural_identification"],
+      "required_issue_concepts": [
+        {"id": "attrition", "patterns": ["attrition", "return.*rate", "follow-up.*selection"]},
+        {"id": "post-treatment-trimming", "patterns": ["post-treatment.*trim", "outcome.*trim", "trim.*random"]},
+        {"id": "claim-scope", "patterns": ["all.*workers", "external valid", "volunteer.*sample", "population.*scope"]}
+      ],
+      "forbidden_issue_concepts": [
+        {"id": "ritual-clustering", "patterns": ["cluster.*standard error", "cluster-robust"]}
+      ]
+    },
+    {
+      "id": "descriptive-index",
+      "family": "descriptive",
+      "paper": "papers/descriptive-index.md",
+      "required_active_burdens": ["logical_validity", "technical_validity", "methodological_validity", "measurement", "sampling_or_randomization_uncertainty", "external_validity", "reproducibility"],
+      "required_not_applicable_burdens": ["causal_identification", "formal_proof", "structural_identification"],
+      "required_issue_concepts": [
+        {"id": "changing-weights", "patterns": ["changing weight", "composition", "fixed weight", "chain"]},
+        {"id": "missingness", "patterns": ["missing", "nonresponse", "coverage"]},
+        {"id": "uncertainty", "patterns": ["uncertaint", "sampling error", "confidence interval"]}
+      ],
+      "forbidden_issue_concepts": [
+        {"id": "invented-causal-claim", "patterns": ["parallel trend", "instrument.*exclusion", "treatment effect"]}
+      ]
+    },
+    {
+      "id": "structural-counterfactual",
+      "family": "structural-quantitative",
+      "paper": "papers/structural-counterfactual.md",
+      "required_active_burdens": ["logical_validity", "technical_validity", "methodological_validity", "measurement", "structural_identification", "calibration_and_computation", "equilibrium_counterfactual_validity", "external_validity", "reproducibility"],
+      "required_not_applicable_burdens": ["formal_proof"],
+      "required_issue_concepts": [
+        {"id": "parameter-identification", "patterns": ["identify.*eta", "same moment", "parameter.*moment"]},
+        {"id": "counterfactual-invariance", "patterns": ["held fixed", "policy invariant", "counterfactual.*eta"]},
+        {"id": "numerical-convergence", "patterns": ["converg", "multiple start", "tolerance", "numerical"]}
+      ],
+      "forbidden_issue_concepts": [
+        {"id": "ritual-parallel-trends", "patterns": ["parallel trend"]}
+      ]
+    },
+    {
+      "id": "macro-transition",
+      "family": "macro",
+      "paper": "papers/macro-transition.md",
+      "required_active_burdens": ["logical_validity", "technical_validity", "methodological_validity", "measurement", "calibration_and_computation", "equilibrium_counterfactual_validity", "external_validity", "reproducibility"],
+      "required_not_applicable_burdens": ["causal_identification", "formal_proof"],
+      "required_issue_concepts": [
+        {"id": "stock-flow-timing", "patterns": ["stock.*flow", "timing", "debt.*interest"]},
+        {"id": "shock-units", "patterns": ["shock.*unit", "basis point", "normalization"]},
+        {"id": "transition-feasibility", "patterns": ["transition", "feasib", "terminal", "resource constraint"]}
+      ],
+      "forbidden_issue_concepts": [
+        {"id": "ritual-rdd", "patterns": ["bandwidth", "density test", "running variable"]}
+      ]
+    },
+    {
+      "id": "formal-theory-existence",
+      "family": "theory",
+      "paper": "papers/formal-theory-existence.md",
+      "required_active_burdens": ["logical_validity", "technical_validity", "methodological_validity", "formal_proof", "external_validity", "reproducibility"],
+      "required_not_applicable_burdens": ["causal_identification", "sampling_or_randomization_uncertainty", "structural_identification"],
+      "required_issue_concepts": [
+        {"id": "nonattainment", "patterns": ["not attain", "open interval", "supremum", "existence"]},
+        {"id": "uniqueness", "patterns": ["unique", "tie", "indiffer"]},
+        {"id": "verbal-overreach", "patterns": ["all market", "universal", "domain", "interpretation"]}
+      ],
+      "forbidden_issue_concepts": [
+        {"id": "invented-standard-errors", "patterns": ["standard error", "cluster", "statistical significance"]}
+      ]
+    },
+    {
+      "id": "hybrid-mechanism",
+      "family": "hybrid",
+      "paper": "papers/hybrid-mechanism.md",
+      "required_active_burdens": ["logical_validity", "technical_validity", "methodological_validity", "causal_identification", "measurement", "sampling_or_randomization_uncertainty", "formal_proof", "external_validity", "reproducibility"],
+      "required_not_applicable_burdens": ["structural_identification"],
+      "required_issue_concepts": [
+        {"id": "model-evidence-bridge", "patterns": ["model.*outcome", "bridge", "proposition.*measure", "effort.*sales"]},
+        {"id": "multiple-testing", "patterns": ["multiple", "familywise", "false discovery", "outcome.*search"]},
+        {"id": "mechanism-claim", "patterns": ["mechanism", "discriminate", "alternative explanation"]}
+      ],
+      "forbidden_issue_concepts": [
+        {"id": "structural-estimation-demand", "patterns": ["estimate.*structural", "simulated method of moments"]}
+      ]
+    }
+  ]
+}

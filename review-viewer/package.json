@@ -1,0 +1,49 @@
+{
+  "name": "econ-review-desk",
+  "version": "0.1.0",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "sync-review": "node scripts/sync-review.mjs",
+    "clear-review-bundles": "node scripts/clear-review-bundles.mjs",
+    "dev": "npm run clear-review-bundles && WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
+    "dev:bundled": "ALLOW_PUBLISH=1 npm run sync-review && WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
+    "build": "npm run sync-review && WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
+    "build:bundled": "ALLOW_PUBLISH=1 npm run build",
+    "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
+    "test": "node scripts/test-viewer.mjs",
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
+  },
+  "dependencies": {
+    "katex": "^0.17.0",
+    "next": "16.2.10",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.44.0",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.3",
+    "@vitejs/plugin-rsc": "0.5.27",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.10",
+    "react-server-dom-webpack": "19.2.7",
+    "typescript": "5.9.3",
+    "vinext": "0.0.50",
+    "vite": "8.1.4",
+    "wrangler": "4.110.0"
+  },
+  "overrides": {
+    "postcss": "8.5.10"
+  },
+  "type": "module"
+}

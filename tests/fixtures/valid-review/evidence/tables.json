@@ -1,0 +1,9 @@
+{
+  "schema_version": "0.1",
+  "review_id": "synthetic-valid-001",
+  "source": "Synthetic manuscript boundary",
+  "inventory_complete_within_assessment_boundary": true,
+  "no_tables_confirmed": true,
+  "tables": [],
+  "boundary_notes": "The rendered synthetic fixture contains no tables."
+}

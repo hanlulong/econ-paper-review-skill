@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openecon.ai/econ-review/review-actions.schema.json",
+  "title": "econ-review author action handoff",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "kind", "source_review_id", "source_review_fingerprint",
+    "source_manuscripts", "exported_at", "entries"
+  ],
+  "properties": {
+    "schema_version": {"enum": ["0.1", "0.2", "0.3"]},
+    "kind": {"const": "econ-review-actions"},
+    "source_review_id": {"type": "string", "minLength": 1, "pattern": "^\\S(?:[\\s\\S]*\\S)?$"},
+    "source_review_fingerprint": {"type": "string", "minLength": 1, "pattern": "^\\S(?:[\\s\\S]*\\S)?$"},
+    "source_manuscripts": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))\\S(?:[^\\r\\n]*\\S)?$",
+            "description": "Portable manuscript label only (normally a basename, disambiguated when needed); never an absolute local path."
+          },
+          "sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"}
+        }
+      }
+    },
+    "exported_at": {"type": "string", "format": "date-time"},
+    "entries": {
+      "type": "array",
+      "maxItems": 20000,
+      "items": {"$ref": "#/$defs/entry"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"schema_version": {"const": "0.1"}}, "required": ["schema_version"]},
+      "then": {
+        "properties": {
+          "entries": {
+            "items": {
+              "allOf": [
+                {
+                  "if": {"properties": {"disposition": {"const": "ready_for_recheck"}}, "required": ["disposition"]},
+                  "then": {
+                    "anyOf": [
+                      {"properties": {"response_note": {"type": "string", "pattern": "\\S"}}, "required": ["response_note"]},
+                      {"properties": {"changed_locations": {"type": "array", "minItems": 1}}, "required": ["changed_locations"]}
+                    ]
+                  }
+                },
+                {
+                  "if": {"properties": {"disposition": {"const": "challenged"}}, "required": ["disposition"]},
+                  "then": {"properties": {"response_note": {"type": "string", "pattern": "\\S"}}, "required": ["response_note"]}
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"schema_version": {"const": "0.3"}}, "required": ["schema_version"]},
+      "then": {"properties": {"entries": {"items": {"required": ["events"]}}}}
+    }
+  ],
+  "$defs": {
+    "history_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["disposition", "at"],
+      "properties": {
+        "disposition": {"enum": ["open", "ready_for_recheck", "challenged", "deferred"]},
+        "at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "finding_id", "disposition", "response_note", "changed_locations",
+        "updated_at", "status_history"
+      ],
+      "properties": {
+        "finding_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]*-[0-9]{2,}$"},
+        "disposition": {"enum": ["open", "ready_for_recheck", "challenged", "deferred"]},
+        "response_note": {"type": "string", "maxLength": 10000},
+        "changed_locations": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 1000, "pattern": "^\\S(?:[\\s\\S]*\\S)?$"}
+        },
+        "updated_at": {"type": "string", "format": "date-time"},
+        "status_history": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10000,
+          "items": {"$ref": "#/$defs/history_entry"}
+        },
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10000,
+          "items": {"$ref": "#/$defs/event"}
+        }
+      },
+      "description": "Author disposition with an optional note. A later review independently verifies every ready-for-recheck or challenged state. changed_locations remains for legacy imports and is normally empty in v0.2 exports."
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "type", "at", "parent_event_id", "origin"],
+      "properties": {
+        "event_id": {"type": "string", "format": "uuid"},
+        "type": {"enum": ["disposition_changed", "note_revised", "imported", "reversed"]},
+        "at": {"type": "string", "format": "date-time"},
+        "disposition": {"enum": ["open", "ready_for_recheck", "challenged", "deferred"]},
+        "note": {"type": ["string", "null"], "maxLength": 10000},
+        "parent_event_id": {"type": ["string", "null"], "format": "uuid"},
+        "origin": {"enum": ["local", "import"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"type": {"const": "disposition_changed"}}, "required": ["type"]},
+          "then": {"required": ["disposition"], "not": {"required": ["note"]}}
+        },
+        {
+          "if": {"properties": {"type": {"const": "note_revised"}}, "required": ["type"]},
+          "then": {"required": ["note"], "not": {"required": ["disposition"]}}
+        },
+        {
+          "if": {"properties": {"type": {"const": "imported"}}, "required": ["type"]},
+          "then": {
+            "properties": {"origin": {"const": "import"}},
+            "not": {"anyOf": [{"required": ["disposition"]}, {"required": ["note"]}]}
+          }
+        },
+        {
+          "if": {"properties": {"type": {"const": "reversed"}}, "required": ["type"]},
+          "then": {
+            "properties": {"parent_event_id": {"type": "string", "format": "uuid"}},
+            "anyOf": [{"required": ["disposition"]}, {"required": ["note"]}]
+          }
+        }
+      ]
+    }
+  }
+}

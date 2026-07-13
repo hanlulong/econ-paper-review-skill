@@ -1,0 +1,140 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-tests:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@70379aad1a8b40919ce8b382d3cd7d0315cde1d0 # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - run: python -m unittest discover -s tests -v
+
+  acceptance:
+    name: Contracts, release, and installer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@70379aad1a8b40919ce8b382d3cd7d0315cde1d0 # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - run: python -m pip check
+      - name: Quick skill-package validation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          skill = Path("econ-review/SKILL.md").read_text(encoding="utf-8")
+          assert skill.startswith("---\n"), "SKILL.md must start with YAML front matter"
+          front_matter = skill.split("---", 2)[1]
+          assert "\nname: econ-review\n" in f"\n{front_matter}\n"
+          assert "\ndescription:" in f"\n{front_matter}"
+          assert Path("econ-review/agents/openai.yaml").is_file()
+          print("quick skill-package validation passed")
+          PY
+      - name: Validate every JSON Schema definition
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from jsonschema import Draft202012Validator
+          schemas = sorted(Path("econ-review/assets").glob("*.schema.json"))
+          assert schemas, "no schemas found"
+          for path in schemas:
+              Draft202012Validator.check_schema(json.loads(path.read_text(encoding="utf-8")))
+          print(f"validated {len(schemas)} JSON Schema definitions")
+          PY
+      - name: Validate and evaluate public benchmark cases
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path, PurePosixPath
+          root = Path("benchmarks")
+          payload = json.loads((root / "cases.json").read_text(encoding="utf-8"))
+          cases = payload.get("cases")
+          assert isinstance(cases, list) and cases, "benchmark cases must be a non-empty array"
+          ids = set()
+          for case in cases:
+              assert isinstance(case, dict) and isinstance(case.get("id"), str)
+              assert case["id"] not in ids, f"duplicate benchmark id: {case['id']}"
+              ids.add(case["id"])
+              raw = case.get("paper")
+              assert isinstance(raw, str) and "\\" not in raw
+              path = PurePosixPath(raw)
+              assert not path.is_absolute() and ".." not in path.parts
+              assert (root.joinpath(*path.parts)).is_file(), f"missing benchmark paper: {raw}"
+          print(f"validated {len(cases)} public benchmark cases")
+          PY
+          python benchmarks/evaluate.py
+      - run: python econ-review/scripts/generate_reports.py --check tests/fixtures/valid-review
+      - run: python econ-review/scripts/generate_fix_plan.py --check tests/fixtures/valid-review
+      - run: python econ-review/scripts/validate_review.py tests/fixtures/valid-review
+      - run: bash -n install.sh
+      - run: python scripts/build_public_release.py --check --output "$RUNNER_TEMP/econ-review.zip"
+      - name: Installer and release extraction smoke tests
+        run: python tests/test_public_release.py -v
+
+  pdf-ingestion:
+    name: PDF ingestion
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@70379aad1a8b40919ce8b382d3cd7d0315cde1d0 # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install the declared PDF runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends poppler-utils
+          pdftoppm -v
+      - run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - run: python econ-review/scripts/pdf_ingestion.py doctor
+      - run: python tests/test_pdf_ingestion.py -v
+
+  viewer:
+    name: Viewer
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: review-viewer
+    steps:
+      - uses: actions/checkout@70379aad1a8b40919ce8b382d3cd7d0315cde1d0 # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: review-viewer/.nvmrc
+          cache: npm
+          cache-dependency-path: review-viewer/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run build:bundled
+      - run: npm audit --audit-level=moderate

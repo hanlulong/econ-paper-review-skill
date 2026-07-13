@@ -1,0 +1,2113 @@
+"use client";
+
+import { ChangeEvent, KeyboardEvent, lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import type { MarkdownComponents } from "./markdown-content";
+import {
+  generateReviewActionsPayload,
+  mergeReviewActionEntries,
+  privacySafeSourceManuscripts,
+  recordReviewActionImport,
+  reconcileReviewActions,
+  REVIEW_ACTION_DISPOSITIONS,
+  updateReviewAction,
+  type ReviewActionDisposition,
+  type ReviewActionEntry,
+} from "../lib/review-actions";
+import {
+  clearBrowserReviewActions,
+  persistBrowserReviewActions,
+  restoreBrowserReviewActions,
+} from "../lib/review-action-storage";
+import {
+  discoverReviewDocuments,
+  REVIEW_DOCUMENT_GROUP_LABELS,
+  resolveReviewDocumentLink,
+  validateReviewDocumentManifest,
+  type ReviewDocument,
+} from "../lib/review-documents";
+import {
+  inferReviewPackageRoot,
+  matchReferencedImagePaths,
+  normalizePackagePath,
+  referencedExhibitPaths,
+  relativeToReviewRoot,
+  selectReviewPackageFilePath,
+  selectManuscriptPath,
+} from "../lib/local-review-package";
+import { reviewLedgerFingerprint, sha256Hex } from "../lib/review-fingerprint";
+import {
+  comparePaperPosition,
+  paperSection,
+  parseReviewUrlState,
+  writeReviewUrlState,
+  type PaperPosition,
+} from "../lib/review-view-state";
+import { validateActivatedBurdens, type ActivatedBurden } from "../lib/review-runtime-contracts";
+
+type Severity = "critical" | "major" | "minor" | "info";
+type LocalStatus = ReviewActionDisposition;
+type DecisionRole = "potentially_dispositive" | "posture_material" | "revision_value" | "polish";
+
+type Evidence = {
+  id?: string;
+  type: string;
+  representation?: "verbatim" | "normalized_transcription" | "composite_comparison" | "reviewer_observation" | "checked_absence" | "computed_result";
+  anchor_id?: string | null;
+  computation_id?: string | null;
+  source_record_id?: string | null;
+  content: string | null;
+  scope_checked?: string | null;
+  source: string;
+  locator: {
+    section?: string | null;
+    page?: number | null;
+    paragraph?: string | null;
+    exhibit?: string | null;
+    equation?: string | null;
+    lines?: string | null;
+    file?: string | null;
+  };
+};
+
+type Finding = {
+  id: string;
+  title?: string;
+  decision_role?: DecisionRole;
+  repairability?: "within_current_design" | "claim_narrowing" | "additional_analysis" | "new_evidence" | "redesign" | "unclear" | "no_clear_fix";
+  importance_rank: number;
+  report_channel?: "substance" | "writing";
+  dimension: string;
+  severity: Severity;
+  essential: boolean;
+  status: string;
+  support_state: string;
+  issue: string;
+  why_it_matters: string;
+  reader_effect: string;
+  confidence?: { level: "low" | "medium" | "high"; would_change_my_mind: string };
+  paper_position?: PaperPosition;
+  evidence_boundary?: string;
+  minimum_repair?: string;
+  display_evidence_id?: string;
+  related_evidence_ids?: string[];
+  related_locations?: string[];
+  evidence: Evidence[];
+  counterargument: {
+    result: "survived" | "weakened" | "refuted" | "not_run";
+    author_reply: string;
+    search_scope?: string;
+    notes: string;
+  };
+  fix: {
+    what: string;
+    how: string;
+    effort: string;
+    publishability: string;
+    resolved_when?: string;
+  };
+  verification: string;
+};
+
+type Ledger = { schema_version?: string; review_id: string; findings: Finding[] };
+type Run = {
+  schema_version?: string;
+  review_id: string;
+  paper_family: string;
+  target: string | { venue?: string | null; tier?: string } | null;
+  counts: Record<string, number>;
+  verification_passed: boolean;
+  status?: "draft" | "awaiting_checkpoint" | "blocked" | "verification_failed" | "complete";
+  activated_burdens?: ActivatedBurden[];
+  comment_policy: { exhaustive: boolean };
+  assessment_boundary?: {
+    sources?: Array<{ path: string; sha256?: string | null }>;
+  };
+};
+
+type ReviewPosture = "reject" | "weak_r_and_r" | "strong_r_and_r" | "accept" | "not_assessed";
+type PrincipalConcern = {
+  id: string;
+  title: string;
+  finding_ids: string[];
+  decision_effect: "potentially_dispositive" | "posture_material";
+  repairability: NonNullable<Finding["repairability"]>;
+  rationale: string;
+  upgrade_condition: string;
+};
+type Synthesis = {
+  schema_version: "0.1";
+  review_contract_version: "0.3" | "0.4";
+  review_id: string;
+  overall_assessment: string;
+  strengths: string[];
+  review_posture: ReviewPosture;
+  posture_rationale: string;
+  upgrade_conditions: string[];
+  principal_concerns: PrincipalConcern[];
+  other_major_finding_ids: string[];
+  convincingness: string;
+  writing_finding_count: number;
+};
+
+type LocalEntry = ReviewActionEntry;
+type LocalState = Record<string, LocalEntry>;
+type UndoStatusChange = { findingId: string; previous: LocalStatus; next: LocalStatus };
+type PendingDocumentAnchor = { documentId: string; fragment: string };
+type DetailMode = "overview" | "comment";
+type QueueOrder = "importance" | "paper";
+type ExhibitAsset = { key: string; label: string; kind: "figure" | "table"; pages: number[]; paths: string[]; missingPaths: string[] };
+type ExhibitManifest = { figures?: unknown[]; tables?: unknown[] };
+type ReviewRegistryEntry = { slug: string; title: string; base_path: string };
+type ReviewRegistry = { schema_version: number; default_review: string; reviews: ReviewRegistryEntry[] };
+type LoadedReviewDocument = ReviewDocument & { content: string };
+type SourceAnchor = { id: string; source_id: string; kind: string; start_char: number | null; end_char: number | null; content_sha256: string; locator: string };
+type SourceManifest = {
+  schema_version: "0.1";
+  review_id: string;
+  anchors: SourceAnchor[];
+  sources?: Array<{ path?: string; extraction?: { path?: string } | null }>;
+};
+
+const MarkdownContent = lazy(() => import("./markdown-content"));
+
+function RenderedMarkdown({ children, components }: { children: string; components?: MarkdownComponents }) {
+  return (
+    <Suspense fallback={<span className="markdown-loading" role="status">Formatting review text…</span>}>
+      <MarkdownContent components={components}>{children}</MarkdownContent>
+    </Suspense>
+  );
+}
+
+const MAX_JSON_BYTES = 5_000_000;
+const MAX_MANUSCRIPT_BYTES = 20_000_000;
+const MAX_SELECTED_FILE_COUNT = 10_000;
+const MAX_LOCAL_PACKAGE_FILES = 2_500;
+const MAX_LOCAL_PACKAGE_BYTES = 300_000_000;
+const MAX_REFERENCED_IMAGES = 500;
+const MAX_LOCAL_IMAGE_BYTES = 30_000_000;
+const MAX_NOTE_CHARS = 10_000;
+const LEGACY_REVIEW_DOCUMENT_PATHS = [
+  "README.md", "report.md", "writing-report.md", "fix-plan.md", "evidence/reconstruction.md",
+  "evidence/reader-claim-audit.md", "evidence/analytical-audit.md", "evidence/figures.md",
+  "evidence/tables.md", "evidence/writing.md", "evidence/coverage.md", "evidence/sources.md",
+  "evidence/verification.md",
+];
+
+function normalizedFilePath(file: File) {
+  return normalizePackagePath(file.webkitRelativePath || file.name);
+}
+
+function parseJsonFile(fileName: string, text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "invalid JSON syntax";
+    throw new Error(`${fileName} contains invalid JSON: ${detail}`);
+  }
+}
+
+function equationMarkdown(content: string) {
+  const value = content.trim();
+  if (!value) return "No equation evidence is available.";
+  return /\$\$|\\\[|\\\(|(^|[^\\])\$/m.test(value) ? value : `$$\n${value}\n$$`;
+}
+
+function EquationEvidence({ content, compact = false }: { content: string; compact?: boolean }) {
+  const raw = content || "No equation evidence is available.";
+  return (
+    <div className={`equation-evidence${compact ? " compact" : ""}`}>
+      <div className="equation-render" aria-label="Rendered equation">
+        <RenderedMarkdown>{equationMarkdown(raw)}</RenderedMarkdown>
+      </div>
+      <details className="equation-raw">
+        <summary>View raw equation</summary>
+        <pre>{raw}</pre>
+      </details>
+    </div>
+  );
+}
+
+function ExhibitImage({ src, alt, compact = false }: { src: string; alt: string; compact?: boolean }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return <div className="missing-exhibit" role="status"><strong>Exhibit render unavailable</strong><span>The declared image could not be loaded. Use the source locator and package manifest to inspect it manually.</span></div>;
+  }
+  // Local object URLs and bundled static assets cannot use the optimization pipeline.
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={src} alt={alt} loading={compact ? "lazy" : "eager"} onError={() => setFailed(true)} />;
+}
+
+function exhibitKey(kind: "figure" | "table", label: string) {
+  const normalized = label
+    .replace(/^Appendix\s+(Figure|Table)\s+/i, "")
+    .replace(/^(Figure|Table)\s+/i, "")
+    .trim()
+    .toLowerCase();
+  return `${kind}:${normalized}`;
+}
+
+function manifestAssets(
+  tables: unknown,
+  figures: unknown,
+  resolvePath: (path: string) => string | null,
+) {
+  const assets: Record<string, ExhibitAsset> = {};
+  const add = (rows: unknown, kind: "figure" | "table", pathField: "render_paths" | "extraction_paths") => {
+    if (!Array.isArray(rows)) return;
+    for (const row of rows) {
+      if (!isRecord(row) || typeof row.label !== "string") continue;
+      const rawPaths = Array.isArray(row[pathField]) ? row[pathField].filter((value): value is string => typeof value === "string") : [];
+      const resolved = rawPaths.map((path) => ({ path, resolved: resolvePath(path) }));
+      const paths = resolved.map((item) => item.resolved).filter((value): value is string => Boolean(value));
+      const key = exhibitKey(kind, row.label);
+      const asset = {
+        key,
+        label: row.label,
+        kind,
+        pages: Array.isArray(row.pdf_pages) ? row.pdf_pages.filter((value): value is number => Number.isInteger(value)) : [],
+        paths,
+        missingPaths: resolved.filter((item) => !item.resolved).map((item) => item.path),
+      };
+      assets[key] = asset;
+      const labelPart = key.slice(kind.length + 1);
+      const shortLabel = labelPart.split(":", 1)[0];
+      if (shortLabel !== labelPart) assets[`${kind}:${shortLabel}`] = asset;
+    }
+  };
+  add(isRecord(tables) ? tables.tables : undefined, "table", "render_paths");
+  add(isRecord(figures) ? figures.figures : undefined, "figure", "extraction_paths");
+  return assets;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function validEvidenceLocator(value: unknown): value is Evidence["locator"] {
+  if (!isRecord(value)) return false;
+  for (const key of ["section", "paragraph", "exhibit", "equation", "lines", "file"]) {
+    const field = value[key];
+    if (!(typeof field === "string" || field === null || field === undefined)) return false;
+  }
+  const page = value.page;
+  return typeof page === "number" ? Number.isFinite(page) : page === null || page === undefined;
+}
+
+function validateLedger(value: unknown): Ledger {
+  if (!isRecord(value) || typeof value.review_id !== "string" || !value.review_id.trim() || !Array.isArray(value.findings)) {
+    throw new Error("findings.json does not have the required review_id and findings array");
+  }
+  if (value.schema_version !== undefined && !["0.1", "0.2", "0.3", "0.4"].includes(String(value.schema_version))) {
+    throw new Error("findings.json has an unsupported schema_version");
+  }
+  const ids = new Set<string>();
+  for (const [index, raw] of value.findings.entries()) {
+    if (!isRecord(raw) || typeof raw.id !== "string" || !raw.id.trim() || ids.has(raw.id)) {
+      throw new Error(`findings.json has an invalid or duplicate finding at position ${index + 1}`);
+    }
+    if (!Number.isInteger(raw.importance_rank) || !["critical", "major", "minor", "info"].includes(String(raw.severity))) {
+      throw new Error(`finding ${raw.id} has an invalid rank or severity`);
+    }
+    if (raw.report_channel !== undefined && !["substance", "writing"].includes(String(raw.report_channel))) {
+      throw new Error(`finding ${raw.id} has an invalid report channel`);
+    }
+    if (["0.3", "0.4"].includes(String(value.schema_version)) && (
+      typeof raw.title !== "string" || !raw.title.trim()
+      || !["potentially_dispositive", "posture_material", "revision_value", "polish"].includes(String(raw.decision_role))
+      || !["within_current_design", "claim_narrowing", "additional_analysis", "new_evidence", "redesign", "unclear", "no_clear_fix"].includes(String(raw.repairability))
+    )) {
+      throw new Error(`v0.3 finding ${raw.id} is missing title, decision role, or repairability`);
+    }
+    if (
+      typeof raw.issue !== "string" || typeof raw.why_it_matters !== "string" || typeof raw.reader_effect !== "string"
+      || typeof raw.dimension !== "string" || typeof raw.status !== "string" || typeof raw.support_state !== "string"
+      || typeof raw.verification !== "string" || typeof raw.essential !== "boolean"
+    ) {
+      throw new Error(`finding ${raw.id} is missing required review text or state`);
+    }
+    if (!Array.isArray(raw.evidence) || !raw.evidence.length || raw.evidence.some((item) => (
+      !isRecord(item) || !["quote", "equation", "table_cell", "figure", "code", "literature", "absence_scope"].includes(String(item.type))
+      || typeof item.source !== "string" || !validEvidenceLocator(item.locator)
+      || !(typeof item.content === "string" || item.content === null)
+      || !(typeof item.scope_checked === "string" || item.scope_checked === null || item.scope_checked === undefined)
+      || (value.schema_version === "0.4" && (
+        typeof item.id !== "string" || !item.id.trim()
+        || !["verbatim", "normalized_transcription", "composite_comparison", "reviewer_observation", "checked_absence", "computed_result"].includes(String(item.representation))
+      ))
+    ))) {
+      throw new Error(`finding ${raw.id} has invalid evidence data`);
+    }
+    if (raw.confidence !== undefined && (
+      !isRecord(raw.confidence)
+      || !["low", "medium", "high"].includes(String(raw.confidence.level))
+      || typeof raw.confidence.would_change_my_mind !== "string"
+      || !raw.confidence.would_change_my_mind.trim()
+    )) throw new Error(`finding ${raw.id} has malformed confidence data`);
+    if (raw.paper_position !== undefined) {
+      if (!isRecord(raw.paper_position)) throw new Error(`finding ${raw.id} has malformed paper_position data`);
+      const paperPosition = raw.paper_position;
+      const positionNumber = paperPosition.ordinal ?? paperPosition.order;
+      if (
+        typeof positionNumber !== "number" || !Number.isFinite(positionNumber) || positionNumber < 0
+        || !["section", "label", "source_id", "anchor_id"].every((key) => paperPosition[key] === undefined || paperPosition[key] === null || typeof paperPosition[key] === "string")
+      ) throw new Error(`finding ${raw.id} has malformed paper_position data`);
+    }
+    if (value.schema_version === "0.4" && (
+      typeof raw.evidence_boundary !== "string" || !raw.evidence_boundary.trim()
+      || typeof raw.minimum_repair !== "string" || !raw.minimum_repair.trim()
+      || typeof raw.display_evidence_id !== "string" || !raw.evidence.some((item) => isRecord(item) && item.id === raw.display_evidence_id)
+      || !Array.isArray(raw.related_evidence_ids) || raw.related_evidence_ids.some((item) => typeof item !== "string")
+      || !Array.isArray(raw.related_locations) || raw.related_locations.some((item) => typeof item !== "string")
+    )) throw new Error(`v0.4 finding ${raw.id} is missing source-linked display metadata`);
+    if (
+      !isRecord(raw.fix) || typeof raw.fix.what !== "string" || typeof raw.fix.how !== "string" || typeof raw.fix.effort !== "string"
+      || typeof raw.fix.publishability !== "string" || !(typeof raw.fix.resolved_when === "string" || raw.fix.resolved_when === undefined)
+      || !isRecord(raw.counterargument) || typeof raw.counterargument.result !== "string"
+      || typeof raw.counterargument.author_reply !== "string" || typeof raw.counterargument.notes !== "string"
+      || !(typeof raw.counterargument.search_scope === "string" || raw.counterargument.search_scope === undefined)
+    ) {
+      throw new Error(`finding ${raw.id} is missing fix or fairness data`);
+    }
+    ids.add(raw.id);
+  }
+  return value as Ledger;
+}
+
+function validateRun(value: unknown): Run {
+  if (
+    !isRecord(value) || typeof value.review_id !== "string" || !value.review_id.trim() || typeof value.paper_family !== "string"
+    || typeof value.verification_passed !== "boolean" || !isRecord(value.counts) || !isRecord(value.comment_policy)
+  ) {
+    throw new Error("run.json does not have the required review_id and paper_family");
+  }
+  if (value.schema_version !== undefined && !["0.1", "0.2", "0.3", "0.4"].includes(String(value.schema_version))) {
+    throw new Error("run.json has an unsupported schema_version");
+  }
+  for (const key of ["critical", "major", "minor", "info", "essential"]) {
+    if (!Number.isInteger(value.counts[key]) || Number(value.counts[key]) < 0) throw new Error(`run.json count ${key} must be a nonnegative integer`);
+  }
+  if (typeof value.comment_policy.exhaustive !== "boolean") throw new Error("run.json comment_policy.exhaustive must be boolean");
+  if (value.status !== undefined && !["draft", "awaiting_checkpoint", "blocked", "verification_failed", "complete"].includes(String(value.status))) {
+    throw new Error("run.json has an unsupported status");
+  }
+  if (value.schema_version === "0.4") validateActivatedBurdens(value.activated_burdens);
+  if (
+    !(value.target === null || typeof value.target === "string" || (
+      isRecord(value.target)
+      && (value.target.venue === undefined || value.target.venue === null || typeof value.target.venue === "string")
+      && (value.target.tier === undefined || typeof value.target.tier === "string")
+    ))
+  ) throw new Error("run.json target must be text, null, or an object with text venue/tier fields");
+  return value as Run;
+}
+
+function validateSynthesis(value: unknown): Synthesis | null {
+  if (value === null || value === undefined || (isRecord(value) && !Object.keys(value).length)) return null;
+  if (
+    !isRecord(value) || value.schema_version !== "0.1" || !["0.3", "0.4"].includes(String(value.review_contract_version))
+    || typeof value.review_id !== "string" || !value.review_id.trim()
+    || typeof value.overall_assessment !== "string" || !value.overall_assessment.trim()
+    || typeof value.posture_rationale !== "string" || !value.posture_rationale.trim()
+    || typeof value.convincingness !== "string" || !value.convincingness.trim()
+    || !["reject", "weak_r_and_r", "strong_r_and_r", "accept", "not_assessed"].includes(String(value.review_posture))
+    || !Array.isArray(value.strengths) || value.strengths.some((item) => typeof item !== "string" || !item.trim())
+    || !Array.isArray(value.upgrade_conditions) || value.upgrade_conditions.some((item) => typeof item !== "string" || !item.trim())
+    || !Array.isArray(value.other_major_finding_ids) || value.other_major_finding_ids.some((item) => typeof item !== "string" || !item.trim())
+    || !Number.isInteger(value.writing_finding_count) || Number(value.writing_finding_count) < 0
+    || !Array.isArray(value.principal_concerns)
+  ) throw new Error("synthesis.json does not have the required v0.3 assessment structure");
+  for (const [index, concern] of value.principal_concerns.entries()) {
+    if (
+      !isRecord(concern) || typeof concern.id !== "string" || !/^PC-[0-9]{2,}$/.test(concern.id)
+      || typeof concern.title !== "string" || !concern.title.trim()
+      || !Array.isArray(concern.finding_ids) || !concern.finding_ids.length
+      || concern.finding_ids.some((item) => typeof item !== "string" || !item.trim())
+      || !["potentially_dispositive", "posture_material"].includes(String(concern.decision_effect))
+      || !["within_current_design", "claim_narrowing", "additional_analysis", "new_evidence", "redesign", "unclear", "no_clear_fix"].includes(String(concern.repairability))
+      || typeof concern.rationale !== "string" || !concern.rationale.trim()
+      || typeof concern.upgrade_condition !== "string" || !concern.upgrade_condition.trim()
+    ) throw new Error(`synthesis.json has an invalid principal concern at position ${index + 1}`);
+  }
+  return value as Synthesis;
+}
+
+function validateSourceManifest(value: unknown): SourceManifest | null {
+  if (value === null || value === undefined || (isRecord(value) && !Object.keys(value).length)) return null;
+  if (!isRecord(value) || value.schema_version !== "0.1" || typeof value.review_id !== "string" || !Array.isArray(value.anchors)) {
+    throw new Error("source-manifest.json does not have the required source-anchor structure");
+  }
+  const ids = new Set<string>();
+  if (value.sources !== undefined) {
+    if (!Array.isArray(value.sources)) throw new Error("source-manifest.json sources must be an array");
+    for (const [index, source] of value.sources.entries()) {
+      if (!isRecord(source) || typeof source.path !== "string" || !source.path.trim()) {
+        throw new Error(`source-manifest.json has an invalid source at position ${index + 1}`);
+      }
+      if (source.extraction !== undefined && source.extraction !== null && (
+        !isRecord(source.extraction) || typeof source.extraction.path !== "string" || !source.extraction.path.trim()
+      )) throw new Error(`source-manifest.json has an invalid extraction at source position ${index + 1}`);
+    }
+  }
+  for (const [index, anchor] of value.anchors.entries()) {
+    if (
+      !isRecord(anchor) || typeof anchor.id !== "string" || ids.has(anchor.id)
+      || typeof anchor.source_id !== "string" || typeof anchor.kind !== "string"
+      || !(anchor.start_char === null || Number.isInteger(anchor.start_char) && Number(anchor.start_char) >= 0)
+      || !(anchor.end_char === null || Number.isInteger(anchor.end_char) && Number(anchor.end_char) >= 0)
+      || typeof anchor.content_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(anchor.content_sha256)
+      || typeof anchor.locator !== "string" || !anchor.locator.trim()
+    ) throw new Error(`source-manifest.json has an invalid anchor at position ${index + 1}`);
+    if (typeof anchor.start_char === "number" && typeof anchor.end_char === "number" && anchor.end_char < anchor.start_char) {
+      throw new Error(`source-manifest.json anchor ${anchor.id} ends before it starts`);
+    }
+    ids.add(anchor.id);
+  }
+  return value as unknown as SourceManifest;
+}
+
+function validateLedgerAnchors(ledger: Ledger, manifest: SourceManifest | null): void {
+  if (ledger.schema_version !== "0.4") return;
+  if (!manifest) throw new Error("v0.4 findings require evidence/source-manifest.json");
+  const anchors = new Map(manifest.anchors.map((anchor) => [anchor.id, anchor]));
+  for (const finding of ledger.findings) {
+    const positionAnchor = finding.paper_position?.anchor_id;
+    const positionSource = finding.paper_position?.source_id;
+    if (!positionAnchor || !anchors.has(positionAnchor)) throw new Error(`finding ${finding.id} has an unresolved paper-position anchor`);
+    if (positionSource && anchors.get(positionAnchor)?.source_id !== positionSource) throw new Error(`finding ${finding.id} paper position has inconsistent source and anchor IDs`);
+    for (const evidence of finding.evidence) {
+      if (evidence.anchor_id && !anchors.has(evidence.anchor_id)) throw new Error(`finding ${finding.id} evidence ${evidence.id || "item"} has an unresolved source anchor`);
+    }
+  }
+}
+
+function validatePackageLinks(ledger: Ledger, run: Run, synthesis: Synthesis | null): void {
+  const active = ledger.findings.filter((finding) => !["dismissed", "resolved"].includes(finding.status));
+  for (const severity of ["critical", "major", "minor", "info"] as const) {
+    const actual = active.filter((finding) => finding.severity === severity).length;
+    if (run.counts[severity] !== actual) throw new Error(`run.json ${severity} count does not match findings.json`);
+  }
+  const essential = active.filter((finding) => finding.essential).length;
+  if (run.counts.essential !== essential) throw new Error("run.json essential count does not match findings.json");
+  if (!synthesis) return;
+  const ids = new Set(ledger.findings.map((finding) => finding.id));
+  for (const concern of synthesis.principal_concerns) {
+    for (const id of concern.finding_ids) if (!ids.has(id)) throw new Error(`synthesis concern ${concern.id} references unknown finding ${id}`);
+  }
+  for (const id of synthesis.other_major_finding_ids) if (!ids.has(id)) throw new Error(`synthesis references unknown finding ${id}`);
+}
+
+function reviewFingerprint(ledger: Ledger) {
+  return reviewLedgerFingerprint(ledger.findings);
+}
+
+function locator(finding: Finding, evidenceIndex = 0) {
+  const value = finding.evidence[evidenceIndex]?.locator || finding.evidence[0]?.locator;
+  if (!value) return "Location unavailable";
+  const parts = [
+    value.file,
+    value.section && (/^(section|sections|abstract|appendix|online appendix|front matter|end matter|table|figure|treatment|references)/i.test(value.section) ? value.section : `Section ${value.section}`),
+    value.paragraph && `para. ${value.paragraph}`,
+    value.exhibit,
+    value.equation && `Eq. ${value.equation}`,
+    value.page && `p. ${value.page}`,
+    value.lines && `lines ${value.lines}`,
+  ];
+  const unique = parts.filter((part): part is string => Boolean(part)).filter((part, index, values) => values.indexOf(part) === index);
+  return unique.join(" · ") || "Manuscript";
+}
+
+function shortTitle(finding: Finding) {
+  return (finding.title || finding.issue.split(". ", 1)[0]).replace(/\.$/, "");
+}
+
+function channelLabel(finding: Finding) {
+  return finding.report_channel === "writing" ? "Writing" : "Substance";
+}
+
+function readableState(value: string | undefined) {
+  return (value || "not available").replaceAll("_", " ");
+}
+
+function mergeDistinctText(first: string | undefined, second: string | undefined) {
+  const left = " ".concat(first || "").trim().replace(/\s+/g, " ");
+  const right = " ".concat(second || "").trim().replace(/\s+/g, " ");
+  if (!left) return right;
+  if (!right) return left;
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const leftKey = normalize(left);
+  const rightKey = normalize(right);
+  if (leftKey === rightKey || rightKey.includes(leftKey)) return right;
+  if (leftKey.includes(rightKey)) return left;
+  return `${left} ${right}`;
+}
+
+const DECISION_ROLE_LABELS: Record<DecisionRole, string> = {
+  potentially_dispositive: "Could prevent publication",
+  posture_material: "Recommendation material",
+  revision_value: "Strengthens the revision",
+  polish: "Polish",
+};
+
+const SHORT_DECISION_ROLE_LABELS: Record<DecisionRole, string> = {
+  potentially_dispositive: "Dispositive",
+  posture_material: "Posture",
+  revision_value: "Revision",
+  polish: "Polish",
+};
+
+const POSTURE_LABELS: Record<ReviewPosture, string> = {
+  reject: "Reject",
+  weak_r_and_r: "Weak revise & resubmit",
+  strong_r_and_r: "Strong revise & resubmit",
+  accept: "Accept",
+  not_assessed: "Not assessed",
+};
+
+function decisionRoleLabel(value: DecisionRole | undefined) {
+  return value ? DECISION_ROLE_LABELS[value] : "Publication role not available";
+}
+
+function shortDecisionRoleLabel(value: DecisionRole | undefined) {
+  return value ? SHORT_DECISION_ROLE_LABELS[value] : "Unclassified";
+}
+
+function evidenceText(evidence: Evidence | undefined) {
+  if (!evidence) return "";
+  if (!evidence.content && evidence.type === "absence_scope" && evidence.scope_checked) return `Scope checked: ${evidence.scope_checked}`;
+  if (!evidence.content) return "";
+  if (evidence.type !== "quote") return evidence.content.trim();
+  return evidence.content
+    .split("\n")
+    .map((line) => line.replace(/^\s*>\s?/, ""))
+    .join("\n")
+    .trim();
+}
+
+function displayEvidenceIndex(finding: Finding): number {
+  if (!finding.display_evidence_id) return 0;
+  const index = finding.evidence.findIndex((evidence) => evidence.id === finding.display_evidence_id);
+  return index < 0 ? 0 : index;
+}
+
+function defaultEntry(findingId: string): LocalEntry {
+  return {
+    finding_id: findingId,
+    disposition: "open",
+    response_note: "",
+    changed_locations: [],
+    updated_at: "1970-01-01T00:00:00.000Z",
+    status_history: [{ disposition: "open", at: "1970-01-01T00:00:00.000Z" }],
+    events: [{
+      event_id: "00000000-0000-4000-8000-000000000000",
+      type: "disposition_changed",
+      at: "1970-01-01T00:00:00.000Z",
+      disposition: "open",
+      parent_event_id: null,
+      origin: "local",
+    }],
+  };
+}
+
+export function ReviewWorkspace() {
+  const [ledger, setLedger] = useState<Ledger | null>(null);
+  const [run, setRun] = useState<Run | null>(null);
+  const [synthesis, setSynthesis] = useState<Synthesis | null>(null);
+  const [manuscript, setManuscript] = useState("");
+  const [documents, setDocuments] = useState<LoadedReviewDocument[]>([]);
+  const [reportView, setReportView] = useState("none");
+  const [detailMode, setDetailMode] = useState<DetailMode>("overview");
+  const [queueOrder, setQueueOrder] = useState<QueueOrder>("importance");
+  const [selectedId, setSelectedId] = useState("");
+  const [localState, setLocalState] = useState<LocalState>({});
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [query, setQuery] = useState("");
+  const [severity, setSeverity] = useState<"all" | Severity>("all");
+  const [decisionRole, setDecisionRole] = useState<"all" | DecisionRole>("all");
+  const [status, setStatus] = useState<"all" | LocalStatus>("all");
+  const [channel, setChannel] = useState<"all" | "substance" | "writing">("all");
+  const [dimension, setDimension] = useState("all");
+  const [showEvidence, setShowEvidence] = useState(true);
+  const [expandedEvidence, setExpandedEvidence] = useState(false);
+  const [evidenceIndex, setEvidenceIndex] = useState(0);
+  const [assetPathIndex, setAssetPathIndex] = useState(0);
+  const [loadError, setLoadError] = useState("");
+  const [announcement, setAnnouncement] = useState("");
+  const [actionNotice, setActionNotice] = useState("");
+  const [undoStatusChange, setUndoStatusChange] = useState<UndoStatusChange | null>(null);
+  const [pendingDocumentAnchor, setPendingDocumentAnchor] = useState<PendingDocumentAnchor | null>(null);
+  const [exhibitAssets, setExhibitAssets] = useState<Record<string, ExhibitAsset>>({});
+  const [sourceAnchors, setSourceAnchors] = useState<Record<string, SourceAnchor>>({});
+  const [registry, setRegistry] = useState<ReviewRegistry | null>(null);
+  const [reviewSlug, setReviewSlug] = useState("");
+  const [isBundleLoading, setIsBundleLoading] = useState(false);
+  const [isLocalLoading, setIsLocalLoading] = useState(false);
+  const [persistenceWarning, setPersistenceWarning] = useState("");
+  const [handoffWarning, setHandoffWarning] = useState("");
+  const [persistenceMode, setPersistenceMode] = useState<"local" | "session">("local");
+  const [registryUnavailable, setRegistryUnavailable] = useState(false);
+  const [mobilePane, setMobilePane] = useState<"queue" | "comment" | "evidence">("queue");
+  const fileInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
+  const actionsInput = useRef<HTMLInputElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const noteInput = useRef<HTMLTextAreaElement>(null);
+  const reportReader = useRef<HTMLElement>(null);
+  const reportHeading = useRef<HTMLHeadingElement>(null);
+  const reportBackButton = useRef<HTMLButtonElement>(null);
+  const topMenu = useRef<HTMLDetailsElement>(null);
+  const commentHeading = useRef<HTMLHeadingElement>(null);
+  const evidenceHeading = useRef<HTMLHeadingElement>(null);
+  const commentPane = useRef<HTMLElement>(null);
+  const documentPane = useRef<HTMLElement>(null);
+  const noResultsRef = useRef<HTMLElement>(null);
+  const findingRefs = useRef(new Map<string, HTMLButtonElement>());
+  const localObjectUrls = useRef<string[]>([]);
+  const loadedReviewSlug = useRef("");
+  const localLoadSequence = useRef(0);
+  const localStateRef = useRef<LocalState>({});
+  const focusAfterFilter = useRef(false);
+  const persistenceWarningRef = useRef("");
+  const applyingHistoryState = useRef(false);
+
+  const showActionNotice = useCallback((message: string, undo: UndoStatusChange | null = null) => {
+    setActionNotice(message);
+    setUndoStatusChange(undo);
+  }, []);
+
+  useEffect(() => {
+    if (!actionNotice) return;
+    const timeout = window.setTimeout(() => {
+      setActionNotice("");
+      setUndoStatusChange(null);
+    }, 5500);
+    return () => window.clearTimeout(timeout);
+  }, [actionNotice]);
+
+  useEffect(() => {
+    fetch("/reviews/index.json")
+      .then((response) => {
+        if (!response.ok) throw new Error("Review registry is unavailable");
+        return response.json();
+      })
+      .then((value: unknown) => {
+        if (!isRecord(value) || !Array.isArray(value.reviews) || typeof value.default_review !== "string") {
+          throw new Error("Review registry is malformed");
+        }
+        const checked = value as unknown as ReviewRegistry;
+        const requested = new URLSearchParams(window.location.search).get("review");
+        const initial = checked.reviews.some((entry) => entry.slug === requested) ? requested! : checked.default_review;
+        setRegistry(checked);
+        setReviewSlug(initial);
+      })
+      .catch(() => setRegistryUnavailable(true));
+  }, []);
+
+  useEffect(() => {
+    const entry = registry?.reviews.find((candidate) => candidate.slug === reviewSlug);
+    if (!entry) return;
+    if (entry.slug === loadedReviewSlug.current && ledger && run) {
+      setIsBundleLoading(false);
+      return;
+    }
+    let cancelled = false;
+    localLoadSequence.current += 1;
+    setIsLocalLoading(false);
+    setIsBundleLoading(true);
+    const requiredJson = async (path: string) => {
+      const response = await fetch(path);
+      if (!response.ok) throw new Error(`Required review file is unavailable: ${path}`);
+      return response.json();
+    };
+    const requiredText = async (path: string) => {
+      const response = await fetch(path);
+      if (!response.ok) throw new Error(`Required review file is unavailable: ${path}`);
+      return response.text();
+    };
+    const optionalJson = async (path: string) => {
+      const response = await fetch(path);
+      return response.ok ? response.json() : {};
+    };
+    const optionalManifest = async (path: string) => {
+      const response = await fetch(path);
+      if (response.status === 404) return null;
+      if (!response.ok) throw new Error(`Optional review manifest could not be read: ${path}`);
+      return response.json();
+    };
+    const optionalText = async (path: string) => {
+      const response = await fetch(path);
+      return response.ok ? response.text() : "";
+    };
+    Promise.all([
+      requiredJson(`${entry.base_path}/findings.json`),
+      requiredJson(`${entry.base_path}/run.json`),
+      optionalJson(`${entry.base_path}/synthesis.json`),
+      optionalText(`${entry.base_path}/manuscript.md`),
+      optionalJson(`${entry.base_path}/tables.json`),
+      optionalJson(`${entry.base_path}/figures.json`),
+      optionalManifest(`${entry.base_path}/review-manifest.json`),
+      optionalJson(`${entry.base_path}/source-manifest.json`),
+    ])
+      .then(async ([nextLedger, nextRun, nextSynthesis, nextManuscript, nextTables, nextFigures, manifestValue, sourceManifestValue]) => {
+        if (cancelled) return;
+        const checkedLedger = validateLedger(nextLedger);
+        const checkedRun = validateRun(nextRun);
+        const checkedSynthesis = validateSynthesis(nextSynthesis);
+        const checkedSourceManifest = validateSourceManifest(sourceManifestValue);
+        validateLedgerAnchors(checkedLedger, checkedSourceManifest);
+        if (checkedLedger.review_id !== checkedRun.review_id) throw new Error("Bundled review IDs do not match");
+        if (checkedLedger.schema_version !== checkedRun.schema_version) throw new Error("Bundled review schema versions do not match");
+        if (checkedSynthesis && checkedSynthesis.review_id !== checkedLedger.review_id) throw new Error("Bundled synthesis ID does not match findings.json");
+        if (checkedSourceManifest && checkedSourceManifest.review_id !== checkedLedger.review_id) throw new Error("Bundled source manifest ID does not match findings.json");
+        validatePackageLinks(checkedLedger, checkedRun, checkedSynthesis);
+        const hasManifest = manifestValue !== null;
+        const checkedManifest = hasManifest ? validateReviewDocumentManifest(manifestValue) : null;
+        const definitions = checkedManifest
+          ? checkedManifest.documents
+          : discoverReviewDocuments(LEGACY_REVIEW_DOCUMENT_PATHS);
+        if (checkedManifest && checkedManifest.review_id !== checkedLedger.review_id) {
+          throw new Error("Bundled review manifest ID does not match findings.json");
+        }
+        const contents = await Promise.all(definitions.map((document) => (
+          checkedManifest
+            ? requiredText(`${entry.base_path}/${document.path}`)
+            : optionalText(`${entry.base_path}/${document.path}`)
+        )));
+        const nextDocuments = definitions
+          .map((document, index) => ({ ...document, content: contents[index] }))
+          .filter((document) => document.content.trim());
+        if (cancelled) return;
+        setLedger(checkedLedger);
+        setRun(checkedRun);
+        setSynthesis(checkedSynthesis);
+        setManuscript(nextManuscript);
+        setDocuments(nextDocuments);
+        const urlState = parseReviewUrlState(window.location.search);
+        const linkedFinding = checkedLedger.findings.find((finding) => finding.id === urlState.finding);
+        const linkedDocument = nextDocuments.find((document) => document.id === urlState.document);
+        setReportView(urlState.view === "document" && linkedDocument ? linkedDocument.id : "none");
+        setDetailMode(urlState.view === "comment" && linkedFinding ? "comment" : "overview");
+        setSelectedId(linkedFinding?.id || checkedLedger.findings[0]?.id || "");
+        const restoredActions = restoreBrowserReviewActions(window.localStorage, {
+          review_id: checkedLedger.review_id,
+          review_fingerprint: reviewFingerprint(checkedLedger),
+          finding_ids: checkedLedger.findings.map((finding) => finding.id),
+        });
+        localStateRef.current = restoredActions.entries;
+        setLocalState(restoredActions.entries);
+        setNoteDrafts({});
+        setHandoffWarning(restoredActions.warning);
+        setQuery("");
+        setSeverity((["critical", "major", "minor", "info"] as string[]).includes(urlState.severity) ? urlState.severity as Severity : "all");
+        setDecisionRole((["potentially_dispositive", "posture_material", "revision_value", "polish"] as string[]).includes(urlState.role) ? urlState.role as DecisionRole : "all");
+        setStatus((REVIEW_ACTION_DISPOSITIONS as readonly string[]).includes(urlState.status) ? urlState.status as LocalStatus : "all");
+        setChannel((["substance", "writing"] as string[]).includes(urlState.channel) ? urlState.channel as "substance" | "writing" : "all");
+        setDimension(checkedLedger.findings.some((finding) => finding.dimension === urlState.dimension) ? urlState.dimension : "all");
+        setEvidenceIndex(linkedFinding ? Math.min(urlState.evidence, linkedFinding.evidence.length - 1) : 0);
+        setAssetPathIndex(0);
+        try {
+          const params = new URLSearchParams(window.location.search);
+          const savedOrder = window.localStorage.getItem(`review-desk:queue-order:${checkedLedger.review_id}`);
+          setQueueOrder(params.has("order") ? urlState.order : savedOrder === "paper" ? "paper" : "importance");
+        } catch { setQueueOrder("importance"); }
+        setActionNotice("");
+        setUndoStatusChange(null);
+        setPendingDocumentAnchor(null);
+        setMobilePane(urlState.view === "comment" || urlState.view === "document" ? "comment" : "queue");
+        setExhibitAssets(manifestAssets(nextTables, nextFigures, (path) => `${entry.base_path}/${path}`));
+        setSourceAnchors(Object.fromEntries((checkedSourceManifest?.anchors || []).map((anchor) => [anchor.id, anchor])));
+        loadedReviewSlug.current = entry.slug;
+        setIsBundleLoading(false);
+        setLoadError("");
+        const url = new URL(window.location.href);
+        url.searchParams.set("review", entry.slug);
+        window.history.replaceState({}, "", url);
+        setAnnouncement(`Loaded ${entry.title} with ${checkedLedger.findings.length} comments.`);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setIsBundleLoading(false);
+        const detail = error instanceof Error ? ` ${error.message}` : "";
+        const previous = loadedReviewSlug.current;
+        if (previous && previous !== entry.slug) {
+          setReviewSlug(previous);
+          const url = new URL(window.location.href);
+          url.searchParams.set("review", previous);
+          window.history.replaceState({}, "", url);
+          setLoadError(`The selected bundled review could not be loaded. The previous review was restored.${detail}`);
+        } else {
+          setLoadError(`The selected bundled review could not be loaded. Choose another review or local files.${detail}`);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [ledger, registry, reviewSlug, run]);
+
+  useEffect(() => {
+    if (!ledger?.review_id || persistenceMode !== "local") return;
+    const timeout = window.setTimeout(() => {
+      let nextWarning = "";
+      try {
+        persistBrowserReviewActions(window.localStorage, generateReviewActionsPayload({
+          source_review_id: ledger.review_id,
+          source_review_fingerprint: reviewFingerprint(ledger),
+          source_manuscripts: privacySafeSourceManuscripts(run?.assessment_boundary?.sources || []),
+          entries: localState,
+        }));
+      } catch {
+        nextWarning = "Progress is available for this tab, but the browser could not save it locally.";
+      }
+      if (nextWarning !== persistenceWarningRef.current) {
+        persistenceWarningRef.current = nextWarning;
+        setPersistenceWarning(nextWarning);
+      }
+    }, 300);
+    return () => window.clearTimeout(timeout);
+  }, [ledger, localState, persistenceMode, run]);
+
+  useEffect(() => {
+    if (!loadedReviewSlug.current || !ledger || applyingHistoryState.current) return;
+    const url = writeReviewUrlState(new URL(window.location.href), {
+      view: reportView !== "none" ? "document" : detailMode,
+      finding: selectedId || null,
+      document: reportView !== "none" ? reportView : null,
+      evidence: evidenceIndex,
+      order: queueOrder,
+      severity,
+      role: decisionRole,
+      status,
+      channel,
+      dimension,
+    });
+    window.history.replaceState({ reviewDesk: true }, "", url);
+  }, [channel, decisionRole, detailMode, dimension, evidenceIndex, ledger, queueOrder, reportView, selectedId, severity, status]);
+
+  useEffect(() => () => {
+    for (const url of localObjectUrls.current) URL.revokeObjectURL(url);
+  }, []);
+
+  const findings = useMemo(
+    () =>
+      (ledger?.findings || [])
+        .filter((finding) => !["dismissed", "resolved"].includes(finding.status))
+        .sort((a, b) => a.importance_rank - b.importance_rank),
+    [ledger],
+  );
+
+  const deferredQuery = useDeferredValue(query.trim().toLowerCase());
+  const searchIndex = useMemo(() => new Map(findings.map((finding) => {
+    const entry = localState[finding.id] || defaultEntry(finding.id);
+    return [finding.id, [
+      finding.id, finding.title, finding.decision_role, finding.repairability, finding.dimension,
+      channelLabel(finding), finding.issue, finding.why_it_matters, finding.reader_effect,
+      finding.fix.what, finding.fix.how, finding.fix.resolved_when, finding.counterargument.author_reply,
+      finding.counterargument.search_scope, finding.counterargument.notes, entry.response_note,
+      ...entry.changed_locations,
+      ...finding.evidence.flatMap((item, index) => [item.type, item.source, item.content, locator(finding, index)]),
+    ].filter(Boolean).join(" ").toLowerCase()] as const;
+  })), [findings, localState]);
+
+  const filtered = useMemo(() => {
+    const needle = deferredQuery;
+    const matching = findings.filter((finding) => {
+      const entry = localState[finding.id] || defaultEntry(finding.id);
+      const haystack = searchIndex.get(finding.id) || "";
+      return (
+        (severity === "all" || finding.severity === severity) &&
+        (decisionRole === "all" || finding.decision_role === decisionRole) &&
+        (status === "all" || entry.disposition === status) &&
+        (channel === "all" || (finding.report_channel || "substance") === channel) &&
+        (dimension === "all" || finding.dimension === dimension) &&
+        (!needle || haystack.includes(needle))
+      );
+    });
+    return queueOrder === "paper"
+      ? [...matching].sort(comparePaperPosition)
+      : matching;
+  }, [channel, decisionRole, deferredQuery, dimension, findings, localState, queueOrder, searchIndex, severity, status]);
+
+  const selected = filtered.find((finding) => finding.id === selectedId) || filtered[0] || findings[0];
+  const selectedEntry = selected ? localState[selected.id] || defaultEntry(selected.id) : defaultEntry("EMPTY-00");
+  const majorFindings = findings.filter((finding) => ["critical", "major"].includes(finding.severity));
+  const minorFindings = findings.filter((finding) => finding.severity === "minor");
+  const majorReady = majorFindings.filter((finding) => localState[finding.id]?.disposition === "ready_for_recheck").length;
+  const minorReady = minorFindings.filter((finding) => localState[finding.id]?.disposition === "ready_for_recheck").length;
+  const triagedCount = findings.filter((finding) => (localState[finding.id]?.disposition || "open") !== "open").length;
+  const dimensions = useMemo(() => Array.from(new Set(findings.map((finding) => finding.dimension))).sort(), [findings]);
+  const substanceCount = findings.filter((finding) => finding.report_channel !== "writing").length;
+  const writingCount = findings.filter((finding) => finding.report_channel === "writing").length;
+  const severityCounts = {
+    critical: findings.filter((finding) => finding.severity === "critical").length,
+    major: findings.filter((finding) => finding.severity === "major").length,
+    minor: findings.filter((finding) => finding.severity === "minor").length,
+    info: findings.filter((finding) => finding.severity === "info").length,
+  };
+  const filteredPosition = selected ? filtered.findIndex((finding) => finding.id === selected.id) : -1;
+  const activeFilters = [severity !== "all", decisionRole !== "all", status !== "all", channel !== "all", dimension !== "all", Boolean(query.trim())].filter(Boolean).length;
+  const isReviewLoading = isBundleLoading || isLocalLoading;
+
+  const pushViewState = useCallback((next: Partial<ReturnType<typeof parseReviewUrlState>>, replace = false) => {
+    if (!loadedReviewSlug.current) return;
+    const current = parseReviewUrlState(window.location.search);
+    const url = writeReviewUrlState(new URL(window.location.href), { ...current, ...next });
+    window.history[replace ? "replaceState" : "pushState"]({ reviewDesk: true }, "", url);
+  }, []);
+
+  const selectAndFocus = useCallback((id: string, replaceHistory = false) => {
+    const finding = findings.find((candidate) => candidate.id === id);
+    setDetailMode("comment");
+    setReportView("none");
+    setSelectedId(id);
+    setEvidenceIndex(finding ? displayEvidenceIndex(finding) : 0);
+    setAssetPathIndex(0);
+    setExpandedEvidence(false);
+    pushViewState({ view: "comment", finding: id, document: null, evidence: finding ? displayEvidenceIndex(finding) : 0 }, replaceHistory);
+    requestAnimationFrame(() => findingRefs.current.get(id)?.focus());
+  }, [findings, pushViewState]);
+
+  /** Reveal an exact canonical finding from reports/permalinks, clearing filters that could hide it. */
+  const openFinding = useCallback((id: string, message?: string, replaceHistory = false, clearIncompatibleFilters = true) => {
+    const finding = findings.find((candidate) => candidate.id === id);
+    if (!finding) {
+      setAnnouncement(`Finding ${id} is not active in this review.`);
+      return false;
+    }
+    if (clearIncompatibleFilters) {
+      setQuery("");
+      setSeverity("all");
+      setDecisionRole("all");
+      setStatus("all");
+      setChannel("all");
+      setDimension("all");
+    }
+    setReportView("none");
+    setDetailMode("comment");
+    setSelectedId(id);
+    const displayIndex = displayEvidenceIndex(finding);
+    setEvidenceIndex(displayIndex);
+    setAssetPathIndex(0);
+    setExpandedEvidence(false);
+    setMobilePane("comment");
+    pushViewState({
+      view: "comment", finding: id, document: null, evidence: displayIndex,
+      ...(clearIncompatibleFilters ? { severity: "all", role: "all", status: "all", channel: "all", dimension: "all" } : {}),
+    }, replaceHistory);
+    setAnnouncement(message || `Opened ${id}: ${shortTitle(finding)}`);
+    requestAnimationFrame(() => commentHeading.current?.focus());
+    return true;
+  }, [findings, pushViewState]);
+
+  const updateLocal = useCallback((id: string, patch: Partial<Pick<LocalEntry, "disposition" | "response_note" | "changed_locations">>) => {
+    const current = localStateRef.current;
+    const base = current[id] || defaultEntry(id);
+    const nextDisposition = patch.disposition ?? base.disposition;
+    const nextEntry = updateReviewAction(base, id, { ...patch, disposition: nextDisposition });
+    const nextState = { ...current, [id]: nextEntry };
+    localStateRef.current = nextState;
+    setLocalState(nextState);
+  }, []);
+
+  const commitNote = useCallback((id: string) => {
+    const draft = noteDrafts[id];
+    if (draft === undefined) return;
+    const current = localStateRef.current[id] || defaultEntry(id);
+    if (draft !== current.response_note) updateLocal(id, { response_note: draft });
+    setNoteDrafts((values) => {
+      if (!(id in values)) return values;
+      const next = { ...values };
+      delete next[id];
+      return next;
+    });
+  }, [noteDrafts, updateLocal]);
+
+  const markFindingStatus = useCallback((id: string, nextStatus: LocalStatus) => {
+    const entry = localStateRef.current[id] || defaultEntry(id);
+    if (entry.disposition === nextStatus) {
+      showActionNotice(`${id} is already ${readableState(nextStatus)}.`);
+      return;
+    }
+    if (status !== "all" && status !== nextStatus) focusAfterFilter.current = true;
+    updateLocal(id, { disposition: nextStatus });
+    const label = nextStatus === "ready_for_recheck" ? "ready for recheck" : nextStatus;
+    setAnnouncement(`${id} marked ${label}`);
+    showActionNotice(`${id} is ${label}. This is author state; the next review still verifies it.`, {
+      findingId: id,
+      previous: entry.disposition,
+      next: nextStatus,
+    });
+  }, [showActionNotice, status, updateLocal]);
+
+  const undoLastStatusChange = useCallback(() => {
+    if (!undoStatusChange) return;
+    const current = localStateRef.current[undoStatusChange.findingId] || defaultEntry(undoStatusChange.findingId);
+    if (current.disposition !== undoStatusChange.next) {
+      showActionNotice("That status has changed again, so the earlier change cannot be undone safely.");
+      return;
+    }
+    const currentState = localStateRef.current;
+    const reversed = updateReviewAction(current, undoStatusChange.findingId, { disposition: undoStatusChange.previous }, new Date().toISOString(), { type: "reversed" });
+    const nextState = { ...currentState, [undoStatusChange.findingId]: reversed };
+    localStateRef.current = nextState;
+    setLocalState(nextState);
+    setAnnouncement(`${undoStatusChange.findingId} restored to ${readableState(undoStatusChange.previous)}`);
+    showActionNotice(`${undoStatusChange.findingId} returned to ${readableState(undoStatusChange.previous)}. The reversal was added to its action history.`);
+  }, [showActionNotice, undoStatusChange]);
+
+  const moveSelection = useCallback(
+    (delta: number) => {
+      if (!filtered.length) return;
+      const index = Math.max(0, filtered.findIndex((finding) => finding.id === selected?.id));
+      const next = filtered[(index + delta + filtered.length) % filtered.length];
+      selectAndFocus(next.id, true);
+      setAnnouncement(`Selected ${next.id}: ${shortTitle(next)}`);
+    },
+    [filtered, selectAndFocus, selected?.id],
+  );
+
+  const moveDetailSelection = useCallback((delta: number) => {
+    if (!filtered.length) return;
+    const index = Math.max(0, filtered.findIndex((finding) => finding.id === selected?.id));
+    const next = filtered[(index + delta + filtered.length) % filtered.length];
+    setDetailMode("comment");
+    setReportView("none");
+    setSelectedId(next.id);
+    setEvidenceIndex(0);
+    setAssetPathIndex(0);
+    setExpandedEvidence(false);
+    setAnnouncement(`Selected ${next.id}: ${shortTitle(next)}`);
+    requestAnimationFrame(() => commentHeading.current?.focus());
+  }, [filtered, selected?.id]);
+
+  const moveToNextOpen = useCallback(() => {
+    if (!filtered.length) return;
+    const start = Math.max(0, filtered.findIndex((finding) => finding.id === selected?.id));
+    const next = [...filtered.slice(start + 1), ...filtered.slice(0, start + 1)]
+      .find((finding) => (localState[finding.id]?.disposition || "open") === "open");
+    if (!next) {
+      setAnnouncement("No other open comment in the current filter");
+      return;
+    }
+    setSelectedId(next.id);
+    setEvidenceIndex(0);
+    setAssetPathIndex(0);
+    setExpandedEvidence(false);
+    setAnnouncement(`Next open comment: ${next.id}`);
+    requestAnimationFrame(() => commentHeading.current?.focus());
+  }, [filtered, localState, selected?.id]);
+
+  const clearFilters = useCallback(() => {
+    setQuery("");
+    setSeverity("all");
+    setDecisionRole("all");
+    setStatus("all");
+    setChannel("all");
+    setDimension("all");
+    setMobilePane("queue");
+    setAnnouncement(`Filters cleared. ${findings.length} comments shown.`);
+    requestAnimationFrame(() => searchInput.current?.focus());
+  }, [findings.length]);
+
+  const openPrincipalConcern = useCallback((concern: PrincipalConcern) => {
+    const findingId = concern.finding_ids.find((id) => findings.some((finding) => finding.id === id));
+    if (!findingId) {
+      setAnnouncement(`${concern.id} has no active linked comment in this review`);
+      return;
+    }
+    openFinding(findingId, `Opened ${concern.id}: ${concern.title}`);
+  }, [findings, openFinding]);
+
+  const openMobilePane = useCallback((pane: "queue" | "comment" | "evidence") => {
+    setMobilePane(pane);
+    requestAnimationFrame(() => {
+      if (pane === "queue") (selected && findingRefs.current.get(selected.id) || searchInput.current)?.focus();
+      else if (pane === "comment") commentHeading.current?.focus();
+      else evidenceHeading.current?.focus();
+    });
+  }, [selected]);
+
+  const openOverview = useCallback(() => {
+    setReportView("none");
+    setDetailMode("overview");
+    setMobilePane("comment");
+    setAnnouncement("Opened review overview");
+    pushViewState({ view: "overview", finding: null, document: null, evidence: 0 });
+  }, [pushViewState]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const requestedReview = new URLSearchParams(window.location.search).get("review");
+      if (registry && requestedReview && registry.reviews.some((entry) => entry.slug === requestedReview) && requestedReview !== reviewSlug) {
+        setReviewSlug(requestedReview);
+        return;
+      }
+      const state = parseReviewUrlState(window.location.search);
+      applyingHistoryState.current = true;
+      setQueueOrder(state.order);
+      setSeverity((["critical", "major", "minor", "info"] as string[]).includes(state.severity) ? state.severity as Severity : "all");
+      setDecisionRole((["potentially_dispositive", "posture_material", "revision_value", "polish"] as string[]).includes(state.role) ? state.role as DecisionRole : "all");
+      setStatus((REVIEW_ACTION_DISPOSITIONS as readonly string[]).includes(state.status) ? state.status as LocalStatus : "all");
+      setChannel((["substance", "writing"] as string[]).includes(state.channel) ? state.channel as "substance" | "writing" : "all");
+      setDimension(findings.some((finding) => finding.dimension === state.dimension) ? state.dimension : "all");
+      if (state.view === "comment" && state.finding && findings.some((finding) => finding.id === state.finding)) {
+        const target = findings.find((finding) => finding.id === state.finding)!;
+        const filtersIncludeTarget = (state.severity === "all" || target.severity === state.severity)
+          && (state.role === "all" || target.decision_role === state.role)
+          && (state.status === "all" || (localStateRef.current[target.id]?.disposition || "open") === state.status)
+          && (state.channel === "all" || (target.report_channel || "substance") === state.channel)
+          && (state.dimension === "all" || target.dimension === state.dimension);
+        openFinding(state.finding, `Opened ${state.finding} from browser history`, true, !filtersIncludeTarget);
+        setEvidenceIndex(Math.min(state.evidence, Math.max(0, target.evidence.length - 1)));
+      } else if (state.view === "document" && state.document && documents.some((document) => document.id === state.document)) {
+        setReportView(state.document);
+        setDetailMode("overview");
+        setMobilePane("comment");
+        setAnnouncement(`Opened ${documents.find((document) => document.id === state.document)!.title} from browser history`);
+      } else {
+        setReportView("none");
+        setDetailMode("overview");
+        setMobilePane("comment");
+        setAnnouncement("Opened review overview from browser history");
+      }
+      window.setTimeout(() => { applyingHistoryState.current = false; }, 0);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [documents, findings, openFinding, registry, reviewSlug]);
+
+  useEffect(() => {
+    commentPane.current?.scrollTo({ top: 0 });
+    documentPane.current?.scrollTo({ top: 0 });
+  }, [selected?.id]);
+
+  useEffect(() => {
+    if (reportView === "none") return;
+    reportReader.current?.scrollTo({ top: 0 });
+    requestAnimationFrame(() => reportBackButton.current?.focus());
+  }, [reportView]);
+
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.isComposing || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const findingControl = target?.closest(".finding-row");
+      const interactive = target?.closest("input, textarea, select, button, a, summary, [contenteditable='true'], [role='dialog']");
+      if (event.key === "Escape" && mobilePane === "evidence") {
+        event.preventDefault();
+        openMobilePane("comment");
+        return;
+      }
+      if (event.key.toLowerCase() === "o") {
+        event.preventDefault();
+        openOverview();
+        return;
+      }
+      if (reportView === "none" && detailMode === "overview" && ["j", "k"].includes(event.key.toLowerCase())) {
+        const first = filtered[0] || findings[0];
+        if (first) {
+          event.preventDefault();
+          selectAndFocus(first.id);
+          setMobilePane("comment");
+          setAnnouncement(`Started with ${first.id}`);
+        }
+        return;
+      }
+      if (interactive && !findingControl) return;
+      if (reportView !== "none" || !filtered.length || !selected || !filtered.some((finding) => finding.id === selected.id)) return;
+      if (event.key === "/") {
+        event.preventDefault();
+        searchInput.current?.focus();
+      } else if (event.key.toLowerCase() === "j") {
+        event.preventDefault();
+        moveSelection(1);
+      } else if (event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        moveSelection(-1);
+      } else if (event.key.toLowerCase() === "a" && selected) {
+        if (event.repeat) return;
+        event.preventDefault();
+        markFindingStatus(selected.id, "ready_for_recheck");
+      } else if (event.key.toLowerCase() === "c" && selected) {
+        if (event.repeat) return;
+        event.preventDefault();
+        markFindingStatus(selected.id, "challenged");
+      } else if (event.key.toLowerCase() === "p" && selected) {
+        if (event.repeat) return;
+        event.preventDefault();
+        markFindingStatus(selected.id, "deferred");
+      } else if (event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        noteInput.current?.focus();
+        setAnnouncement("Author note focused");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [detailMode, filtered, findings, markFindingStatus, mobilePane, moveSelection, openMobilePane, openOverview, reportView, selectAndFocus, selected]);
+
+  useEffect(() => {
+    if (filtered.length && !filtered.some((finding) => finding.id === selectedId)) {
+      const next = filtered[0];
+      const shouldFocus = focusAfterFilter.current;
+      focusAfterFilter.current = false;
+      const frame = requestAnimationFrame(() => {
+        setSelectedId(next.id);
+        setEvidenceIndex(0);
+        setAssetPathIndex(0);
+        if (shouldFocus) findingRefs.current.get(next.id)?.focus();
+      });
+      return () => cancelAnimationFrame(frame);
+    } else if (!filtered.length && findings.length && focusAfterFilter.current) {
+      focusAfterFilter.current = false;
+      const frame = requestAnimationFrame(() => noResultsRef.current?.focus());
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [filtered, findings.length, selectedId]);
+
+  async function loadFiles(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files || []);
+    await loadSelectedFiles(files);
+    event.target.value = "";
+  }
+
+  async function loadSelectedFiles(files: File[]) {
+    if (!files.length) return;
+    const sequence = ++localLoadSequence.current;
+    setIsLocalLoading(true);
+    setLoadError("");
+    try {
+      if (files.length > MAX_SELECTED_FILE_COUNT) {
+        throw new Error(`The selected folder contains more than ${MAX_SELECTED_FILE_COUNT.toLocaleString()} files. Choose the review package itself or a smaller parent folder.`);
+      }
+      const paths = files.map(normalizedFilePath);
+      if (new Set(paths.map((path) => path.toLowerCase())).size !== paths.length) {
+        throw new Error("Duplicate relative file paths were selected");
+      }
+      const reviewRoot = inferReviewPackageRoot(paths);
+      const relativePath = (file: File) => relativeToReviewRoot(normalizedFilePath(file), reviewRoot);
+      const canonicalFile = (name: string, required = false, fallbackNames: string[] = []) => {
+        const selectedPath = selectReviewPackageFilePath({
+          paths,
+          reviewRoot,
+          canonicalPath: name,
+          fallbackPaths: fallbackNames,
+        });
+        if (required && !selectedPath) throw new Error(`The inferred review package is missing ${name}.`);
+        return selectedPath
+          ? files.find((file) => normalizedFilePath(file) === selectedPath) || null
+          : null;
+      };
+      const readText = async (file: File, limit: number) => {
+        if (file.size > limit) throw new Error(`${file.name} exceeds the local size limit`);
+        return file.text();
+      };
+
+      const findingsFile = canonicalFile("findings.json", true)!;
+      const runFile = canonicalFile("run.json", true)!;
+      const synthesisFile = canonicalFile("synthesis.json");
+      const manifestFile = canonicalFile("review-manifest.json");
+      const sourceManifestFile = canonicalFile("evidence/source-manifest.json", false, ["source-manifest.json"]);
+      const tablesFile = canonicalFile("evidence/tables.json", false, ["tables.json"]);
+      const figuresFile = canonicalFile("evidence/figures.json", false, ["figures.json"]);
+      const [findingsText, runText, synthesisText, manifestText, sourceManifestText, tablesText, figuresText] = await Promise.all([
+        readText(findingsFile, MAX_JSON_BYTES),
+        readText(runFile, MAX_JSON_BYTES),
+        synthesisFile ? readText(synthesisFile, MAX_JSON_BYTES) : Promise.resolve(null),
+        manifestFile ? readText(manifestFile, MAX_JSON_BYTES) : Promise.resolve(null),
+        sourceManifestFile ? readText(sourceManifestFile, MAX_JSON_BYTES) : Promise.resolve(null),
+        tablesFile ? readText(tablesFile, MAX_JSON_BYTES) : Promise.resolve(null),
+        figuresFile ? readText(figuresFile, MAX_JSON_BYTES) : Promise.resolve(null),
+      ]);
+      if (sequence !== localLoadSequence.current) return;
+
+      const nextLedger = validateLedger(parseJsonFile("findings.json", findingsText));
+      const nextRun = validateRun(parseJsonFile("run.json", runText));
+      const nextSynthesis = synthesisText === null ? null : validateSynthesis(parseJsonFile("synthesis.json", synthesisText));
+      const nextManifest = manifestText === null ? undefined : validateReviewDocumentManifest(manifestText);
+      const nextSourceManifest = sourceManifestText === null ? null : validateSourceManifest(parseJsonFile("source-manifest.json", sourceManifestText));
+      validateLedgerAnchors(nextLedger, nextSourceManifest);
+      const nextTables = tablesText === null ? null : parseJsonFile("tables.json", tablesText) as ExhibitManifest;
+      const nextFigures = figuresText === null ? null : parseJsonFile("figures.json", figuresText) as ExhibitManifest;
+      if (nextLedger.review_id !== nextRun.review_id) throw new Error("findings.json and run.json have different review IDs");
+      if (nextLedger.schema_version !== nextRun.schema_version) throw new Error("findings.json and run.json have different schema versions");
+      if (nextSynthesis && nextSynthesis.review_id !== nextLedger.review_id) throw new Error("synthesis.json has a different review ID");
+      if (nextManifest && nextManifest.review_id !== nextLedger.review_id) throw new Error("review-manifest.json has a different review ID");
+      if (nextSourceManifest && nextSourceManifest.review_id !== nextLedger.review_id) throw new Error("source-manifest.json has a different review ID");
+      validatePackageLinks(nextLedger, nextRun, nextSynthesis);
+
+      const declaredDocumentPaths = nextManifest?.documents.map((document) => document.path) || [];
+      const manuscriptPath = selectManuscriptPath({
+        paths,
+        reviewRoot,
+        declaredDocumentPaths,
+        sourcePaths: [
+          ...(nextSourceManifest?.sources || []).flatMap((source) => [source.extraction?.path, source.path]),
+          ...(nextRun.assessment_boundary?.sources || []).map((source) => source.path),
+        ].filter((path): path is string => Boolean(path)),
+      });
+      const manuscriptFile = manuscriptPath ? files.find((file) => normalizedFilePath(file) === manuscriptPath) || null : null;
+      const availableDocumentPaths = files
+        .filter((file) => /\.(md|markdown)$/i.test(file.name) && normalizedFilePath(file) !== manuscriptPath)
+        .map((file) => relativePath(file))
+        .filter((path): path is string => Boolean(path));
+      const definitions = discoverReviewDocuments(availableDocumentPaths, nextManifest);
+      const documentFiles = definitions.map((document) => {
+        const matches = files.filter((file) => relativePath(file) === document.path);
+        if (matches.length !== 1) throw new Error(`Review document ${document.path} is missing or ambiguous in the selected package.`);
+        return { definition: document, file: matches[0] };
+      });
+
+      const references = referencedExhibitPaths(nextTables, nextFigures);
+      if (references.length > MAX_REFERENCED_IMAGES) {
+        throw new Error(`The exhibit manifests reference more than ${MAX_REFERENCED_IMAGES.toLocaleString()} images.`);
+      }
+      const imageFiles = files.filter((file) => /\.(png|jpe?g|webp)$/i.test(file.name));
+      const imageMatches = matchReferencedImagePaths(imageFiles.map(normalizedFilePath), reviewRoot, references);
+      const resolvedImagePaths = new Set(Array.from(imageMatches.values()).filter((path): path is string => Boolean(path)));
+      const resolvedImageFiles = imageFiles.filter((file) => resolvedImagePaths.has(normalizedFilePath(file)));
+      for (const file of resolvedImageFiles) {
+        if (file.size > MAX_LOCAL_IMAGE_BYTES) throw new Error(`${file.name} exceeds the local image size limit`);
+      }
+      const relevantFiles = Array.from(new Set([
+        findingsFile, runFile, synthesisFile, manifestFile, sourceManifestFile, tablesFile, figuresFile, manuscriptFile,
+        ...documentFiles.map(({ file }) => file), ...resolvedImageFiles,
+      ].filter((file): file is File => Boolean(file))));
+      const relevantBytes = relevantFiles.reduce((sum, file) => sum + file.size, 0);
+      if (relevantFiles.length > MAX_LOCAL_PACKAGE_FILES || relevantBytes > MAX_LOCAL_PACKAGE_BYTES) {
+        throw new Error("The inferred review package exceeds the local processing limit. Choose a smaller package with only its review artifacts and referenced renders.");
+      }
+
+      const [nextManuscript, documentContents] = await Promise.all([
+        manuscriptFile ? readText(manuscriptFile, MAX_MANUSCRIPT_BYTES) : Promise.resolve(""),
+        Promise.all(documentFiles.map(({ file }) => readText(file, MAX_MANUSCRIPT_BYTES))),
+      ]);
+      if (sequence !== localLoadSequence.current) return;
+      const nextDocuments = documentFiles.map(({ definition }, index) => ({ ...definition, content: documentContents[index] }));
+
+      const urlByFilePath = new Map<string, string>();
+      const nextObjectUrls = resolvedImageFiles.map((file) => {
+        const url = URL.createObjectURL(file);
+        urlByFilePath.set(normalizedFilePath(file), url);
+        return url;
+      });
+      const urlByReference = new Map<string, string>();
+      for (const [reference, matchedPath] of imageMatches) {
+        if (matchedPath && urlByFilePath.has(matchedPath)) urlByReference.set(reference, urlByFilePath.get(matchedPath)!);
+      }
+
+      for (const url of localObjectUrls.current) URL.revokeObjectURL(url);
+      localObjectUrls.current = nextObjectUrls;
+      setLedger(nextLedger);
+      setRun(nextRun);
+      setSynthesis(nextSynthesis);
+      setManuscript(nextManuscript);
+      setDocuments(nextDocuments);
+      setReportView("none");
+      setDetailMode("overview");
+      setSelectedId(nextLedger.findings?.[0]?.id || "");
+      const restoredActions = restoreBrowserReviewActions(window.localStorage, {
+        review_id: nextLedger.review_id,
+        review_fingerprint: reviewFingerprint(nextLedger),
+        finding_ids: nextLedger.findings.map((finding) => finding.id),
+      });
+      localStateRef.current = restoredActions.entries;
+      setLocalState(restoredActions.entries);
+      setNoteDrafts({});
+      setHandoffWarning(restoredActions.warning);
+      setQuery("");
+      setSeverity("all");
+      setDecisionRole("all");
+      setStatus("all");
+      setChannel("all");
+      setDimension("all");
+      setEvidenceIndex(0);
+      setAssetPathIndex(0);
+      try {
+        const savedOrder = window.localStorage.getItem(`review-desk:queue-order:${nextLedger.review_id}`);
+        setQueueOrder(savedOrder === "paper" ? "paper" : "importance");
+      } catch { setQueueOrder("importance"); }
+      setActionNotice("");
+      setUndoStatusChange(null);
+      setPendingDocumentAnchor(null);
+      setMobilePane("comment");
+      loadedReviewSlug.current = "";
+      setReviewSlug("");
+      const url = new URL(window.location.href);
+      url.searchParams.delete("review");
+      window.history.replaceState({}, "", url);
+      setExhibitAssets(manifestAssets(nextTables, nextFigures, (path) => urlByReference.get(normalizePackagePath(path)) || null));
+      setSourceAnchors(Object.fromEntries((nextSourceManifest?.anchors || []).map((anchor) => [anchor.id, anchor])));
+      setAnnouncement(`Loaded review ${nextLedger.review_id} with ${nextLedger.findings.length} findings${nextManuscript ? " and manuscript context" : "; no manuscript was loaded"}.`);
+    } catch (error) {
+      if (sequence === localLoadSequence.current) {
+        setLoadError(error instanceof Error ? error.message : "Select findings.json and run.json from the same review. Manuscript Markdown is optional.");
+      }
+    } finally {
+      if (sequence === localLoadSequence.current) setIsLocalLoading(false);
+    }
+  }
+
+  function exportSession() {
+    if (!ledger) return;
+    const payload = JSON.stringify(generateReviewActionsPayload({
+      source_review_id: ledger.review_id,
+      source_review_fingerprint: reviewFingerprint(ledger),
+      source_manuscripts: privacySafeSourceManuscripts(run?.assessment_boundary?.sources || []),
+      entries: localStateRef.current,
+    }), null, 2);
+    const url = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${ledger.review_id}-review-actions.json`;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showActionNotice("Review actions exported. Import this file with the next review round to reconcile exact finding IDs.");
+  }
+
+  async function importActions(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !ledger) return;
+    try {
+      if (file.size > MAX_JSON_BYTES) throw new Error("The review-actions file exceeds the local size limit");
+      const result = reconcileReviewActions(await file.text(), {
+        review_id: ledger.review_id,
+        review_fingerprint: reviewFingerprint(ledger),
+        finding_ids: findings.map((finding) => finding.id),
+      });
+      if (!result.review_id_matches) throw new Error(result.warnings.map((warning) => warning.message).join(" "));
+      const merged = mergeReviewActionEntries(localStateRef.current, result.entries);
+      const importedAt = new Date().toISOString();
+      const entriesWithProvenance = { ...merged.entries };
+      for (const findingId of merged.applied_finding_ids) {
+        entriesWithProvenance[findingId] = recordReviewActionImport(entriesWithProvenance[findingId], importedAt);
+      }
+      localStateRef.current = entriesWithProvenance;
+      setLocalState(entriesWithProvenance);
+      setNoteDrafts({});
+      const details = [
+        `${merged.applied_finding_ids.length} applied`,
+        merged.stale_finding_ids.length ? `${merged.stale_finding_ids.length} stale` : "",
+        merged.conflict_finding_ids.length ? `${merged.conflict_finding_ids.length} conflicts kept local` : "",
+        result.unmatched_entry_ids.length ? `${result.unmatched_entry_ids.length} unmatched` : "",
+        !result.fingerprint_matches ? "ledger changed; exact IDs only" : "",
+      ].filter(Boolean).join(" · ");
+      setHandoffWarning([
+        ...result.warnings.map((warning) => warning.message),
+        ...merged.warnings.map((warning) => warning.message),
+      ].join(" "));
+      showActionNotice(`Review actions: ${details}. Imported changes remain author claims until rechecked.`);
+      setAnnouncement(`Applied actions for ${merged.applied_finding_ids.length} findings; ${merged.conflict_finding_ids.length} conflicts kept local`);
+      setLoadError("");
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "The review-actions file could not be imported.");
+    }
+  }
+
+  async function copyRevisionBrief() {
+    if (!selected) return;
+    const activeEvidence = selected.evidence[activeEvidenceIndex];
+    const text = `${selected.id}: ${shortTitle(selected)}\nChannel: ${channelLabel(selected)}\nPublication role: ${decisionRoleLabel(selected.decision_role)}\nSeverity: ${selected.severity}\nRepairability: ${readableState(selected.repairability)}\nAuthor disposition: ${readableState(selectedEntry.disposition)}\n\nIssue: ${selected.issue}\n\nRelevant text (${readableState(activeEvidence?.type)}): ${evidenceText(activeEvidence)}\nSource: ${activeEvidence?.source || "not available"}\nLocation: ${locator(selected, activeEvidenceIndex)}\n\nConcern: ${mergeDistinctText(selected.why_it_matters, selected.reader_effect)}\n\nSuggestions: ${mergeDistinctText(selected.fix.what, selected.fix.how)}\n\nReady to close when: ${selected.fix.resolved_when || "Complete the stated revision path."}\n\nOptional author note: ${selectedEntry.response_note || "None"}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setAnnouncement(`Copied revision brief for ${selected.id}`);
+      setLoadError("");
+      showActionNotice(`Copied the revision brief for ${selected.id}.`);
+    } catch {
+      setLoadError("The browser blocked clipboard access. Select and copy the comment text manually.");
+    }
+  }
+
+  function onListKey(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const next = filtered[index + (event.key === "ArrowDown" ? 1 : -1)];
+      const wrapped = next || filtered[event.key === "ArrowDown" ? 0 : filtered.length - 1];
+      if (wrapped) {
+        selectAndFocus(wrapped.id);
+        setAnnouncement(`Selected ${wrapped.id}: ${shortTitle(wrapped)}`);
+      }
+    }
+  }
+
+  const activeEvidenceIndex = Math.min(evidenceIndex, Math.max(0, (selected?.evidence.length || 1) - 1));
+  const evidence = selected?.evidence[activeEvidenceIndex] || selected?.evidence[0];
+  const evidenceKind = evidence?.type === "figure" ? "figure" : evidence?.type === "table_cell" ? "table" : null;
+  const exhibit = evidenceKind && evidence?.locator.exhibit ? exhibitAssets[exhibitKey(evidenceKind, evidence.locator.exhibit)] : undefined;
+  const activeExhibitPath = exhibit?.paths[Math.min(assetPathIndex, exhibit.paths.length - 1)];
+  const loadingReviewTitle = isLocalLoading ? "local review package" : registry?.reviews.find((entry) => entry.slug === reviewSlug)?.title || "review";
+  const bannerMessage = loadError || persistenceWarning || handoffWarning;
+  const packageWarning = run?.status && run.status !== "complete"
+    ? `This package is ${readableState(run.status)}. Comments and reports may still change; do not treat this view as final.`
+    : run && !run.verification_passed
+      ? "This package has not passed its declared verification gate. Treat every finding as provisional."
+      : "";
+  const activeDocument = documents.find((document) => document.id === reportView) || documents[0];
+  const activeReport = activeDocument?.content || "";
+  const reportComponents: MarkdownComponents = {
+    img: ({ alt }) => <span className="blocked-report-image">[Image omitted from report view{alt ? `: ${alt}` : ""}]</span>,
+    a: ({ children, href }) => {
+      const linked = resolveReviewDocumentLink(activeDocument?.path, href, documents);
+      if (linked) {
+        return <button type="button" className="report-document-link" onClick={() => {
+          setReportView(linked.document.id);
+          pushViewState({ view: "document", document: linked.document.id, finding: null, evidence: 0 });
+          if (linked.fragment) {
+            setPendingDocumentAnchor({ documentId: linked.document.id, fragment: linked.fragment });
+            setAnnouncement(`Opening ${linked.document.title} at the linked section.`);
+          } else {
+            setPendingDocumentAnchor(null);
+            setAnnouncement(`Opened review document: ${linked.document.title}`);
+            requestAnimationFrame(() => reportHeading.current?.focus());
+          }
+        }}>{children}</button>;
+      }
+      return href?.startsWith("http")
+        ? <a href={href} target="_blank" rel="noopener noreferrer">{children}<span className="visually-hidden"> (opens in a new tab)</span></a>
+        : <a href={href}>{children}</a>;
+    },
+    code: ({ children }) => {
+      const token = String(children).trim();
+      const linkedFinding = findings.find((finding) => finding.id === token);
+      return linkedFinding ? <button type="button" className="report-finding-link" onClick={() => openFinding(
+        linkedFinding.id,
+        `Opened ${linkedFinding.id} from ${activeDocument?.title || "review document"}`,
+      )}>{token}</button> : <code>{children}</code>;
+    },
+  };
+  const documentGroups = Object.entries(REVIEW_DOCUMENT_GROUP_LABELS).map(([group, label]) => ({
+    group,
+    label,
+    documents: documents.filter((document) => document.group === group),
+  })).filter((group) => group.documents.length);
+  const evidenceContent = evidenceText(evidence);
+  const manuscriptExcerpt = useMemo(() => {
+    const message = (value: string) => ({ before: "", highlight: "", after: "", message: value, exact: false });
+    if (!manuscript) return message("No manuscript text is loaded for this review. The structured evidence quote remains available.");
+    if (!evidenceContent || evidence?.type === "absence_scope") return message("Use the structured source and locator for this scope-based evidence; no unrelated manuscript opening is shown.");
+    const sourceAnchor = evidence?.anchor_id ? sourceAnchors[evidence.anchor_id] : undefined;
+    if (sourceAnchor && sourceAnchor.start_char !== null && sourceAnchor.end_char !== null) {
+      const { start_char: start, end_char: end } = sourceAnchor;
+      if (end <= manuscript.length && sha256Hex(manuscript.slice(start, end)) === sourceAnchor.content_sha256) {
+        return {
+          before: manuscript.slice(Math.max(0, start - 700), start),
+          highlight: manuscript.slice(start, end),
+          after: manuscript.slice(end, Math.min(manuscript.length, end + 1900)),
+          message: "",
+          exact: true,
+        };
+      }
+      return message(`Source anchor ${sourceAnchor.id} did not match the loaded manuscript text and was not highlighted. Use the structured evidence and verify the source package.`);
+    }
+    const clean = evidenceContent.replace(/[“”]/g, '"').replace(/\.\.\..*$/, "");
+    const normalizedManuscript = manuscript.replace(/[“”]/g, '"');
+    const tokens = clean.match(/[\p{L}\p{N}]+/gu)?.filter((token) => token.length > 1).slice(0, 12) || [];
+    if (tokens.length < 4) return message("The evidence anchor is too short for a safe manuscript match. Use the structured source and locator.");
+    const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const anchor = new RegExp(tokens.map(escape).join("[^\\p{L}\\p{N}]+"), "iu");
+    const index = anchor.exec(normalizedManuscript)?.index ?? -1;
+    if (index < 0) return message("The quoted passage could not be matched safely in the loaded manuscript. Use the structured source and locator; no unrelated opening-page text is shown.");
+    return { before: manuscript.slice(Math.max(0, index - 700), Math.min(manuscript.length, index + 1900)), highlight: "", after: "", message: "", exact: false };
+  }, [evidence?.anchor_id, evidence?.type, evidenceContent, manuscript, sourceAnchors]);
+
+  useEffect(() => {
+    if (!pendingDocumentAnchor || activeDocument?.id !== pendingDocumentAnchor.documentId) return;
+    const container = reportReader.current;
+    if (!container) return;
+    let finished = false;
+    const focusTarget = () => {
+      const target = container.ownerDocument.getElementById(pendingDocumentAnchor.fragment);
+      if (!target || !container.contains(target)) return false;
+      finished = true;
+      if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+      target.scrollIntoView({ block: "start" });
+      target.focus({ preventScroll: true });
+      setAnnouncement(`Opened ${activeDocument.title} at ${target.textContent?.trim() || "the linked section"}.`);
+      setPendingDocumentAnchor(null);
+      return true;
+    };
+    if (focusTarget()) return;
+    const observer = new MutationObserver(() => {
+      if (focusTarget()) observer.disconnect();
+    });
+    observer.observe(container, { childList: true, subtree: true });
+    const timeout = window.setTimeout(() => {
+      if (finished) return;
+      observer.disconnect();
+      setAnnouncement(`Opened ${activeDocument.title}, but the linked section #${pendingDocumentAnchor.fragment} was not found.`);
+      setPendingDocumentAnchor(null);
+      reportHeading.current?.focus();
+    }, 1500);
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(timeout);
+    };
+  }, [activeDocument, activeReport, pendingDocumentAnchor]);
+
+  if (!ledger || !run) {
+    if (isLocalLoading) {
+      return (
+        <main className="loading-shell" aria-busy="true">
+          <div className="loading-mark" aria-hidden="true">RD</div>
+          <p>Checking the local review package…</p>
+        </main>
+      );
+    }
+    if (registryUnavailable || loadError) {
+      return (
+        <main className="welcome-shell">
+          <section className="welcome-card" aria-labelledby="welcome-title">
+            <div className="loading-mark" aria-hidden="true">RD</div>
+            <span className="eyebrow">Local Review Desk</span>
+            <h1 id="welcome-title">Open a review without uploading it.</h1>
+            <p>Choose the paper folder to load its nested review files together. They stay in this browser and are never sent to a server.</p>
+            <div className="file-requirements">
+              <div><strong>Required</strong><span>findings.json · run.json</span></div>
+              <div><strong>Optional context</strong><span>synthesis.json · review-manifest.json · all report/audit Markdown · manuscript · exhibit manifests and renders</span></div>
+            </div>
+            {loadError && <div className="welcome-error" role="alert">{loadError}</div>}
+            <div
+              className="drop-zone"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => { event.preventDefault(); void loadSelectedFiles(Array.from(event.dataTransfer.files)); }}
+            >
+              <div className="drop-zone-actions">
+                <button onClick={() => folderInput.current?.click()}>Open review folder</button>
+                <button className="secondary" onClick={() => fileInput.current?.click()}>Choose individual files</button>
+              </div>
+              <span>Folder mode resolves nested manifests and duplicate image names; file mode remains available for small bundles.</span>
+            </div>
+            <p className="privacy-note">Canonical review files remain read-only. Progress and notes are stored separately in local browser storage.</p>
+            <p className="welcome-demo-hint"><strong>Looking for the walkthrough?</strong> Start the local synthetic example with <code>npm run dev:bundled</code>. Generated reports remain fully usable without this viewer.</p>
+          </section>
+          <input id="review-files" name="review-files" accept=".json,.md,.markdown,.txt,.png,.jpg,.jpeg,.webp" aria-label="Choose local review files" ref={fileInput} className="visually-hidden" type="file" multiple onChange={loadFiles} />
+          <input id="review-folder" name="review-folder" aria-label="Choose local review folder" ref={folderInput} className="visually-hidden" type="file" multiple {...{ webkitdirectory: "", directory: "" }} onChange={loadFiles} />
+        </main>
+      );
+    }
+    return (
+      <main className="loading-shell">
+        <div className="loading-mark">RD</div>
+        <p>{loadError || "Opening the review ledger…"}</p>
+        {loadError && <button onClick={() => folderInput.current?.click()}>Open review folder</button>}
+        <input id="review-files" name="review-files" accept=".json,.md,.markdown,.txt,.png,.jpg,.jpeg,.webp" aria-label="Choose local review files" ref={fileInput} className="visually-hidden" type="file" multiple onChange={loadFiles} />
+        <input id="review-folder" name="review-folder" aria-label="Choose local review folder" ref={folderInput} className="visually-hidden" type="file" multiple {...{ webkitdirectory: "", directory: "" }} onChange={loadFiles} />
+      </main>
+    );
+  }
+
+  if (!selected) {
+    if (isReviewLoading) {
+      return (
+        <main className="loading-shell" aria-busy="true">
+          <div className="loading-mark" aria-hidden="true">RD</div>
+          <p>Checking {loadingReviewTitle}…</p>
+        </main>
+      );
+    }
+    return (
+      <main className="complete-review-shell">
+        <section className="complete-review-card">
+          <span className="eyebrow">{run.status === "complete" && run.verification_passed ? "Review complete" : "Review package"}</span>
+          <h1>No active comments remain.</h1>
+          <p>The package loaded successfully. Canonical reports and audit documents remain available below.</p>
+          {packageWarning && <div className="package-warning" role="alert"><strong>Non-final review package</strong><span>{packageWarning}</span></div>}
+          {synthesis && (
+            <section className="complete-synthesis" aria-label="Overall review assessment">
+              <span className={`posture-chip posture-${synthesis.review_posture}`}>{POSTURE_LABELS[synthesis.review_posture]}</span>
+              <p>{synthesis.overall_assessment}</p>
+            </section>
+          )}
+          <div className="complete-review-actions">
+            <button onClick={() => folderInput.current?.click()}>Open another folder</button>
+            <button onClick={exportSession}>Export actions</button>
+          </div>
+          {documents.length ? <>
+            <label className="report-picker">
+              <span>Choose a report, plan, or audit document</span>
+              <select value={activeDocument?.id || documents[0].id} onChange={(event) => { setReportView(event.target.value); pushViewState({ view: "document", document: event.target.value, finding: null, evidence: 0 }); }}>
+                {documentGroups.map((group) => (
+                  <optgroup key={group.group} label={group.label}>
+                    {group.documents.map((document) => <option key={document.id} value={document.id}>{document.title}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+            </label>
+            <article ref={reportReader} className="report-document">
+              <RenderedMarkdown components={reportComponents}>{activeReport}</RenderedMarkdown>
+            </article>
+          </> : <p>No narrative document was included in this package.</p>}
+        </section>
+        <input id="complete-review-folder" name="complete-review-folder" aria-label="Choose local review folder" ref={folderInput} className="visually-hidden" type="file" multiple {...{ webkitdirectory: "", directory: "" }} onChange={loadFiles} />
+      </main>
+    );
+  }
+
+  return (
+    <main className="app-shell" aria-busy={isReviewLoading}>
+      <a className="skip-link" href="#findings-panel">Skip to comments</a>
+      <a className="skip-link" href="#review-detail">Skip to review detail</a>
+      <h1 className="visually-hidden">Review Desk for {run.review_id}</h1>
+      <header className="topbar" data-testid="compact-header">
+        <div className="brand-lockup">
+          <span className="brand-mark" aria-hidden="true">RD</span>
+          <div>
+            <strong>Review Desk</strong>
+            <span>{run.paper_family.replaceAll("-", " ")}</span>
+          </div>
+        </div>
+        {registry ? (
+          <label className="review-picker header-review-picker">
+            <span className="visually-hidden">Choose bundled review</span>
+            <select id="bundled-review" name="bundled-review" aria-label="Choose bundled review" value={reviewSlug} disabled={isReviewLoading} onChange={(event) => { setLoadError(""); setReviewSlug(event.target.value); }}>
+              {!reviewSlug && <option value="">Local review</option>}
+              {registry.reviews.map((entry) => <option key={entry.slug} value={entry.slug}>{entry.title}</option>)}
+            </select>
+          </label>
+        ) : <span className="local-review-title">Local review</span>}
+        <div className="compact-review-summary" aria-label="Review status summary">
+          {synthesis && <span className={`posture-chip posture-${synthesis.review_posture}`}>{POSTURE_LABELS[synthesis.review_posture]}</span>}
+          <span className="compact-severity-counts">
+            {severityCounts.critical > 0 && <span>{severityCounts.critical} critical</span>}
+            {severityCounts.major > 0 && <span>{severityCounts.major} major</span>}
+            {severityCounts.minor > 0 && <span>{severityCounts.minor} minor</span>}
+            {severityCounts.info > 0 && <span>{severityCounts.info} info</span>}
+          </span>
+          <span className="compact-progress"><span className="compact-progress-track segmented" aria-hidden="true"><i className="major-segment" style={{ width: `${findings.length ? (majorReady / findings.length) * 100 : 0}%` }} /><i className="minor-segment" style={{ width: `${findings.length ? (minorReady / findings.length) * 100 : 0}%` }} /></span>{majorReady}/{majorFindings.length} major ready · {minorReady}/{minorFindings.length} minor ready · {triagedCount} triaged</span>
+        </div>
+        <details className="top-menu" ref={topMenu}>
+          <summary aria-label="Open review menu">Menu</summary>
+          <div className="top-menu-panel">
+            <button disabled={isReviewLoading} onClick={() => { if (topMenu.current) topMenu.current.open = false; folderInput.current?.click(); }}>Open folder</button>
+            <button disabled={isReviewLoading || !documents.length} onClick={() => { if (topMenu.current) topMenu.current.open = false; const id = documents[0]?.id; if (id) { setReportView(id); setMobilePane("comment"); pushViewState({ view: "document", document: id, finding: null, evidence: 0 }); } }}>Documents</button>
+            <button disabled={isReviewLoading} onClick={() => { if (topMenu.current) topMenu.current.open = false; actionsInput.current?.click(); }}>Import actions</button>
+            <button disabled={isReviewLoading} onClick={() => { if (topMenu.current) topMenu.current.open = false; exportSession(); }}>Export actions</button>
+            <div className="privacy-controls" role="group" aria-label="Browser storage for actions">
+              <strong>Action storage</strong>
+              <button aria-pressed={persistenceMode === "local"} onClick={() => { setPersistenceMode("local"); setPersistenceWarning(""); showActionNotice("Actions will be saved in this browser after changes."); }}>Save in this browser</button>
+              <button aria-pressed={persistenceMode === "session"} onClick={() => {
+                if (!ledger) return;
+                const removed = clearBrowserReviewActions(window.localStorage, ledger.review_id);
+                window.localStorage.removeItem(`review-desk:queue-order:${ledger.review_id}`);
+                setPersistenceMode("session");
+                setPersistenceWarning("");
+                setHandoffWarning("");
+                showActionNotice(`This-tab-only mode enabled. Removed ${removed} saved action snapshot${removed === 1 ? "" : "s"} for this review.`);
+              }}>This tab only</button>
+              <button className="danger-text" onClick={() => {
+                if (!ledger || !window.confirm(`Clear every saved action snapshot for ${ledger.review_id}? The current tab will keep its present actions until closed.`)) return;
+                const removed = clearBrowserReviewActions(window.localStorage, ledger.review_id);
+                window.localStorage.removeItem(`review-desk:queue-order:${ledger.review_id}`);
+                setPersistenceMode("session");
+                setHandoffWarning("");
+                showActionNotice(`Cleared ${removed} saved action snapshot${removed === 1 ? "" : "s"}. Current actions remain in this tab.`);
+              }}>Clear saved snapshots</button>
+            </div>
+            <details className="shortcut-menu"><summary>Keyboard shortcuts</summary><p><kbd>J</kbd>/<kbd>K</kbd> move · <kbd>A</kbd> recheck · <kbd>C</kbd> challenge · <kbd>P</kbd> defer · <kbd>N</kbd> note</p></details>
+          </div>
+        </details>
+        <input id="review-files" name="review-files" accept=".json,.md,.markdown,.txt,.png,.jpg,.jpeg,.webp" aria-label="Choose local review files" ref={fileInput} className="visually-hidden" type="file" multiple disabled={isReviewLoading} onChange={loadFiles} />
+        <input id="review-folder" name="review-folder" aria-label="Choose local review folder" ref={folderInput} className="visually-hidden" type="file" multiple disabled={isReviewLoading} {...{ webkitdirectory: "", directory: "" }} onChange={loadFiles} />
+        <input id="review-actions" name="review-actions" accept=".json" aria-label="Import review actions" ref={actionsInput} className="visually-hidden" type="file" disabled={isReviewLoading} onChange={importActions} />
+      </header>
+
+      {!isReviewLoading && (bannerMessage || packageWarning) && <div className="notice-stack">
+        {bannerMessage && <div className="error-banner" role={loadError ? "alert" : "status"}>{bannerMessage}</div>}
+        {packageWarning && <div className="package-warning" role="alert"><strong>Non-final review package</strong><span>{packageWarning}</span></div>}
+      </div>}
+      {actionNotice && <div className="action-toast" role="status"><span>{actionNotice}</span>{undoStatusChange && <button onClick={undoLastStatusChange}>Undo status</button>}</div>}
+
+      {isReviewLoading ? (
+        <section id="review-detail" className="bundle-loading-panel" role="status" aria-live="polite" tabIndex={-1}>
+          <div className="loading-mark" aria-hidden="true">RD</div>
+          <h1>Loading {loadingReviewTitle}</h1>
+          <p>{isLocalLoading ? "The current review is hidden until the selected local package has passed compatibility checks." : "The current review is hidden until the selected bundle has loaded and passed compatibility checks."}</p>
+        </section>
+      ) : <div className="workspace-grid">
+        <nav className="mobile-view-switcher" aria-label="Review workspace panes">
+          <button aria-pressed={mobilePane === "queue"} onClick={() => openMobilePane("queue")}>Queue</button>
+          <button aria-pressed={mobilePane === "comment"} onClick={() => openMobilePane("comment")}>{reportView !== "none" ? "Document" : detailMode === "overview" ? "Overview" : "Comment"}</button>
+          <button aria-pressed={mobilePane === "evidence"} disabled={!filtered.length || detailMode !== "comment" || reportView !== "none"} onClick={() => openMobilePane("evidence")}>Evidence</button>
+        </nav>
+        <aside id="findings-panel" className={`finding-rail ${mobilePane !== "queue" ? "mobile-hidden" : ""}`} aria-label="Review findings">
+          <div className="rail-controls">
+          {synthesis && (
+            <button className="orientation-strip" onClick={openOverview}>
+              <span className={`posture-chip posture-${synthesis.review_posture}`}>{POSTURE_LABELS[synthesis.review_posture]}</span>
+              <strong>{synthesis.principal_concerns.length} principal {synthesis.principal_concerns.length === 1 ? "concern" : "concerns"}</strong>
+              <span>View overview →</span>
+            </button>
+          )}
+          <div className="rail-header">
+            <h2>Comments</h2>
+            <span className="rail-count" aria-label={`${filtered.length} of ${findings.length} comments shown`}>{activeFilters ? `${filtered.length} of ${findings.length}` : findings.length}</span>
+          </div>
+          <div className="queue-order" role="group" aria-label="Order comments">
+            <button aria-pressed={queueOrder === "importance"} onClick={() => { setQueueOrder("importance"); try { if (persistenceMode === "local") window.localStorage.setItem(`review-desk:queue-order:${ledger.review_id}`, "importance"); } catch { /* preference remains session-local */ } }}>Importance</button>
+            <button aria-pressed={queueOrder === "paper"} onClick={() => { setQueueOrder("paper"); try { if (persistenceMode === "local") window.localStorage.setItem(`review-desk:queue-order:${ledger.review_id}`, "paper"); } catch { /* preference remains session-local */ } }}>Paper order</button>
+          </div>
+          <label className="search-field">
+            <span className="visually-hidden">Search comments</span>
+            <input id="review-search" name="review-search" aria-keyshortcuts="/" ref={searchInput} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search object, evidence, fix, or note" />
+            <kbd>/</kbd>
+          </label>
+          <details className="filter-popover">
+            <summary>Filters{activeFilters ? ` · ${activeFilters} active` : ""}</summary>
+            <div className="filter-row">
+            <select id="status-filter" name="status-filter" value={status} onChange={(event) => setStatus(event.target.value as "all" | LocalStatus)} aria-label="Filter by progress">
+              <option value="all">All progress</option>
+              <option value="open">Open</option>
+              <option value="ready_for_recheck">Ready for recheck</option>
+              <option value="challenged">Challenged</option>
+              <option value="deferred">Deferred</option>
+            </select>
+            <select id="channel-filter" name="channel-filter" value={channel} onChange={(event) => setChannel(event.target.value as "all" | "substance" | "writing")} aria-label="Filter by report channel">
+              <option value="all">All comments ({findings.length})</option>
+              <option value="substance">Substance ({substanceCount})</option>
+              <option value="writing">Writing ({writingCount})</option>
+            </select>
+              <select id="severity-filter" name="severity-filter" value={severity} onChange={(event) => setSeverity(event.target.value as "all" | Severity)} aria-label="Filter by severity">
+                <option value="all">All severities</option>
+                <option value="critical">Critical</option>
+                <option value="major">Major</option>
+                <option value="minor">Minor</option>
+                <option value="info">Information</option>
+              </select>
+              <select id="decision-role-filter" name="decision-role-filter" value={decisionRole} onChange={(event) => setDecisionRole(event.target.value as "all" | DecisionRole)} aria-label="Filter by publication relevance">
+                <option value="all">All publication roles</option>
+                <option value="potentially_dispositive">Could prevent publication</option>
+                <option value="posture_material">Recommendation material</option>
+                <option value="revision_value">Revision value</option>
+                <option value="polish">Polish</option>
+              </select>
+              <select id="dimension-filter" name="dimension-filter" value={dimension} onChange={(event) => setDimension(event.target.value)} aria-label="Filter by review dimension">
+                <option value="all">All dimensions</option>
+                {dimensions.map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </div>
+            <p className="filter-help">Publication role is recommendation relevance; severity is the technical consequence.</p>
+            {activeFilters > 0 && <button className="clear-filters" onClick={clearFilters}>Clear all filters</button>}
+          </details>
+          </div>
+          <nav className="finding-list" aria-label={`${filtered.length} findings in the current filter`}>
+            {filtered.map((finding, index) => {
+              const entry = localState[finding.id] || defaultEntry(finding.id);
+              const showSection = queueOrder === "paper" && (index === 0 || paperSection(filtered[index - 1]) !== paperSection(finding));
+              return (
+                <div key={finding.id} className="finding-group-row">
+                {showSection && <h3 className="finding-section-heading">{paperSection(finding)}</h3>}
+                <button
+                  ref={(node) => { if (node) findingRefs.current.set(finding.id, node); else findingRefs.current.delete(finding.id); }}
+                  className={`finding-row ${finding.id === selected.id ? "selected" : ""} severity-${finding.severity}`}
+                  onClick={() => { selectAndFocus(finding.id); setMobilePane("comment"); setAnnouncement(`Selected ${finding.id}: ${shortTitle(finding)}`); requestAnimationFrame(() => commentHeading.current?.focus()); }}
+                  onKeyDown={(event) => onListKey(event, index)}
+                  aria-keyshortcuts="J K A C P N"
+                  aria-current={finding.id === selected.id ? "true" : undefined}
+                  tabIndex={finding.id === selected.id ? 0 : -1}
+                >
+                  <span className="rank">{finding.importance_rank}</span>
+                  <span className="finding-copy">
+                    <span className="finding-kicker">{finding.id} · {channelLabel(finding)}</span>
+                    <strong>{shortTitle(finding)}</strong>
+                    <span className="row-semantics">
+                      <span className={`row-severity severity-${finding.severity}`}>{finding.severity}</span>
+                      <span className={`row-role role-${finding.decision_role || "unclassified"}`}>{shortDecisionRoleLabel(finding.decision_role)}</span>
+                    </span>
+                  </span>
+                  <span className={`status-dot status-${entry.disposition}`} role="img" aria-label={`Author status: ${readableState(entry.disposition)}`} />
+                </button>
+                </div>
+              );
+            })}
+            {!filtered.length && <p className="empty-state">No comments match these filters.</p>}
+          </nav>
+        </aside>
+
+        {reportView !== "none" ? (
+        <section id="review-detail" ref={reportReader} className={`report-reader side-by-side-reader ${mobilePane !== "comment" ? "mobile-hidden" : ""}`} aria-labelledby="report-reader-title" tabIndex={-1}>
+          <h2 id="report-reader-title" ref={reportHeading} className="visually-hidden" tabIndex={-1}>Review document reader</h2>
+          <div className="report-toolbar">
+            <button ref={reportBackButton} className="report-close" onClick={openOverview}>← Overview</button>
+            <label className="report-picker">
+              <span>Document</span>
+              <select value={activeDocument?.id || ""} onChange={(event) => { setReportView(event.target.value); pushViewState({ view: "document", document: event.target.value, finding: null, evidence: 0 }); }}>
+                {documentGroups.map((group) => <optgroup key={group.group} label={group.label}>{group.documents.map((document) => <option key={document.id} value={document.id}>{document.title}</option>)}</optgroup>)}
+              </select>
+            </label>
+          </div>
+          <article className="report-document">
+            <RenderedMarkdown components={reportComponents}>{activeReport || "This report file was not included in the selected review bundle."}</RenderedMarkdown>
+          </article>
+        </section>
+        ) : detailMode === "overview" ? (
+        <article id="review-detail" className={`comment-pane overview-pane ${mobilePane !== "comment" ? "mobile-hidden" : ""}`} aria-labelledby="overview-title" tabIndex={-1}>
+          <div className="overview-scroll">
+            <div className="overview-heading">
+              {synthesis && <span className={`posture-chip posture-${synthesis.review_posture}`}>{POSTURE_LABELS[synthesis.review_posture]}</span>}
+              <h2 id="overview-title">Review overview</h2>
+              <p>{synthesis?.overall_assessment || "Start with the referee report, then work through the detailed comments."}</p>
+            </div>
+            {synthesis?.principal_concerns.length ? <section className="overview-concerns" aria-labelledby="principal-concerns-title">
+              <h3 id="principal-concerns-title">Principal concerns</h3>
+              {synthesis.principal_concerns.map((concern, index) => <button key={concern.id} onClick={() => openPrincipalConcern(concern)}><span>{index + 1}</span><strong>{concern.title}</strong><small>{concern.finding_ids.length} linked {concern.finding_ids.length === 1 ? "comment" : "comments"}</small></button>)}
+            </section> : null}
+            <section className="overview-reading" aria-labelledby="reading-order-title">
+              <h3 id="reading-order-title">Recommended path</h3>
+              <ol><li>Read the assessment and principal concerns.</li><li>Resolve major comments before writing polish.</li><li>Export actions for the next review round.</li></ol>
+            </section>
+            <div className="overview-actions">
+              <button className="overview-primary" onClick={() => { const first = filtered[0] || findings[0]; if (first) openFinding(first.id, `Started with ${first.id}`); }}>Start with the first comment →</button>
+              {documents.find((document) => document.path === "report.md") && <button onClick={() => { const id = documents.find((document) => document.path === "report.md")!.id; setReportView(id); setMobilePane("comment"); pushViewState({ view: "document", document: id, finding: null, evidence: 0 }); }}>Read the full referee report</button>}
+            </div>
+          </div>
+        </article>
+        ) : filtered.length ? <>
+        <section id="evidence-panel" ref={documentPane} data-testid="evidence-context" className={`document-pane ${mobilePane !== "evidence" ? "mobile-hidden" : ""}`} aria-labelledby="evidence-heading">
+          <div className="pane-heading">
+            <div>
+              <span className="eyebrow">Manuscript context</span>
+              <h2 id="evidence-heading" ref={evidenceHeading} tabIndex={-1}>{locator(selected, activeEvidenceIndex)}</h2>
+            </div>
+            <div className="view-switcher" role="group" aria-label="Choose evidence view">
+              <button aria-pressed={showEvidence} onClick={() => setShowEvidence(true)}>Evidence</button>
+              <button aria-pressed={!showEvidence} onClick={() => setShowEvidence(false)}>Manuscript</button>
+              <button className="evidence-close" aria-label="Close evidence context" onClick={() => openMobilePane("comment")}>Close</button>
+            </div>
+          </div>
+          {showEvidence ? (
+            <div className="evidence-sheet">
+              {selected.evidence.length > 1 && (
+                <div className="evidence-switcher" role="group" aria-label="Evidence items">
+                  {selected.evidence.map((item, index) => (
+                    <button key={`${item.source}-${index}`} className={index === activeEvidenceIndex ? "active" : ""} aria-pressed={index === activeEvidenceIndex} onClick={() => { setEvidenceIndex(index); setAssetPathIndex(0); setExpandedEvidence(false); }}>
+                      {index + 1}. {readableState(item.type)}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="evidence-label"><span>{readableState(evidence?.type)}</span><span>{readableState(selected.support_state)}</span></div>
+              {evidence?.type === "quote" ? (
+                <blockquote className={!expandedEvidence && evidenceContent.length > 900 ? "evidence-collapsed" : ""}>
+                  <span className="quote-mark" aria-hidden="true">“</span>
+                  <RenderedMarkdown>{evidenceContent || "No quoted evidence is available."}</RenderedMarkdown>
+                </blockquote>
+              ) : evidence?.type === "equation" ? (
+                <EquationEvidence content={evidenceContent} />
+              ) : ["code", "table_cell"].includes(evidence?.type || "") ? (
+                <pre className="structured-evidence">{evidenceContent || "No structured evidence is available."}</pre>
+              ) : (
+                <p className="prose-evidence">{evidenceContent || "No narrative evidence is available."}</p>
+              )}
+              {evidence?.type === "quote" && evidenceContent.length > 900 && <button className="evidence-expand" aria-expanded={expandedEvidence} onClick={() => setExpandedEvidence((value) => !value)}>{expandedEvidence ? "Collapse evidence" : "Show full evidence"}</button>}
+              {exhibit && activeExhibitPath && (
+                <figure className="exhibit-preview">
+                  {exhibit.paths.length > 1 && (
+                    <div className="render-switcher" role="group" aria-label="Saved exhibit renders">
+                      {exhibit.paths.map((path, index) => (
+                        <button key={path} aria-pressed={index === Math.min(assetPathIndex, exhibit.paths.length - 1)} onClick={() => setAssetPathIndex(index)}>Render {index + 1}</button>
+                      ))}
+                    </div>
+                  )}
+                  <a className="exhibit-image-link" href={activeExhibitPath} target="_blank" rel="noopener noreferrer" aria-label={`Open ${exhibit.label} at full size in a new tab`}>
+                    <ExhibitImage src={activeExhibitPath} alt={`${exhibit.kind} ${exhibit.label} evidence${exhibit.pages.length ? `, PDF page ${exhibit.pages.join(", ")}` : ""}`} />
+                  </a>
+                  <figcaption><span>{exhibit.kind} render · {exhibit.label}{exhibit.pages.length ? ` · PDF p. ${exhibit.pages.join(", ")}` : ""}</span><a href={activeExhibitPath} target="_blank" rel="noopener noreferrer">Open full size</a></figcaption>
+                </figure>
+              )}
+              {evidenceKind && evidence?.locator.exhibit && !activeExhibitPath && <div className="missing-exhibit" role="status"><strong>Declared exhibit render unavailable</strong><span>{exhibit?.missingPaths.length ? `${exhibit.missingPaths.length} referenced image ${exhibit.missingPaths.length === 1 ? "was" : "were"} not included or could not be resolved.` : "No matching render is declared in the loaded exhibit manifest."} The evidence text and source locator remain available.</span></div>}
+              <dl className="source-grid">
+                <div><dt>Source</dt><dd>{evidence?.source}</dd></div>
+                <div><dt>Location</dt><dd>{locator(selected, activeEvidenceIndex)}</dd></div>
+                <div><dt>Evidence type</dt><dd>{readableState(evidence?.type)}</dd></div>
+                {evidence?.representation && <div><dt>Representation</dt><dd>{readableState(evidence.representation)}</dd></div>}
+                {evidence?.anchor_id && <div><dt>Source anchor</dt><dd>{evidence.anchor_id}</dd></div>}
+              </dl>
+              {selected.evidence_boundary && <p className="evidence-boundary"><strong>Evidence boundary</strong>{selected.evidence_boundary}</p>}
+            </div>
+          ) : (
+            <pre className="manuscript-sheet">{manuscriptExcerpt.message || <>{manuscriptExcerpt.before}{manuscriptExcerpt.highlight && <mark title="Verified source anchor">{manuscriptExcerpt.highlight}</mark>}{manuscriptExcerpt.after}{manuscriptExcerpt.exact && <span className="visually-hidden"> Exact source anchor verified.</span>}</>}</pre>
+          )}
+          <div className="document-footnote">The canonical review files remain read-only. Your progress and notes stay in this browser.</div>
+        </section>
+
+        <article id="review-detail" ref={commentPane} className={`comment-pane ${mobilePane !== "comment" ? "mobile-hidden" : ""}`} aria-labelledby="selected-comment-title" tabIndex={-1}>
+          <div className="comment-scroll" data-testid="comment-scroll">
+          <button className="overview-crumb" onClick={openOverview}>← Overview</button>
+          <div className="comment-heading">
+            <div className="comment-tags">
+              <span className={`channel-pill channel-${selected.report_channel || "substance"}`}>{channelLabel(selected)}</span>
+              <span className={`severity-pill severity-${selected.severity}`}>{selected.severity}</span>
+              {selected.decision_role && <span className={`decision-role-pill role-${selected.decision_role}`}>{decisionRoleLabel(selected.decision_role)}</span>}
+              <span>{selected.dimension}</span>
+            </div>
+            <div className="comment-position"><span>{Math.max(1, filteredPosition + 1)} of {filtered.length}</span><span className="comment-id">{selected.id}</span></div>
+          </div>
+          <div className="comment-title-row">
+            <h2 id="selected-comment-title" ref={commentHeading} tabIndex={-1}>{shortTitle(selected)}</h2>
+            <div className="comment-navigation" aria-label="Move through filtered comments">
+              <button aria-label="Previous comment" onClick={() => moveDetailSelection(-1)}>←</button>
+              <button aria-label="Next comment" onClick={() => moveDetailSelection(1)}>→</button>
+            </div>
+          </div>
+          {selected.confidence && <p className="confidence-note"><strong>Confidence: {selected.confidence.level}.</strong> Would change if {selected.confidence.would_change_my_mind.replace(/^[A-Z]/, (letter) => letter.toLowerCase())}</p>}
+
+          <section className="decision-block question-block">
+            <span className="section-number">01</span>
+            <div><h3>Issue</h3><p>{selected.issue}</p></div>
+          </section>
+          <section className="decision-block compact-evidence-block">
+            <span className="section-number">02</span>
+            <div>
+              <h3>Relevant text</h3>
+              {evidence?.type === "quote" ? (
+                <blockquote><RenderedMarkdown>{evidenceContent || "No quoted evidence is available."}</RenderedMarkdown></blockquote>
+              ) : evidence?.type === "equation" ? <EquationEvidence content={evidenceContent} compact /> : <p>{evidenceContent || "No narrative evidence is available."}</p>}
+              {exhibit && activeExhibitPath && <figure className="inline-exhibit-preview">
+                <ExhibitImage compact src={activeExhibitPath} alt={`${exhibit.kind} ${exhibit.label} evidence`} />
+                <figcaption>{exhibit.kind} render · {exhibit.label}</figcaption>
+              </figure>}
+              {evidenceKind && evidence?.locator.exhibit && !activeExhibitPath && <div className="missing-exhibit compact" role="status"><strong>Exhibit render unavailable</strong><span>Open the evidence context for the source locator and package details.</span></div>}
+              <button className="evidence-expand" onClick={() => openMobilePane("evidence")}>Open evidence context</button>
+            </div>
+          </section>
+          <section className="decision-block">
+            <span className="section-number">03</span>
+            <div><h3>Concern</h3><p>{mergeDistinctText(selected.why_it_matters, selected.reader_effect)}</p></div>
+          </section>
+          <section className="revision-block recommendation-block">
+            <div className="revision-heading"><span>Suggestions</span><small>{selected.fix.effort}</small></div>
+            <p>{mergeDistinctText(selected.fix.what, selected.fix.how)}</p>
+            <div className="completion-check"><strong>Ready to close when</strong><span>{selected.fix.resolved_when || "Complete the stated revision path and reconcile the linked claims and evidence."}</span></div>
+          </section>
+          <section className="author-workspace">
+            <label>
+              <span>What changed? <small>Optional</small></span>
+              <textarea id="author-note" name="author-note" ref={noteInput} maxLength={MAX_NOTE_CHARS} value={noteDrafts[selected.id] ?? selectedEntry.response_note} onChange={(event) => setNoteDrafts((values) => ({ ...values, [selected.id]: event.target.value.slice(0, MAX_NOTE_CHARS) }))} onBlur={() => commitNote(selected.id)} placeholder="Add a short note for the next review round…" />
+              {(noteDrafts[selected.id] ?? selectedEntry.response_note).length >= 9000 && <small id="note-character-limit" className="note-limit">{(noteDrafts[selected.id] ?? selectedEntry.response_note).length.toLocaleString()} / {MAX_NOTE_CHARS.toLocaleString()}</small>}
+            </label>
+            <div className="handoff-actions">
+              <button className="copy-button" onClick={copyRevisionBrief}>Copy revision brief</button>
+              <button className="next-open-button" onClick={moveToNextOpen}>Next open comment</button>
+            </div>
+          </section>
+          </div>
+          <section className="author-action-bar" data-testid="author-action-dock" aria-label="Author action for selected comment">
+            <div className="action-bar-heading"><span className={`status-dot status-${selectedEntry.disposition}`} aria-hidden="true" /><strong>{readableState(selectedEntry.disposition)}</strong></div>
+            <div className="workspace-actions" role="group" aria-label="Finding progress">
+              <button title="Keep this comment open" aria-pressed={selectedEntry.disposition === "open"} className={selectedEntry.disposition === "open" ? "active" : ""} onClick={() => markFindingStatus(selected.id, "open")}>Open</button>
+              <button title="Mark ready for the next review" aria-pressed={selectedEntry.disposition === "ready_for_recheck"} className={selectedEntry.disposition === "ready_for_recheck" ? "active ready" : ""} onClick={() => markFindingStatus(selected.id, "ready_for_recheck")}>Recheck</button>
+              <button title="Record disagreement for the next review" aria-pressed={selectedEntry.disposition === "challenged"} className={selectedEntry.disposition === "challenged" ? "active challenged" : ""} onClick={() => markFindingStatus(selected.id, "challenged")}>Challenge</button>
+              <button title="Defer this comment for later" aria-pressed={selectedEntry.disposition === "deferred"} className={selectedEntry.disposition === "deferred" ? "active deferred" : ""} onClick={() => markFindingStatus(selected.id, "deferred")}>Defer</button>
+            </div>
+          </section>
+        </article>
+        </> : (
+          <section id="review-detail" ref={noResultsRef} className="no-filter-results" tabIndex={-1} aria-live="polite">
+            <span className="eyebrow">{findings.length ? "No matching comments" : "Review complete"}</span>
+            <h2>{findings.length ? "The active filters exclude every finding." : "No active comments remain in this review."}</h2>
+            <p>{findings.length ? "The detail and manuscript panes are intentionally blank so they cannot show an item outside the filtered queue." : "You can still read every available report, plan, and audit document from the Documents button."}</p>
+            {findings.length ? <button onClick={clearFilters}>Clear filters</button> : documents.length ? <button onClick={() => { setReportView(documents[0].id); pushViewState({ view: "document", document: documents[0].id, finding: null, evidence: 0 }); }}>Open documents</button> : null}
+          </section>
+        )}
+      </div>}
+      <div className="visually-hidden" aria-live="polite" aria-atomic="true">{announcement}</div>
+    </main>
+  );
+}

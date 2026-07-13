@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openecon.ai/econ-review/source-manifest.schema.json",
+  "title": "econ-review source and anchor manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "review_id", "sources", "anchors"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "review_id": {"type": "string", "minLength": 1},
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/source"}
+    },
+    "anchors": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/anchor"}
+    }
+  },
+  "$defs": {
+    "safePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "role", "path", "media_type", "sha256"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^SRC-[0-9]{2,}$"},
+        "role": {"enum": ["manuscript", "appendix", "supplement", "code", "data_dictionary", "external_source"]},
+        "path": {"$ref": "#/$defs/safePath"},
+        "media_type": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "extraction": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "dependentRequired": {
+            "ingestion_manifest_path": ["ingestion_manifest_sha256", "pipeline_fingerprint"],
+            "ingestion_manifest_sha256": ["ingestion_manifest_path", "pipeline_fingerprint"],
+            "pipeline_fingerprint": ["ingestion_manifest_path", "ingestion_manifest_sha256"]
+          },
+          "required": ["path", "sha256", "normalization"],
+          "properties": {
+            "path": {"$ref": "#/$defs/safePath"},
+            "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+            "normalization": {"enum": ["none", "unicode_nfc", "unicode_nfkc_whitespace"]},
+            "ingestion_manifest_path": {"$ref": "#/$defs/safePath"},
+            "ingestion_manifest_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+            "pipeline_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"media_type": {"const": "application/pdf"}},
+            "required": ["media_type"]
+          },
+          "then": {
+            "required": ["extraction"],
+            "properties": {
+              "extraction": {
+                "type": "object",
+                "required": [
+                  "ingestion_manifest_path",
+                  "ingestion_manifest_sha256",
+                  "pipeline_fingerprint"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "source_id", "kind", "start_char", "end_char", "content_sha256", "locator"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"},
+        "source_id": {"type": "string", "pattern": "^SRC-[0-9]{2,}$"},
+        "kind": {"enum": ["text_span", "equation", "table_cell", "figure", "code_range", "scope"]},
+        "start_char": {"type": ["integer", "null"], "minimum": 0},
+        "end_char": {"type": ["integer", "null"], "minimum": 0},
+        "content_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "locator": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

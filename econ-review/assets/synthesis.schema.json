@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openecon.ai/econ-review/synthesis.schema.json",
+  "title": "econ-review referee synthesis",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "review_contract_version", "review_id", "overall_assessment",
+    "strengths", "review_posture", "posture_rationale", "upgrade_conditions",
+    "principal_concerns", "other_major_finding_ids", "convincingness",
+    "writing_finding_count"
+  ],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "review_contract_version": {"enum": ["0.3", "0.4"]},
+    "review_id": {"type": "string", "minLength": 1},
+    "overall_assessment": {"type": "string", "minLength": 1},
+    "strengths": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "review_posture": {
+      "enum": ["reject", "weak_r_and_r", "strong_r_and_r", "accept", "not_assessed"]
+    },
+    "posture_rationale": {"type": "string", "minLength": 1},
+    "upgrade_conditions": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "principal_concerns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "title", "finding_ids", "decision_effect", "repairability",
+          "rationale", "upgrade_condition"
+        ],
+        "properties": {
+          "id": {"type": "string", "pattern": "^PC-[0-9]{2,}$"},
+          "title": {"type": "string", "minLength": 1},
+          "finding_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]*-[0-9]{2,}$"}
+          },
+          "decision_effect": {"enum": ["potentially_dispositive", "posture_material"]},
+          "repairability": {
+            "enum": [
+              "within_current_design", "claim_narrowing", "additional_analysis", "new_evidence",
+              "redesign", "unclear", "no_clear_fix"
+            ]
+          },
+          "rationale": {"type": "string", "minLength": 1},
+          "upgrade_condition": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "other_major_finding_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]*-[0-9]{2,}$"}
+    },
+    "convincingness": {"type": "string", "minLength": 1},
+    "writing_finding_count": {"type": "integer", "minimum": 0}
+    ,
+    "support_mappings": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/support_mapping"}
+    }
+  },
+  "$defs": {
+    "support_mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target_type", "target_id", "target_index", "statement", "claim_ids", "finding_ids", "evidence_ids"],
+      "properties": {
+        "target_type": {
+          "enum": [
+            "overall_assessment", "strength", "posture_rationale", "upgrade_condition",
+            "principal_concern_rationale", "principal_concern_upgrade", "convincingness"
+          ]
+        },
+        "target_id": {"type": ["string", "null"]},
+        "target_index": {"type": ["integer", "null"], "minimum": 0},
+        "statement": {"type": "string", "minLength": 1},
+        "claim_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^CLM-[0-9]{2,}$"}},
+        "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]*-[0-9]{2,}$"}},
+        "evidence_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^EVD-[A-Z0-9_-]+$"}}
+      },
+      "anyOf": [
+        {"properties": {"claim_ids": {"minItems": 1}}},
+        {"properties": {"finding_ids": {"minItems": 1}}},
+        {"properties": {"evidence_ids": {"minItems": 1}}}
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"review_contract_version": {"const": "0.4"}}, "required": ["review_contract_version"]},
+      "then": {"required": ["support_mappings"]}
+    }
+  ]
+}
