@@ -600,20 +600,171 @@ def overlaps(a: list[float], b: list[float], threshold: float = 0.4) -> bool:
     return bool(area and intersection / area >= threshold)
 
 
-def region_from_caption(block: dict[str, Any], kind: str, rows: list[dict[str, Any]]) -> list[float]:
+def object_note(block: dict[str, Any]) -> bool:
+    """Return whether a block is a note/source line that belongs with an exhibit."""
+    lines = [re.sub(r"\s+", " ", line).strip().casefold() for line in block.get("raw_text", "").splitlines()]
+    return any(re.match(
+        r"^(?:notes?|sources?|data\s+sources?|source\s+notes?|reading\s+note|"
+        r"robust\s+standard\s+errors?|standard\s+errors?)\s*[:.]?",
+        line,
+    ) for line in lines if line)
+
+
+def prose_block(block: dict[str, Any], page_width: float) -> bool:
+    """Identify body prose without treating dense table cells or chart labels as prose."""
+    text = block.get("raw_text", "")
+    alpha_words = len(re.findall(r"\b[A-Za-z]{3,}\b", text))
+    x0, _, x1, _ = block["bbox"]
+    return len(text) >= 90 and alpha_words >= 15 and x1 - x0 >= page_width * 0.45
+
+
+def visual_bbox(record: dict[str, Any]) -> list[float] | None:
+    bbox = record.get("bbox")
+    if not isinstance(bbox, list) or len(bbox) != 4:
+        return None
+    try:
+        values = [float(value) for value in bbox]
+    except (TypeError, ValueError):
+        return None
+    return values if values[2] > values[0] and values[3] > values[1] else None
+
+
+def region_from_caption(
+    block: dict[str, Any],
+    kind: str,
+    rows: list[dict[str, Any]],
+    graphics: list[dict[str, Any]] | None = None,
+) -> list[float]:
+    """Infer an exhibit region from its caption and nearby page content.
+
+    Captions may sit above or below their objects.  The prior implementation
+    assumed figures were always above captions and inherited the caption's
+    horizontal width for tables.  This routine instead selects an orientation
+    from substantial PDF graphics and surrounding content, stops at prose,
+    headings, or the next caption, and unions the full nearby content span.
+    """
     x0, y0, x1, y1 = block["bbox"]
     width, height = block["page_width"], block["page_height"]
-    if kind == "figure":
-        prior = [row["bbox"][3] for row in rows if row["bbox"][3] <= y0 and row["id"] != block["id"]]
-        top = max(prior, default=max(0.0, y0 - height * 0.45))
-        if y0 - top < height * 0.08:
-            top = max(0.0, y0 - height * 0.4)
-        return [max(0.0, x0 - 18), top, min(width, x1 + 18), min(height, y1 + 12)]
-    following = [row["bbox"][1] for row in rows if row["bbox"][1] >= y1 and row["id"] != block["id"]]
-    bottom = min(following, default=min(height, y1 + height * 0.45))
-    if bottom - y1 < height * 0.08:
-        bottom = min(height, y1 + height * 0.4)
-    return [max(0.0, x0 - 18), max(0.0, y0 - 12), min(width, x1 + 18), bottom]
+    other_captions = [
+        row for row in rows
+        if row["id"] != block["id"] and row.get("kind") in {"caption_table", "caption_figure"}
+    ]
+    above_limit = max(
+        (row["bbox"][3] for row in other_captions if row["bbox"][3] <= y0),
+        default=height * 0.04,
+    )
+    below_limit = min(
+        (row["bbox"][1] for row in other_captions if row["bbox"][1] >= y1),
+        default=height * 0.96,
+    )
+
+    substantial: list[list[float]] = []
+    for record in graphics or []:
+        bbox = visual_bbox(record)
+        if bbox is None:
+            continue
+        area_share = ((bbox[2] - bbox[0]) * (bbox[3] - bbox[1])) / (width * height)
+        if area_share >= 0.002 or record.get("kind") == "image":
+            substantial.append(bbox)
+
+    above_graphics = [bbox for bbox in substantial if bbox[3] <= y1 and bbox[1] >= above_limit]
+    below_graphics = [bbox for bbox in substantial if bbox[1] >= y0 and bbox[3] <= below_limit]
+
+    def graphic_score(boxes: list[list[float]]) -> float:
+        return sum(((box[2] - box[0]) * (box[3] - box[1])) / (width * height) for box in boxes)
+
+    def content_score(direction: str) -> float:
+        score = 0.0
+        for row in rows:
+            if row["id"] == block["id"] or row.get("kind") == "header_footer":
+                continue
+            bx0, by0, bx1, by1 = row["bbox"]
+            in_side = (
+                above_limit <= by0 and by1 <= y1 if direction == "above"
+                else y0 <= by0 and by1 <= below_limit
+            )
+            if not in_side or (prose_block(row, width) and not object_note(row)):
+                continue
+            score += min(0.03, max(0.0002, ((bx1 - bx0) * (by1 - by0)) / (width * height)))
+        return score
+
+    above_score = graphic_score(above_graphics) * 4 + content_score("above")
+    below_score = graphic_score(below_graphics) * 4 + content_score("below")
+    if y1 <= height * 0.30 and below_limit > y1 + height * 0.10:
+        below_score += 0.12
+    if y0 >= height * 0.70 and above_limit < y0 - height * 0.10:
+        above_score += 0.12
+    # Economics tables conventionally put their titles above the cells.  This
+    # is only a weak prior and loses to concrete content/graphic evidence.
+    if kind == "table":
+        below_score += 0.08
+    direction = "below" if below_score >= above_score else "above"
+    side_graphics = below_graphics if direction == "below" else above_graphics
+    selected_rows: list[dict[str, Any]] = []
+
+    if direction == "below":
+        graphic_end = max((bbox[3] for bbox in side_graphics), default=y1)
+        content_seen = bool(side_graphics)
+        content_bottom = graphic_end
+        for row in sorted(rows, key=lambda item: (item["bbox"][1], item["bbox"][0])):
+            if row["id"] == block["id"] or row.get("kind") == "header_footer":
+                continue
+            by0, by1 = row["bbox"][1], row["bbox"][3]
+            if by0 < y1 or by0 >= below_limit:
+                continue
+            if row.get("kind") in {"caption_table", "caption_figure"}:
+                break
+            if content_seen and by0 - content_bottom > height * 0.035 and by0 >= graphic_end:
+                break
+            if row.get("kind") == "heading" and content_seen:
+                break
+            if prose_block(row, width) and not object_note(row) and content_seen and by0 >= graphic_end - 3:
+                break
+            selected_rows.append(row)
+            content_seen = True
+            content_bottom = max(content_bottom, by1)
+        primary_boxes = [[x0, y0, x1, y1], *side_graphics, *[row["bbox"] for row in selected_rows]]
+    else:
+        graphic_start = min((bbox[1] for bbox in side_graphics), default=y0)
+        content_seen = bool(side_graphics)
+        content_top = graphic_start
+        for row in sorted(rows, key=lambda item: (item["bbox"][1], item["bbox"][0]), reverse=True):
+            if row["id"] == block["id"] or row.get("kind") == "header_footer":
+                continue
+            by0, by1 = row["bbox"][1], row["bbox"][3]
+            if by1 > y0 or by1 <= above_limit:
+                continue
+            if row.get("kind") in {"caption_table", "caption_figure"}:
+                break
+            if content_seen and content_top - by1 > height * 0.035 and by1 <= graphic_start:
+                break
+            if row.get("kind") == "heading" and content_seen:
+                break
+            if prose_block(row, width) and not object_note(row) and content_seen and by1 <= graphic_start + 3:
+                break
+            selected_rows.append(row)
+            content_seen = True
+            content_top = min(content_top, by0)
+        # Notes and sources commonly follow a below-figure caption.  Attach
+        # only consecutive note blocks, never ordinary body prose.
+        for row in sorted(rows, key=lambda item: (item["bbox"][1], item["bbox"][0])):
+            if row["id"] == block["id"] or row["bbox"][1] < y1 or row["bbox"][1] >= below_limit:
+                continue
+            if object_note(row):
+                selected_rows.append(row)
+                continue
+            if row.get("kind") != "header_footer":
+                break
+        primary_boxes = [[x0, y0, x1, y1], *side_graphics, *[row["bbox"] for row in selected_rows]]
+
+    left = min(box[0] for box in primary_boxes)
+    top = min(box[1] for box in primary_boxes)
+    right = max(box[2] for box in primary_boxes)
+    bottom = max(box[3] for box in primary_boxes)
+    return [
+        max(0.0, left - 18), max(0.0, top - 4),
+        min(width, right + 18), min(height, bottom + 4),
+    ]
 
 
 def table_candidates(pdf: Path) -> dict[int, list[dict[str, Any]]]:
@@ -638,6 +789,43 @@ def table_candidates(pdf: Path) -> dict[int, list[dict[str, Any]]]:
                         continue
                     bbox = [round(float(value), 3) for value in table.bbox]
                     output[page_number].append({"bbox": bbox, "grid": grid, "strategy": "pdfplumber_lines"})
+    except Exception:
+        return {}
+    return output
+
+
+def page_graphic_candidates(pdf: Path) -> dict[int, list[dict[str, Any]]]:
+    """Recover non-authoritative graphic extents used only to bound crops.
+
+    Raster images and large vector containers are especially useful when a
+    plot contains little extractable text.  All coordinates use pdfplumber's
+    top-left page convention, matching Poppler's bbox output.
+    """
+    try:
+        import pdfplumber
+    except ImportError:
+        return {}
+    output: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    try:
+        with pdfplumber.open(pdf) as document:
+            for page_number, page in enumerate(document.pages, 1):
+                for kind, objects in (
+                    ("image", page.images), ("rect", page.rects), ("curve", page.curves),
+                ):
+                    for obj in objects:
+                        try:
+                            bbox = [
+                                float(obj["x0"]), float(obj["top"]),
+                                float(obj["x1"]), float(obj["bottom"]),
+                            ]
+                        except (KeyError, TypeError, ValueError):
+                            continue
+                        if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
+                            continue
+                        output[page_number].append({
+                            "kind": kind,
+                            "bbox": [round(value, 3) for value in bbox],
+                        })
     except Exception:
         return {}
     return output
@@ -669,6 +857,7 @@ def create_objects(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     by_page = page_blocks(raw_blocks)
     detected_tables = table_candidates(pdf)
+    detected_graphics = page_graphic_candidates(pdf)
     tables: list[dict[str, Any]] = []
     figures: list[dict[str, Any]] = []
     equations: list[dict[str, Any]] = []
@@ -728,13 +917,13 @@ def create_objects(
         for caption in [row for row in rows if row["kind"] == "caption_table"]:
             if any(overlaps(caption["bbox"], bbox, 0.01) or abs(caption["bbox"][1] - bbox[1]) < page["height"] * 0.25 for bbox in used_table_boxes):
                 continue
-            bbox = region_from_caption(caption, "table", rows)
+            bbox = region_from_caption(caption, "table", rows, detected_graphics.get(page_number, []))
             add_object(
                 tables, "TBL", page_number, bbox, caption["raw_text"], None, "bounded",
                 ["Caption-driven table crop found, but no reliable rectangular grid was recovered; read the rendered crop directly."],
             )
         for caption in [row for row in rows if row["kind"] == "caption_figure"]:
-            bbox = region_from_caption(caption, "figure", rows)
+            bbox = region_from_caption(caption, "figure", rows, detected_graphics.get(page_number, []))
             add_object(
                 figures, "FIG", page_number, bbox, caption["raw_text"],
                 {"representation": "rendered_region", "caption_block_id": caption["id"]},

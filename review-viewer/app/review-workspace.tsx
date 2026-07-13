@@ -34,81 +34,37 @@ import {
   selectReviewPackageFilePath,
   selectManuscriptPath,
 } from "../lib/local-review-package";
+import {
+  indexReviewComputations,
+  validateReviewComputationLinks,
+  validateReviewComputations,
+  type ReviewComputation,
+} from "../lib/review-computations-contract";
 import { reviewLedgerFingerprint, sha256Hex } from "../lib/review-fingerprint";
+import { equationEvidencePresentation } from "../lib/review-equation-presentation";
+import { orderExhibitRenders, type ExhibitRender } from "../lib/review-exhibit-presentation";
+import { formatUserFacingLocator } from "../lib/review-locator";
+import { conciseSourceAnchorLabel, exactAnchorExcerpt, sourceAnchorPageLabel } from "../lib/review-manuscript-context";
+import { EvidenceSemanticFrame } from "../lib/review-text-evidence-presentation";
+import {
+  reviewEvidenceText as evidenceText,
+  validateReviewLedger as validateLedger,
+  type DecisionRole,
+  type Evidence,
+  type Finding,
+  type Ledger,
+  type Severity,
+} from "../lib/review-ledger-contract";
+import type { ReviewEvidenceRepresentation } from "../lib/review-evidence-contract";
 import {
   comparePaperPosition,
   paperSection,
   parseReviewUrlState,
   writeReviewUrlState,
-  type PaperPosition,
 } from "../lib/review-view-state";
 import { validateActivatedBurdens, type ActivatedBurden } from "../lib/review-runtime-contracts";
 
-type Severity = "critical" | "major" | "minor" | "info";
 type LocalStatus = ReviewActionDisposition;
-type DecisionRole = "potentially_dispositive" | "posture_material" | "revision_value" | "polish";
-
-type Evidence = {
-  id?: string;
-  type: string;
-  representation?: "verbatim" | "normalized_transcription" | "composite_comparison" | "reviewer_observation" | "checked_absence" | "computed_result";
-  anchor_id?: string | null;
-  computation_id?: string | null;
-  source_record_id?: string | null;
-  content: string | null;
-  scope_checked?: string | null;
-  source: string;
-  locator: {
-    section?: string | null;
-    page?: number | null;
-    paragraph?: string | null;
-    exhibit?: string | null;
-    equation?: string | null;
-    lines?: string | null;
-    file?: string | null;
-  };
-};
-
-type Finding = {
-  id: string;
-  title?: string;
-  decision_role?: DecisionRole;
-  repairability?: "within_current_design" | "claim_narrowing" | "additional_analysis" | "new_evidence" | "redesign" | "unclear" | "no_clear_fix";
-  importance_rank: number;
-  report_channel?: "substance" | "writing";
-  dimension: string;
-  severity: Severity;
-  essential: boolean;
-  status: string;
-  support_state: string;
-  issue: string;
-  why_it_matters: string;
-  reader_effect: string;
-  confidence?: { level: "low" | "medium" | "high"; would_change_my_mind: string };
-  paper_position?: PaperPosition;
-  evidence_boundary?: string;
-  minimum_repair?: string;
-  display_evidence_id?: string;
-  related_evidence_ids?: string[];
-  related_locations?: string[];
-  evidence: Evidence[];
-  counterargument: {
-    result: "survived" | "weakened" | "refuted" | "not_run";
-    author_reply: string;
-    search_scope?: string;
-    notes: string;
-  };
-  fix: {
-    what: string;
-    how: string;
-    effort: string;
-    publishability: string;
-    resolved_when?: string;
-  };
-  verification: string;
-};
-
-type Ledger = { schema_version?: string; review_id: string; findings: Finding[] };
 type Run = {
   schema_version?: string;
   review_id: string;
@@ -155,7 +111,7 @@ type UndoStatusChange = { findingId: string; previous: LocalStatus; next: LocalS
 type PendingDocumentAnchor = { documentId: string; fragment: string };
 type DetailMode = "overview" | "comment";
 type QueueOrder = "importance" | "paper";
-type ExhibitAsset = { key: string; label: string; kind: "figure" | "table"; pages: number[]; paths: string[]; missingPaths: string[] };
+type ExhibitAsset = { key: string; label: string; kind: "figure" | "table"; pages: number[]; renders: ExhibitRender[]; missingPaths: string[] };
 type ExhibitManifest = { figures?: unknown[]; tables?: unknown[] };
 type ReviewRegistryEntry = { slug: string; title: string; base_path: string };
 type ReviewRegistry = { schema_version: number; default_review: string; reviews: ReviewRegistryEntry[] };
@@ -206,24 +162,102 @@ function parseJsonFile(fileName: string, text: string): unknown {
   }
 }
 
-function equationMarkdown(content: string) {
-  const value = content.trim();
-  if (!value) return "No equation evidence is available.";
-  return /\$\$|\\\[|\\\(|(^|[^\\])\$/m.test(value) ? value : `$$\n${value}\n$$`;
-}
-
-function EquationEvidence({ content, compact = false }: { content: string; compact?: boolean }) {
+function EquationEvidence({
+  content,
+  representation,
+  compact = false,
+  embedded = false,
+}: {
+  content: string;
+  representation?: ReviewEvidenceRepresentation;
+  compact?: boolean;
+  embedded?: boolean;
+}) {
   const raw = content || "No equation evidence is available.";
+  const presentation = equationEvidencePresentation(raw, representation);
+  const isProse = presentation.kind === "prose";
+  const proseLabel = representation === "reviewer_observation" ? "Reviewer observation"
+    : representation === "composite_comparison" ? "Reviewer comparison"
+      : representation === "checked_absence" ? "Checked absence"
+        : representation === "computed_result" ? "Computed result"
+          : "Equation evidence";
   return (
-    <div className={`equation-evidence${compact ? " compact" : ""}`}>
-      <div className="equation-render" aria-label="Rendered equation">
-        <RenderedMarkdown>{equationMarkdown(raw)}</RenderedMarkdown>
+    <div className={`equation-evidence${compact ? " compact" : ""}${embedded ? " embedded" : ""}`}>
+      <div className={`equation-render equation-render-${presentation.kind}`} aria-label={isProse ? proseLabel : "Rendered equation"}>
+        {isProse ? <p>{presentation.content}</p> : <RenderedMarkdown>{presentation.content}</RenderedMarkdown>}
       </div>
       <details className="equation-raw">
-        <summary>View raw equation</summary>
+        <summary>{isProse ? "View raw evidence" : "View raw equation"}</summary>
         <pre>{raw}</pre>
       </details>
     </div>
+  );
+}
+
+function EvidenceContent({
+  evidence,
+  content,
+  compact = false,
+  collapsed = false,
+}: {
+  evidence: Evidence | undefined;
+  content: string;
+  compact?: boolean;
+  collapsed?: boolean;
+}) {
+  const fallback = evidence?.type === "quote" ? "No quoted evidence is available."
+    : ["code", "table_cell"].includes(evidence?.type || "") ? "No structured evidence is available."
+      : "No narrative evidence is available.";
+  const rendered = evidence?.type === "equation"
+    ? <EquationEvidence content={content} representation={evidence.representation} compact={compact} embedded />
+    : ["code", "table_cell"].includes(evidence?.type || "")
+      ? <pre className="structured-evidence">{content || fallback}</pre>
+      : evidence?.type === "quote"
+        ? <RenderedMarkdown>{content || fallback}</RenderedMarkdown>
+        : <p className="prose-evidence">{content || fallback}</p>;
+  return (
+    <EvidenceSemanticFrame representation={evidence?.representation} compact={compact} collapsed={collapsed}>
+      {rendered}
+    </EvidenceSemanticFrame>
+  );
+}
+
+function ComputationProvenance({
+  computationId,
+  computation,
+  sourceAnchors,
+}: {
+  computationId: string | null | undefined;
+  computation: ReviewComputation | undefined;
+  sourceAnchors: Record<string, SourceAnchor>;
+}) {
+  if (!computationId) {
+    return <div className="missing-computation" role="status"><strong>Computation provenance unavailable</strong><span>This evidence item does not declare a computation ID. Reload a complete canonical review package before relying on the result.</span></div>;
+  }
+  if (!computation) {
+    return <div className="missing-computation" role="status"><strong>Linked computation unavailable</strong><span>The loaded package does not contain the record for <code>{computationId}</code>. The evidence statement remains visible, but its provenance cannot be inspected here.</span></div>;
+  }
+  return (
+    <section className="computation-provenance" aria-labelledby={`computation-${computation.id}`}>
+      <div className="computation-heading">
+        <span>Recorded computation</span>
+        <code id={`computation-${computation.id}`}>{computation.id}</code>
+      </div>
+      <p className="computation-result"><strong>Result</strong><span>{computation.result}</span></p>
+      <dl>
+        <div><dt>Tool</dt><dd>{computation.tool}</dd></div>
+        <div><dt>Tolerance</dt><dd>{computation.tolerance}</dd></div>
+        <div className="computation-wide"><dt>Method</dt><dd>{computation.method}</dd></div>
+        <div className="computation-wide"><dt>Input anchors</dt><dd>{computation.input_anchor_ids.map((anchorId, index) => {
+          const locator = sourceAnchors[anchorId]?.locator || "";
+          const page = sourceAnchorPageLabel(locator);
+          return <span className="computation-anchor" key={anchorId} title={locator || undefined}><code>{anchorId}</code>{page && <span aria-hidden="true"> · {page}</span>}{locator && <span className="visually-hidden">. Full locator: {locator}</span>}{index < computation.input_anchor_ids.length - 1 && <span className="computation-anchor-separator" aria-hidden="true">; </span>}</span>;
+        })}</dd></div>
+        <div className="computation-wide"><dt>Artifact record</dt><dd><code>{computation.artifact_path}</code></dd></div>
+        <div className="computation-wide"><dt>SHA-256</dt><dd><code>{computation.artifact_sha256}</code></dd></div>
+      </dl>
+      <p className="computation-boundary">Review Desk displays the package record only. It does not run the method or open the artifact.</p>
+    </section>
   );
 }
 
@@ -258,14 +292,16 @@ function manifestAssets(
       if (!isRecord(row) || typeof row.label !== "string") continue;
       const rawPaths = Array.isArray(row[pathField]) ? row[pathField].filter((value): value is string => typeof value === "string") : [];
       const resolved = rawPaths.map((path) => ({ path, resolved: resolvePath(path) }));
-      const paths = resolved.map((item) => item.resolved).filter((value): value is string => Boolean(value));
+      const renders = orderExhibitRenders(resolved.flatMap((item) => item.resolved
+        ? [{ sourcePath: item.path, resolvedPath: item.resolved }]
+        : []));
       const key = exhibitKey(kind, row.label);
       const asset = {
         key,
         label: row.label,
         kind,
         pages: Array.isArray(row.pdf_pages) ? row.pdf_pages.filter((value): value is number => Number.isInteger(value)) : [],
-        paths,
+        renders,
         missingPaths: resolved.filter((item) => !item.resolved).map((item) => item.path),
       };
       assets[key] = asset;
@@ -281,96 +317,6 @@ function manifestAssets(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function validEvidenceLocator(value: unknown): value is Evidence["locator"] {
-  if (!isRecord(value)) return false;
-  for (const key of ["section", "paragraph", "exhibit", "equation", "lines", "file"]) {
-    const field = value[key];
-    if (!(typeof field === "string" || field === null || field === undefined)) return false;
-  }
-  const page = value.page;
-  return typeof page === "number" ? Number.isFinite(page) : page === null || page === undefined;
-}
-
-function validateLedger(value: unknown): Ledger {
-  if (!isRecord(value) || typeof value.review_id !== "string" || !value.review_id.trim() || !Array.isArray(value.findings)) {
-    throw new Error("findings.json does not have the required review_id and findings array");
-  }
-  if (value.schema_version !== undefined && !["0.1", "0.2", "0.3", "0.4"].includes(String(value.schema_version))) {
-    throw new Error("findings.json has an unsupported schema_version");
-  }
-  const ids = new Set<string>();
-  for (const [index, raw] of value.findings.entries()) {
-    if (!isRecord(raw) || typeof raw.id !== "string" || !raw.id.trim() || ids.has(raw.id)) {
-      throw new Error(`findings.json has an invalid or duplicate finding at position ${index + 1}`);
-    }
-    if (!Number.isInteger(raw.importance_rank) || !["critical", "major", "minor", "info"].includes(String(raw.severity))) {
-      throw new Error(`finding ${raw.id} has an invalid rank or severity`);
-    }
-    if (raw.report_channel !== undefined && !["substance", "writing"].includes(String(raw.report_channel))) {
-      throw new Error(`finding ${raw.id} has an invalid report channel`);
-    }
-    if (["0.3", "0.4"].includes(String(value.schema_version)) && (
-      typeof raw.title !== "string" || !raw.title.trim()
-      || !["potentially_dispositive", "posture_material", "revision_value", "polish"].includes(String(raw.decision_role))
-      || !["within_current_design", "claim_narrowing", "additional_analysis", "new_evidence", "redesign", "unclear", "no_clear_fix"].includes(String(raw.repairability))
-    )) {
-      throw new Error(`v0.3 finding ${raw.id} is missing title, decision role, or repairability`);
-    }
-    if (
-      typeof raw.issue !== "string" || typeof raw.why_it_matters !== "string" || typeof raw.reader_effect !== "string"
-      || typeof raw.dimension !== "string" || typeof raw.status !== "string" || typeof raw.support_state !== "string"
-      || typeof raw.verification !== "string" || typeof raw.essential !== "boolean"
-    ) {
-      throw new Error(`finding ${raw.id} is missing required review text or state`);
-    }
-    if (!Array.isArray(raw.evidence) || !raw.evidence.length || raw.evidence.some((item) => (
-      !isRecord(item) || !["quote", "equation", "table_cell", "figure", "code", "literature", "absence_scope"].includes(String(item.type))
-      || typeof item.source !== "string" || !validEvidenceLocator(item.locator)
-      || !(typeof item.content === "string" || item.content === null)
-      || !(typeof item.scope_checked === "string" || item.scope_checked === null || item.scope_checked === undefined)
-      || (value.schema_version === "0.4" && (
-        typeof item.id !== "string" || !item.id.trim()
-        || !["verbatim", "normalized_transcription", "composite_comparison", "reviewer_observation", "checked_absence", "computed_result"].includes(String(item.representation))
-      ))
-    ))) {
-      throw new Error(`finding ${raw.id} has invalid evidence data`);
-    }
-    if (raw.confidence !== undefined && (
-      !isRecord(raw.confidence)
-      || !["low", "medium", "high"].includes(String(raw.confidence.level))
-      || typeof raw.confidence.would_change_my_mind !== "string"
-      || !raw.confidence.would_change_my_mind.trim()
-    )) throw new Error(`finding ${raw.id} has malformed confidence data`);
-    if (raw.paper_position !== undefined) {
-      if (!isRecord(raw.paper_position)) throw new Error(`finding ${raw.id} has malformed paper_position data`);
-      const paperPosition = raw.paper_position;
-      const positionNumber = paperPosition.ordinal ?? paperPosition.order;
-      if (
-        typeof positionNumber !== "number" || !Number.isFinite(positionNumber) || positionNumber < 0
-        || !["section", "label", "source_id", "anchor_id"].every((key) => paperPosition[key] === undefined || paperPosition[key] === null || typeof paperPosition[key] === "string")
-      ) throw new Error(`finding ${raw.id} has malformed paper_position data`);
-    }
-    if (value.schema_version === "0.4" && (
-      typeof raw.evidence_boundary !== "string" || !raw.evidence_boundary.trim()
-      || typeof raw.minimum_repair !== "string" || !raw.minimum_repair.trim()
-      || typeof raw.display_evidence_id !== "string" || !raw.evidence.some((item) => isRecord(item) && item.id === raw.display_evidence_id)
-      || !Array.isArray(raw.related_evidence_ids) || raw.related_evidence_ids.some((item) => typeof item !== "string")
-      || !Array.isArray(raw.related_locations) || raw.related_locations.some((item) => typeof item !== "string")
-    )) throw new Error(`v0.4 finding ${raw.id} is missing source-linked display metadata`);
-    if (
-      !isRecord(raw.fix) || typeof raw.fix.what !== "string" || typeof raw.fix.how !== "string" || typeof raw.fix.effort !== "string"
-      || typeof raw.fix.publishability !== "string" || !(typeof raw.fix.resolved_when === "string" || raw.fix.resolved_when === undefined)
-      || !isRecord(raw.counterargument) || typeof raw.counterargument.result !== "string"
-      || typeof raw.counterargument.author_reply !== "string" || typeof raw.counterargument.notes !== "string"
-      || !(typeof raw.counterargument.search_scope === "string" || raw.counterargument.search_scope === undefined)
-    ) {
-      throw new Error(`finding ${raw.id} is missing fix or fairness data`);
-    }
-    ids.add(raw.id);
-  }
-  return value as Ledger;
 }
 
 function validateRun(value: unknown): Run {
@@ -476,6 +422,9 @@ function validateLedgerAnchors(ledger: Ledger, manifest: SourceManifest | null):
     if (positionSource && anchors.get(positionAnchor)?.source_id !== positionSource) throw new Error(`finding ${finding.id} paper position has inconsistent source and anchor IDs`);
     for (const evidence of finding.evidence) {
       if (evidence.anchor_id && !anchors.has(evidence.anchor_id)) throw new Error(`finding ${finding.id} evidence ${evidence.id || "item"} has an unresolved source anchor`);
+      for (const anchorId of evidence.anchor_ids || []) {
+        if (!anchors.has(anchorId)) throw new Error(`finding ${finding.id} evidence ${evidence.id || "item"} has an unresolved comparison anchor ${anchorId}`);
+      }
     }
   }
 }
@@ -502,18 +451,7 @@ function reviewFingerprint(ledger: Ledger) {
 
 function locator(finding: Finding, evidenceIndex = 0) {
   const value = finding.evidence[evidenceIndex]?.locator || finding.evidence[0]?.locator;
-  if (!value) return "Location unavailable";
-  const parts = [
-    value.file,
-    value.section && (/^(section|sections|abstract|appendix|online appendix|front matter|end matter|table|figure|treatment|references)/i.test(value.section) ? value.section : `Section ${value.section}`),
-    value.paragraph && `para. ${value.paragraph}`,
-    value.exhibit,
-    value.equation && `Eq. ${value.equation}`,
-    value.page && `p. ${value.page}`,
-    value.lines && `lines ${value.lines}`,
-  ];
-  const unique = parts.filter((part): part is string => Boolean(part)).filter((part, index, values) => values.indexOf(part) === index);
-  return unique.join(" · ") || "Manuscript";
+  return formatUserFacingLocator(value);
 }
 
 function shortTitle(finding: Finding) {
@@ -571,18 +509,6 @@ function shortDecisionRoleLabel(value: DecisionRole | undefined) {
   return value ? SHORT_DECISION_ROLE_LABELS[value] : "Unclassified";
 }
 
-function evidenceText(evidence: Evidence | undefined) {
-  if (!evidence) return "";
-  if (!evidence.content && evidence.type === "absence_scope" && evidence.scope_checked) return `Scope checked: ${evidence.scope_checked}`;
-  if (!evidence.content) return "";
-  if (evidence.type !== "quote") return evidence.content.trim();
-  return evidence.content
-    .split("\n")
-    .map((line) => line.replace(/^\s*>\s?/, ""))
-    .join("\n")
-    .trim();
-}
-
 function displayEvidenceIndex(finding: Finding): number {
   if (!finding.display_evidence_id) return 0;
   const index = finding.evidence.findIndex((evidence) => evidence.id === finding.display_evidence_id);
@@ -629,6 +555,7 @@ export function ReviewWorkspace() {
   const [showEvidence, setShowEvidence] = useState(true);
   const [expandedEvidence, setExpandedEvidence] = useState(false);
   const [evidenceIndex, setEvidenceIndex] = useState(0);
+  const [sourceAnchorSelection, setSourceAnchorSelection] = useState({ evidenceKey: "", index: 0 });
   const [assetPathIndex, setAssetPathIndex] = useState(0);
   const [loadError, setLoadError] = useState("");
   const [announcement, setAnnouncement] = useState("");
@@ -637,6 +564,7 @@ export function ReviewWorkspace() {
   const [pendingDocumentAnchor, setPendingDocumentAnchor] = useState<PendingDocumentAnchor | null>(null);
   const [exhibitAssets, setExhibitAssets] = useState<Record<string, ExhibitAsset>>({});
   const [sourceAnchors, setSourceAnchors] = useState<Record<string, SourceAnchor>>({});
+  const [computationsById, setComputationsById] = useState<Record<string, ReviewComputation>>({});
   const [registry, setRegistry] = useState<ReviewRegistry | null>(null);
   const [reviewSlug, setReviewSlug] = useState("");
   const [isBundleLoading, setIsBundleLoading] = useState(false);
@@ -746,14 +674,17 @@ export function ReviewWorkspace() {
       optionalJson(`${entry.base_path}/figures.json`),
       optionalManifest(`${entry.base_path}/review-manifest.json`),
       optionalJson(`${entry.base_path}/source-manifest.json`),
+      optionalJson(`${entry.base_path}/computations.json`),
     ])
-      .then(async ([nextLedger, nextRun, nextSynthesis, nextManuscript, nextTables, nextFigures, manifestValue, sourceManifestValue]) => {
+      .then(async ([nextLedger, nextRun, nextSynthesis, nextManuscript, nextTables, nextFigures, manifestValue, sourceManifestValue, computationsValue]) => {
         if (cancelled) return;
         const checkedLedger = validateLedger(nextLedger);
         const checkedRun = validateRun(nextRun);
         const checkedSynthesis = validateSynthesis(nextSynthesis);
         const checkedSourceManifest = validateSourceManifest(sourceManifestValue);
+        const checkedComputations = validateReviewComputations(computationsValue);
         validateLedgerAnchors(checkedLedger, checkedSourceManifest);
+        validateReviewComputationLinks(checkedLedger, checkedComputations, checkedSourceManifest);
         if (checkedLedger.review_id !== checkedRun.review_id) throw new Error("Bundled review IDs do not match");
         if (checkedLedger.schema_version !== checkedRun.schema_version) throw new Error("Bundled review schema versions do not match");
         if (checkedSynthesis && checkedSynthesis.review_id !== checkedLedger.review_id) throw new Error("Bundled synthesis ID does not match findings.json");
@@ -815,6 +746,7 @@ export function ReviewWorkspace() {
         setMobilePane(urlState.view === "comment" || urlState.view === "document" ? "comment" : "queue");
         setExhibitAssets(manifestAssets(nextTables, nextFigures, (path) => `${entry.base_path}/${path}`));
         setSourceAnchors(Object.fromEntries((checkedSourceManifest?.anchors || []).map((anchor) => [anchor.id, anchor])));
+        setComputationsById(indexReviewComputations(checkedComputations));
         loadedReviewSlug.current = entry.slug;
         setIsBundleLoading(false);
         setLoadError("");
@@ -901,7 +833,7 @@ export function ReviewWorkspace() {
       finding.fix.what, finding.fix.how, finding.fix.resolved_when, finding.counterargument.author_reply,
       finding.counterargument.search_scope, finding.counterargument.notes, entry.response_note,
       ...entry.changed_locations,
-      ...finding.evidence.flatMap((item, index) => [item.type, item.source, item.content, locator(finding, index)]),
+      ...finding.evidence.flatMap((item, index) => [item.type, item.source, item.content, item.scope_checked, locator(finding, index)]),
     ].filter(Boolean).join(" ").toLowerCase()] as const;
   })), [findings, localState]);
 
@@ -1187,13 +1119,13 @@ export function ReviewWorkspace() {
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.isComposing || event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target instanceof HTMLElement ? event.target : null;
-      const findingControl = target?.closest(".finding-row");
       const interactive = target?.closest("input, textarea, select, button, a, summary, [contenteditable='true'], [role='dialog']");
       if (event.key === "Escape" && mobilePane === "evidence") {
         event.preventDefault();
         openMobilePane("comment");
         return;
       }
+      if (interactive) return;
       if (event.key.toLowerCase() === "o") {
         event.preventDefault();
         openOverview();
@@ -1209,7 +1141,6 @@ export function ReviewWorkspace() {
         }
         return;
       }
-      if (interactive && !findingControl) return;
       if (reportView !== "none" || !filtered.length || !selected || !filtered.some((finding) => finding.id === selected.id)) return;
       if (event.key === "/") {
         event.preventDefault();
@@ -1304,14 +1235,16 @@ export function ReviewWorkspace() {
       const synthesisFile = canonicalFile("synthesis.json");
       const manifestFile = canonicalFile("review-manifest.json");
       const sourceManifestFile = canonicalFile("evidence/source-manifest.json", false, ["source-manifest.json"]);
+      const computationsFile = canonicalFile("evidence/computations.json", false, ["computations.json"]);
       const tablesFile = canonicalFile("evidence/tables.json", false, ["tables.json"]);
       const figuresFile = canonicalFile("evidence/figures.json", false, ["figures.json"]);
-      const [findingsText, runText, synthesisText, manifestText, sourceManifestText, tablesText, figuresText] = await Promise.all([
+      const [findingsText, runText, synthesisText, manifestText, sourceManifestText, computationsText, tablesText, figuresText] = await Promise.all([
         readText(findingsFile, MAX_JSON_BYTES),
         readText(runFile, MAX_JSON_BYTES),
         synthesisFile ? readText(synthesisFile, MAX_JSON_BYTES) : Promise.resolve(null),
         manifestFile ? readText(manifestFile, MAX_JSON_BYTES) : Promise.resolve(null),
         sourceManifestFile ? readText(sourceManifestFile, MAX_JSON_BYTES) : Promise.resolve(null),
+        computationsFile ? readText(computationsFile, MAX_JSON_BYTES) : Promise.resolve(null),
         tablesFile ? readText(tablesFile, MAX_JSON_BYTES) : Promise.resolve(null),
         figuresFile ? readText(figuresFile, MAX_JSON_BYTES) : Promise.resolve(null),
       ]);
@@ -1322,7 +1255,9 @@ export function ReviewWorkspace() {
       const nextSynthesis = synthesisText === null ? null : validateSynthesis(parseJsonFile("synthesis.json", synthesisText));
       const nextManifest = manifestText === null ? undefined : validateReviewDocumentManifest(manifestText);
       const nextSourceManifest = sourceManifestText === null ? null : validateSourceManifest(parseJsonFile("source-manifest.json", sourceManifestText));
+      const nextComputations = computationsText === null ? null : validateReviewComputations(parseJsonFile("computations.json", computationsText));
       validateLedgerAnchors(nextLedger, nextSourceManifest);
+      validateReviewComputationLinks(nextLedger, nextComputations, nextSourceManifest);
       const nextTables = tablesText === null ? null : parseJsonFile("tables.json", tablesText) as ExhibitManifest;
       const nextFigures = figuresText === null ? null : parseJsonFile("figures.json", figuresText) as ExhibitManifest;
       if (nextLedger.review_id !== nextRun.review_id) throw new Error("findings.json and run.json have different review IDs");
@@ -1366,7 +1301,7 @@ export function ReviewWorkspace() {
         if (file.size > MAX_LOCAL_IMAGE_BYTES) throw new Error(`${file.name} exceeds the local image size limit`);
       }
       const relevantFiles = Array.from(new Set([
-        findingsFile, runFile, synthesisFile, manifestFile, sourceManifestFile, tablesFile, figuresFile, manuscriptFile,
+        findingsFile, runFile, synthesisFile, manifestFile, sourceManifestFile, computationsFile, tablesFile, figuresFile, manuscriptFile,
         ...documentFiles.map(({ file }) => file), ...resolvedImageFiles,
       ].filter((file): file is File => Boolean(file))));
       const relevantBytes = relevantFiles.reduce((sum, file) => sum + file.size, 0);
@@ -1434,6 +1369,7 @@ export function ReviewWorkspace() {
       window.history.replaceState({}, "", url);
       setExhibitAssets(manifestAssets(nextTables, nextFigures, (path) => urlByReference.get(normalizePackagePath(path)) || null));
       setSourceAnchors(Object.fromEntries((nextSourceManifest?.anchors || []).map((anchor) => [anchor.id, anchor])));
+      setComputationsById(indexReviewComputations(nextComputations));
       setAnnouncement(`Loaded review ${nextLedger.review_id} with ${nextLedger.findings.length} findings${nextManuscript ? " and manuscript context" : "; no manuscript was loaded"}.`);
     } catch (error) {
       if (sequence === localLoadSequence.current) {
@@ -1529,9 +1465,20 @@ export function ReviewWorkspace() {
 
   const activeEvidenceIndex = Math.min(evidenceIndex, Math.max(0, (selected?.evidence.length || 1) - 1));
   const evidence = selected?.evidence[activeEvidenceIndex] || selected?.evidence[0];
+  const evidenceAnchorIds = evidence?.representation === "composite_comparison"
+    ? evidence.anchor_ids || []
+    : evidence?.anchor_id ? [evidence.anchor_id] : [];
+  const sourceEvidenceKey = `${selected?.id || "none"}:${evidence?.id || activeEvidenceIndex}`;
+  const activeSourceAnchorIndex = sourceAnchorSelection.evidenceKey === sourceEvidenceKey
+    ? Math.min(sourceAnchorSelection.index, Math.max(0, evidenceAnchorIds.length - 1))
+    : 0;
+  const activeSourceAnchorId = evidenceAnchorIds[activeSourceAnchorIndex];
+  const activeSourceAnchor = activeSourceAnchorId ? sourceAnchors[activeSourceAnchorId] : undefined;
+  const computation = evidence?.computation_id ? computationsById[evidence.computation_id] : undefined;
   const evidenceKind = evidence?.type === "figure" ? "figure" : evidence?.type === "table_cell" ? "table" : null;
   const exhibit = evidenceKind && evidence?.locator.exhibit ? exhibitAssets[exhibitKey(evidenceKind, evidence.locator.exhibit)] : undefined;
-  const activeExhibitPath = exhibit?.paths[Math.min(assetPathIndex, exhibit.paths.length - 1)];
+  const activeExhibitRender = exhibit?.renders[Math.min(assetPathIndex, exhibit.renders.length - 1)];
+  const activeExhibitPath = activeExhibitRender?.resolvedPath;
   const loadingReviewTitle = isLocalLoading ? "local review package" : registry?.reviews.find((entry) => entry.slug === reviewSlug)?.title || "review";
   const bannerMessage = loadError || persistenceWarning || handoffWarning;
   const packageWarning = run?.status && run.status !== "complete"
@@ -1582,20 +1529,8 @@ export function ReviewWorkspace() {
     const message = (value: string) => ({ before: "", highlight: "", after: "", message: value, exact: false });
     if (!manuscript) return message("No manuscript text is loaded for this review. The structured evidence quote remains available.");
     if (!evidenceContent || evidence?.type === "absence_scope") return message("Use the structured source and locator for this scope-based evidence; no unrelated manuscript opening is shown.");
-    const sourceAnchor = evidence?.anchor_id ? sourceAnchors[evidence.anchor_id] : undefined;
-    if (sourceAnchor && sourceAnchor.start_char !== null && sourceAnchor.end_char !== null) {
-      const { start_char: start, end_char: end } = sourceAnchor;
-      if (end <= manuscript.length && sha256Hex(manuscript.slice(start, end)) === sourceAnchor.content_sha256) {
-        return {
-          before: manuscript.slice(Math.max(0, start - 700), start),
-          highlight: manuscript.slice(start, end),
-          after: manuscript.slice(end, Math.min(manuscript.length, end + 1900)),
-          message: "",
-          exact: true,
-        };
-      }
-      return message(`Source anchor ${sourceAnchor.id} did not match the loaded manuscript text and was not highlighted. Use the structured evidence and verify the source package.`);
-    }
+    if (activeSourceAnchor) return exactAnchorExcerpt(manuscript, activeSourceAnchor, sha256Hex);
+    if (activeSourceAnchorId) return message(`Source anchor ${activeSourceAnchorId} was not resolved in the loaded source manifest. Use the structured evidence and verify the source package.`);
     const clean = evidenceContent.replace(/[“”]/g, '"').replace(/\.\.\..*$/, "");
     const normalizedManuscript = manuscript.replace(/[“”]/g, '"');
     const tokens = clean.match(/[\p{L}\p{N}]+/gu)?.filter((token) => token.length > 1).slice(0, 12) || [];
@@ -1605,7 +1540,7 @@ export function ReviewWorkspace() {
     const index = anchor.exec(normalizedManuscript)?.index ?? -1;
     if (index < 0) return message("The quoted passage could not be matched safely in the loaded manuscript. Use the structured source and locator; no unrelated opening-page text is shown.");
     return { before: manuscript.slice(Math.max(0, index - 700), Math.min(manuscript.length, index + 1900)), highlight: "", after: "", message: "", exact: false };
-  }, [evidence?.anchor_id, evidence?.type, evidenceContent, manuscript, sourceAnchors]);
+  }, [activeSourceAnchor, activeSourceAnchorId, evidence?.type, evidenceContent, manuscript]);
 
   useEffect(() => {
     if (!pendingDocumentAnchor || activeDocument?.id !== pendingDocumentAnchor.documentId) return;
@@ -1971,6 +1906,12 @@ export function ReviewWorkspace() {
               <button className="evidence-close" aria-label="Close evidence context" onClick={() => openMobilePane("comment")}>Close</button>
             </div>
           </div>
+          {evidenceAnchorIds.length > 1 && <div className="comparison-source-switcher" role="group" aria-label="Comparison source anchors">
+            {evidenceAnchorIds.map((anchorId, index) => <button key={anchorId} aria-pressed={index === activeSourceAnchorIndex} title={sourceAnchors[anchorId]?.locator || anchorId} data-source-anchor={anchorId} onClick={() => {
+              setSourceAnchorSelection({ evidenceKey: sourceEvidenceKey, index });
+              setAnnouncement(`Showing Source ${index + 1} for ${selected.id}`);
+            }}><strong>{conciseSourceAnchorLabel(index, sourceAnchors[anchorId]?.locator || "")}</strong></button>)}
+          </div>}
           {showEvidence ? (
             <div className="evidence-sheet">
               {selected.evidence.length > 1 && (
@@ -1983,32 +1924,22 @@ export function ReviewWorkspace() {
                 </div>
               )}
               <div className="evidence-label"><span>{readableState(evidence?.type)}</span><span>{readableState(selected.support_state)}</span></div>
-              {evidence?.type === "quote" ? (
-                <blockquote className={!expandedEvidence && evidenceContent.length > 900 ? "evidence-collapsed" : ""}>
-                  <span className="quote-mark" aria-hidden="true">“</span>
-                  <RenderedMarkdown>{evidenceContent || "No quoted evidence is available."}</RenderedMarkdown>
-                </blockquote>
-              ) : evidence?.type === "equation" ? (
-                <EquationEvidence content={evidenceContent} />
-              ) : ["code", "table_cell"].includes(evidence?.type || "") ? (
-                <pre className="structured-evidence">{evidenceContent || "No structured evidence is available."}</pre>
-              ) : (
-                <p className="prose-evidence">{evidenceContent || "No narrative evidence is available."}</p>
-              )}
+              <EvidenceContent evidence={evidence} content={evidenceContent} collapsed={evidence?.type === "quote" && !expandedEvidence && evidenceContent.length > 900} />
+              {evidence?.type === "computation" && <ComputationProvenance computationId={evidence.computation_id} computation={computation} sourceAnchors={sourceAnchors} />}
               {evidence?.type === "quote" && evidenceContent.length > 900 && <button className="evidence-expand" aria-expanded={expandedEvidence} onClick={() => setExpandedEvidence((value) => !value)}>{expandedEvidence ? "Collapse evidence" : "Show full evidence"}</button>}
               {exhibit && activeExhibitPath && (
                 <figure className="exhibit-preview">
-                  {exhibit.paths.length > 1 && (
+                  {exhibit.renders.length > 1 && (
                     <div className="render-switcher" role="group" aria-label="Saved exhibit renders">
-                      {exhibit.paths.map((path, index) => (
-                        <button key={path} aria-pressed={index === Math.min(assetPathIndex, exhibit.paths.length - 1)} onClick={() => setAssetPathIndex(index)}>Render {index + 1}</button>
+                      {exhibit.renders.map((render, index) => (
+                        <button key={render.resolvedPath} aria-label={`Show ${render.label.toLowerCase()} for ${exhibit.label}`} aria-pressed={index === Math.min(assetPathIndex, exhibit.renders.length - 1)} onClick={() => setAssetPathIndex(index)}>{render.label}</button>
                       ))}
                     </div>
                   )}
-                  <a className="exhibit-image-link" href={activeExhibitPath} target="_blank" rel="noopener noreferrer" aria-label={`Open ${exhibit.label} at full size in a new tab`}>
-                    <ExhibitImage src={activeExhibitPath} alt={`${exhibit.kind} ${exhibit.label} evidence${exhibit.pages.length ? `, PDF page ${exhibit.pages.join(", ")}` : ""}`} />
+                  <a className="exhibit-image-link" href={activeExhibitPath} target="_blank" rel="noopener noreferrer" aria-label={`Open ${activeExhibitRender?.label.toLowerCase() || "exhibit image"} for ${exhibit.label} at full size in a new tab`}>
+                    <ExhibitImage src={activeExhibitPath} alt={`${exhibit.kind} ${exhibit.label}, ${activeExhibitRender?.label.toLowerCase() || "saved exhibit image"}${exhibit.pages.length ? `, PDF page ${exhibit.pages.join(", ")}` : ""}`} />
                   </a>
-                  <figcaption><span>{exhibit.kind} render · {exhibit.label}{exhibit.pages.length ? ` · PDF p. ${exhibit.pages.join(", ")}` : ""}</span><a href={activeExhibitPath} target="_blank" rel="noopener noreferrer">Open full size</a></figcaption>
+                  <figcaption><span>{activeExhibitRender?.label || "Saved exhibit image"} · {exhibit.label}{exhibit.pages.length ? ` · PDF p. ${exhibit.pages.join(", ")}` : ""}</span><a href={activeExhibitPath} target="_blank" rel="noopener noreferrer">Open full size</a></figcaption>
                 </figure>
               )}
               {evidenceKind && evidence?.locator.exhibit && !activeExhibitPath && <div className="missing-exhibit" role="status"><strong>Declared exhibit render unavailable</strong><span>{exhibit?.missingPaths.length ? `${exhibit.missingPaths.length} referenced image ${exhibit.missingPaths.length === 1 ? "was" : "were"} not included or could not be resolved.` : "No matching render is declared in the loaded exhibit manifest."} The evidence text and source locator remain available.</span></div>}
@@ -2017,7 +1948,8 @@ export function ReviewWorkspace() {
                 <div><dt>Location</dt><dd>{locator(selected, activeEvidenceIndex)}</dd></div>
                 <div><dt>Evidence type</dt><dd>{readableState(evidence?.type)}</dd></div>
                 {evidence?.representation && <div><dt>Representation</dt><dd>{readableState(evidence.representation)}</dd></div>}
-                {evidence?.anchor_id && <div><dt>Source anchor</dt><dd>{evidence.anchor_id}</dd></div>}
+                {activeSourceAnchorId && <div><dt>{evidenceAnchorIds.length > 1 ? `Source ${activeSourceAnchorIndex + 1} anchor` : "Source anchor"}</dt><dd>{activeSourceAnchorId}</dd></div>}
+                {evidence?.computation_id && <div><dt>Computation</dt><dd>{evidence.computation_id}</dd></div>}
               </dl>
               {selected.evidence_boundary && <p className="evidence-boundary"><strong>Evidence boundary</strong>{selected.evidence_boundary}</p>}
             </div>
@@ -2056,12 +1988,10 @@ export function ReviewWorkspace() {
             <span className="section-number">02</span>
             <div>
               <h3>Relevant text</h3>
-              {evidence?.type === "quote" ? (
-                <blockquote><RenderedMarkdown>{evidenceContent || "No quoted evidence is available."}</RenderedMarkdown></blockquote>
-              ) : evidence?.type === "equation" ? <EquationEvidence content={evidenceContent} compact /> : <p>{evidenceContent || "No narrative evidence is available."}</p>}
+              <EvidenceContent evidence={evidence} content={evidenceContent} compact />
               {exhibit && activeExhibitPath && <figure className="inline-exhibit-preview">
-                <ExhibitImage compact src={activeExhibitPath} alt={`${exhibit.kind} ${exhibit.label} evidence`} />
-                <figcaption>{exhibit.kind} render · {exhibit.label}</figcaption>
+                <ExhibitImage compact src={activeExhibitPath} alt={`${exhibit.kind} ${exhibit.label}, ${activeExhibitRender?.label.toLowerCase() || "saved exhibit image"}`} />
+                <figcaption>{activeExhibitRender?.label || "Saved exhibit image"} · {exhibit.label}</figcaption>
               </figure>}
               {evidenceKind && evidence?.locator.exhibit && !activeExhibitPath && <div className="missing-exhibit compact" role="status"><strong>Exhibit render unavailable</strong><span>Open the evidence context for the source locator and package details.</span></div>}
               <button className="evidence-expand" onClick={() => openMobilePane("evidence")}>Open evidence context</button>

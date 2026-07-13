@@ -1,12 +1,5 @@
 version: 2
 updates:
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: monthly
-    groups:
-      github-actions:
-        patterns: ["*"]
   - package-ecosystem: npm
     directory: /review-viewer
     schedule:

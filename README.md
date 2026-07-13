@@ -2,7 +2,7 @@
 
 `econ-review` is a beta Agent Skill for constructive, author-side review of economics papers. Its objective is to improve the paper. It reconstructs the paper before judging it, activates logical, technical, and methodological checks from the actual claims and evidentiary objects, verifies surviving findings against source anchors, and saves a prioritized referee report, a separate writing report, and a dependency-aware fix plan.
 
-The architecture is intended for empirical, experimental, descriptive, structural/quantitative, theoretical, macro, and mixed papers. A public-safe six-family synthetic benchmark now tests routing, seeded-issue recall, and clean false-positive traps. It is a regression harness, not evidence of superiority; end-to-end review results must be reported before making comparative quality claims.
+The architecture is intended for empirical, experimental, descriptive, structural/quantitative, theoretical, macro, and mixed papers. A public-safe six-family synthetic benchmark supplies manuscripts and rubrics for testing routing, seeded-issue recall, and clean false-positive traps. Review outputs are not shipped, so a clean checkout reports every case as `not_run` until those packages are generated. The harness is not evidence of superiority; end-to-end review results must be reported before making comparative quality claims.
 
 ## Current v0.4 scope
 
@@ -26,6 +26,8 @@ The broader challenge/deep-dive/rereview/respond loop, additional conditional me
 ## Install
 
 Use one installation method to avoid duplicate discovery. Remote installation is disabled unless both `ECON_REVIEW_ARCHIVE_URL` and the expected `ECON_REVIEW_ARCHIVE_SHA256` are supplied; the installer verifies the archive before safe extraction.
+
+The supported command-line environment is macOS, Linux, or Windows through WSL, with Python 3.10 or newer. Native Windows installation is not currently tested. The optional Review Desk requires Node.js 22.14 or newer; its `.nvmrc` pins the preferred runtime. PDF ingestion requires separately installed Poppler utilities on the active environment.
 
 From a local checkout:
 
@@ -142,14 +144,14 @@ Production build/sync refuses to copy review materials unless `ALLOW_PUBLISH=1` 
 ## Validate development builds
 
 ```bash
-python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py" econ-review
+python3 econ-review/scripts/validate_skill_package.py econ-review
 python3 -m unittest discover -s tests -v
 python3 econ-review/scripts/generate_reports.py --check tests/fixtures/valid-review
 python3 econ-review/scripts/generate_fix_plan.py --check tests/fixtures/valid-review
 python3 econ-review/scripts/validate_review.py tests/fixtures/valid-review
 python3 econ-review/scripts/finalize_review.py --check tests/fixtures/valid-review
 python3 econ-review/scripts/pdf_ingestion.py doctor
-python3 benchmarks/evaluate.py
+python3 benchmarks/evaluate.py  # missing review packages are reported as not_run
 python3 -m unittest discover -s tests -p 'test_stat_recompute.py' -v
 python3 scripts/build_public_release.py --check
 cd review-viewer && npm run lint && npx tsc --noEmit && npm test

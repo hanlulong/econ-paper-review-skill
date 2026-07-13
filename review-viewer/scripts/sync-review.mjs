@@ -1,7 +1,12 @@
 import { copyFile, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  validateReviewComputationLinks,
+  validateReviewComputations,
+} from "../lib/review-computations-contract.ts";
 import { validateReviewDocumentManifest } from "../lib/review-documents.ts";
+import { validateReviewLedger } from "../lib/review-ledger-contract.ts";
 
 if (process.env.ALLOW_PUBLISH !== "1") {
   console.error([
@@ -78,7 +83,7 @@ async function parseObject(path, label) {
 }
 
 async function prepareBundle(bundle) {
-  const [manifestText, run, findings, synthesis, figures, tables, sourceManifest] = await Promise.all([
+  const [manifestText, run, findings, synthesis, figures, tables, sourceManifest, computations] = await Promise.all([
     readFile(resolve(bundle.reviewRoot, "review-manifest.json"), "utf8"),
     parseObject(resolve(bundle.reviewRoot, "run.json"), `${bundle.slug} run.json`),
     parseObject(resolve(bundle.reviewRoot, "findings.json"), `${bundle.slug} findings.json`),
@@ -86,8 +91,12 @@ async function prepareBundle(bundle) {
     parseObject(resolve(bundle.reviewRoot, "evidence/figures.json"), `${bundle.slug} figures.json`),
     parseObject(resolve(bundle.reviewRoot, "evidence/tables.json"), `${bundle.slug} tables.json`),
     parseObject(resolve(bundle.reviewRoot, "evidence/source-manifest.json"), `${bundle.slug} source-manifest.json`),
+    parseObject(resolve(bundle.reviewRoot, "evidence/computations.json"), `${bundle.slug} computations.json`),
   ]);
   const manifest = validateReviewDocumentManifest(manifestText);
+  const checkedFindings = validateReviewLedger(findings);
+  const checkedComputations = validateReviewComputations(computations);
+  validateReviewComputationLinks(checkedFindings, checkedComputations, sourceManifest);
   if (!run.review_id || manifest.review_id !== run.review_id || findings.review_id !== run.review_id || synthesis.review_id !== run.review_id || sourceManifest.review_id !== run.review_id) {
     throw new Error(`Review IDs do not match across the canonical package for ${bundle.slug}`);
   }
@@ -123,17 +132,24 @@ async function prepareBundle(bundle) {
 
 async function verifyStagedBundle(bundle, manifest, exhibitPaths) {
   const destination = resolve(stageRoot, bundle.slug);
-  const [stagedManifestText, stagedRun, stagedFindings] = await Promise.all([
+  const [stagedManifestText, stagedRun, stagedFindings, stagedComputations, stagedSourceManifest] = await Promise.all([
     readFile(resolve(destination, "review-manifest.json"), "utf8"),
     parseObject(resolve(destination, "run.json"), `${bundle.slug} staged run.json`),
     parseObject(resolve(destination, "findings.json"), `${bundle.slug} staged findings.json`),
+    parseObject(resolve(destination, "computations.json"), `${bundle.slug} staged computations.json`),
+    parseObject(resolve(destination, "source-manifest.json"), `${bundle.slug} staged source-manifest.json`),
   ]);
   const stagedManifest = validateReviewDocumentManifest(stagedManifestText);
   if (stagedManifest.review_id !== manifest.review_id || stagedRun.review_id !== manifest.review_id || stagedFindings.review_id !== manifest.review_id) {
     throw new Error(`Staged review IDs do not match for ${bundle.slug}`);
   }
+  validateReviewComputationLinks(
+    validateReviewLedger(stagedFindings),
+    validateReviewComputations(stagedComputations),
+    stagedSourceManifest,
+  );
   await Promise.all([
-    "synthesis.json", "manuscript.md", "figures.json", "tables.json", "source-manifest.json",
+    "synthesis.json", "manuscript.md", "figures.json", "tables.json", "source-manifest.json", "computations.json",
     ...manifest.documents.map((document) => document.path), ...exhibitPaths,
   ].map(async (relativePath) => {
     const info = await lstat(resolveInside(destination, relativePath));
@@ -163,6 +179,7 @@ try {
       copyRegularFile(resolve(bundle.reviewRoot, "evidence/figures.json"), resolve(destination, "figures.json")),
       copyRegularFile(resolve(bundle.reviewRoot, "evidence/tables.json"), resolve(destination, "tables.json")),
       copyRegularFile(resolve(bundle.reviewRoot, "evidence/source-manifest.json"), resolve(destination, "source-manifest.json")),
+      copyRegularFile(resolve(bundle.reviewRoot, "evidence/computations.json"), resolve(destination, "computations.json")),
       ...manifest.documents.map((document) => copyDeclaredDocument(bundle.reviewRoot, destination, document.path)),
       ...exhibitPaths.map((relativePath) => copyDeclaredDocument(bundle.reviewRoot, destination, relativePath)),
     ]);

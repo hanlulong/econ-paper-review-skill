@@ -1,6 +1,6 @@
 # Cross-family review benchmark
 
-This benchmark tests whether `econ-review` routes checks from claims and evidentiary objects rather than from a single paper label. It is a framework regression suite, not a claim that the skill outperforms another product.
+This benchmark is designed to test whether `econ-review` routes checks from claims and evidentiary objects rather than from a single paper label. It is a framework regression harness, not a completed evaluation or a claim that the skill outperforms another product.
 
 The six synthetic cases cover empirical causal, descriptive/measurement, structural/quantitative, macro/dynamic, formal theory, and mixed theory-empirical work. Each case contains:
 
@@ -20,6 +20,6 @@ Create a full review package for a case under `benchmarks/reviews/<case-id>/`, t
 python3 benchmarks/evaluate.py
 ```
 
-The evaluator checks burden routing, required issue-concept recall, forbidden false positives, and the package validator. It reports each dimension separately and never collapses them into an unsupported quality or superiority score. Missing review packages are reported as `not_run`, not failures.
+The evaluator checks burden routing, required issue-concept recall, forbidden false positives, and the package validator for review packages that exist. It reports each dimension separately and never collapses them into an unsupported quality or superiority score. Missing review packages are reported as `not_run`, not failures; the distributed package intentionally contains no generated reviews, so a clean checkout reports six `not_run` cases.
 
 The benchmark manuscripts and rubrics are public-safe synthetic fixtures. Real manuscripts, competitor reports, and private evaluation labels do not belong here.

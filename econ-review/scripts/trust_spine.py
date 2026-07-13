@@ -21,6 +21,16 @@ PDF_INGESTION_FIELDS = (
     "pipeline_fingerprint",
 )
 
+EVIDENCE_PREFIX_REPRESENTATIONS = {
+    "[Reviewer comparison]": "composite_comparison",
+    "[Reviewer observation]": "reviewer_observation",
+    "[Figure observation]": "reviewer_observation",
+    "[Table observation]": "reviewer_observation",
+    "[Computation]": "computed_result",
+    "[Checked absence]": "checked_absence",
+    "[Rendered transcription]": "normalized_transcription",
+}
+
 
 def _load(path: Path, errors: list[str]) -> Any:
     try:
@@ -40,6 +50,66 @@ def _normalized(value: str, mode: str) -> str:
     if mode == "unicode_nfkc_whitespace":
         return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", value)).strip()
     return value
+
+
+def _anchor_page(anchor: dict[str, Any]) -> int | None:
+    """Return a page number encoded by a canonical source-anchor locator.
+
+    Page provenance lives in the source manifest, while findings carry a
+    reader-facing structured locator.  Keep the parser deliberately narrow:
+    it recognizes the canonical ``PDF p. N`` spelling and common ``page N``
+    variants, but does not infer a page from unrelated digits.
+    """
+    locator = anchor.get("locator")
+    if not isinstance(locator, str):
+        return None
+    match = re.search(r"(?i)\b(?:pdf\s+)?p(?:age)?\.?\s*(\d+)\b", locator)
+    return int(match.group(1)) if match else None
+
+
+def _validate_evidence_page(
+    evidence_id: str,
+    evidence: dict[str, Any],
+    referenced_anchors: list[dict[str, Any]],
+    errors: list[str],
+) -> None:
+    """Require a declared evidence page to agree with every linked anchor.
+
+    A composite may span pages by leaving ``locator.page`` null and carrying
+    its complete provenance in ``anchor_ids``.  The current contract has no
+    primary/context anchor-role model, so a single declared page cannot stand
+    in for components on other pages.
+    """
+    locator = evidence.get("locator")
+    if not isinstance(locator, dict) or not isinstance(locator.get("page"), int):
+        return
+    evidence_page = locator["page"]
+    disagreements: list[str] = []
+    for anchor in referenced_anchors:
+        page = _anchor_page(anchor)
+        if page is not None and page != evidence_page:
+            disagreements.append(f"{anchor.get('id')} is on page {page}")
+    if disagreements:
+        errors.append(
+            f"evidence {evidence_id} locator.page {evidence_page} disagrees with "
+            f"its source anchor provenance: {', '.join(disagreements)}"
+        )
+
+
+def _validate_evidence_prefix(
+    evidence_id: str,
+    content: str,
+    representation: Any,
+    errors: list[str],
+) -> None:
+    """Reject a visible evidence label that contradicts canonical semantics."""
+    for prefix, expected in EVIDENCE_PREFIX_REPRESENTATIONS.items():
+        if content.startswith(prefix) and representation != expected:
+            errors.append(
+                f"evidence {evidence_id} prefix {prefix} requires {expected}, "
+                f"not {representation}"
+            )
+            return
 
 
 def pdf_sources(manifest: dict[str, Any]) -> list[dict[str, Any]]:
@@ -279,21 +349,38 @@ def validate_trust_spine(
             evidence_type = evidence.get("type")
             anchor_id = evidence.get("anchor_id")
             representation = evidence.get("representation")
+            content = str(evidence.get("content") or "")
+            comparison_prefix = "[Reviewer comparison]"
+            _validate_evidence_prefix(evidence_id, content, representation, errors)
             if evidence_type in {"quote", "equation", "table_cell", "figure", "code"}:
                 if representation == "composite_comparison":
                     component_anchors = evidence.get("anchor_ids", [])
+                    if not isinstance(component_anchors, list) or len(component_anchors) < 2:
+                        errors.append(f"evidence {evidence_id} composite requires at least two anchors")
+                        component_anchors = component_anchors if isinstance(component_anchors, list) else []
                     unknown_anchors = sorted(set(component_anchors) - set(anchor_by_id))
                     if unknown_anchors:
                         errors.append(
                             f"evidence {evidence_id} composite references unknown anchors: {', '.join(unknown_anchors)}"
                         )
-                    if not str(evidence.get("content") or "").lower().startswith("composite comparison:"):
-                        errors.append(f"evidence {evidence_id} composite content must be explicitly labeled")
+                    referenced_anchors = [anchor_by_id[value] for value in component_anchors if value in anchor_by_id]
+                    for component in referenced_anchors:
+                        source = source_by_id.get(component.get("source_id"), {})
+                        if evidence.get("source") not in {component.get("source_id"), source.get("path")}:
+                            errors.append(
+                                f"evidence {evidence_id} source does not match composite anchor {component.get('id')}"
+                            )
+                    _validate_evidence_page(evidence_id, evidence, referenced_anchors, errors)
+                    if not content.startswith(comparison_prefix):
+                        errors.append(
+                            f"evidence {evidence_id} composite content must start with {comparison_prefix}"
+                        )
                     continue
                 if anchor_id not in anchor_by_id:
                     errors.append(f"evidence {evidence_id} requires a known anchor_id")
                     continue
                 anchor = anchor_by_id[anchor_id]
+                _validate_evidence_page(evidence_id, evidence, [anchor], errors)
                 source = source_by_id.get(anchor.get("source_id"), {})
                 if evidence.get("source") not in {anchor.get("source_id"), source.get("path")}:
                     errors.append(f"evidence {evidence_id} source does not match anchor {anchor_id}")
@@ -301,7 +388,11 @@ def validate_trust_spine(
                     errors.append(f"evidence {evidence_id} is not verbatim at anchor {anchor_id}")
                 if representation == "normalized_transcription":
                     mode = (source.get("extraction") or {}).get("normalization", "unicode_nfkc_whitespace")
-                    if _normalized(str(evidence.get("content") or ""), mode) != _normalized(anchor_content.get(anchor_id, ""), mode):
+                    transcription = content
+                    prefix = "[Rendered transcription]"
+                    if transcription.startswith(prefix):
+                        transcription = transcription[len(prefix):].lstrip()
+                    if _normalized(transcription, mode) != _normalized(anchor_content.get(anchor_id, ""), mode):
                         errors.append(f"evidence {evidence_id} does not match normalized anchor {anchor_id}")
             elif evidence_type == "computation":
                 if evidence.get("computation_id") not in computation_by_id:

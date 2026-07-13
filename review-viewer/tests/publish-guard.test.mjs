@@ -9,7 +9,7 @@ test("review bundle sync requires explicit publication authorization", async () 
   const environment = { ...process.env };
   delete environment.ALLOW_PUBLISH;
 
-  const result = spawnSync(process.execPath, ["scripts/sync-review.mjs"], {
+  const result = spawnSync(process.execPath, ["--experimental-strip-types", "scripts/sync-review.mjs"], {
     cwd: new URL("..", import.meta.url),
     env: environment,
     encoding: "utf8",
@@ -37,6 +37,8 @@ test("authorized sync stages and validates before replacing published assets", a
   assert.match(source, /verifyStagedBundle/);
   assert.match(source, /exhibitPaths/);
   assert.match(source, /source-manifest\.json/);
+  assert.match(source, /computations\.json/);
+  assert.match(source, /validateReviewComputationLinks/);
   assert.match(source, /Missing or unsafe exhibit render/);
   assert.match(source, /exhibitPaths\.map\(\(relativePath\) => copyDeclaredDocument/);
   assert.match(source, /rename\(stageRoot, publicRoot\)/);

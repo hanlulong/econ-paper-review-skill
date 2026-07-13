@@ -12,6 +12,7 @@ commercial release.
 | `pdfplumber` / `pdfminer.six` | MIT | PDF geometry and table candidates | Python dependencies; not vendored |
 | `pypdf` | BSD-3-Clause | PDF structural and safety inspection | Python dependency; not vendored |
 | Pillow | HPND | Image inspection and deterministic crops | Python dependency; not vendored |
+| PyYAML | MIT | Agent-skill package validation | Python dependency; not vendored |
 | `requests` | Apache-2.0 | Server-side calls to an explicitly authorized Mathpix job | Python dependency; not vendored |
 | Tesseract | Apache-2.0 | Optional local prose OCR | External executable; not bundled |
 | Poppler utilities | GPL | Page metadata, text geometry, and rendering | External executables; not bundled |
@@ -19,6 +20,23 @@ commercial release.
 Invoking a separately installed executable is not permission to redistribute
 its binary. If an online or desktop distribution later bundles Poppler or
 Tesseract, perform a new packaging and license review first.
+
+## Review Desk dependency boundary
+
+The Review Desk's direct JavaScript dependencies are declared in
+`review-viewer/package.json`, and `package-lock.json` records the exact resolved
+tree. They are downloaded by npm and are not vendored in this source archive.
+The tree is predominantly permissively licensed, but current transitive build
+and image dependencies also include MPL-2.0 components and libvips platform
+packages under LGPL-3.0-or-later. A production build or hosted deployment may
+therefore carry notice, source-availability, relinking, or other obligations
+that do not arise merely from publishing this source tree.
+
+Before a commercial deployment, generate an SBOM from the exact lockfile,
+identify which transitive components enter the deployed artifact, preserve all
+required notices, and obtain a legal review of the resulting distribution and
+hosting model. `npm audit` checks known security advisories; it is not a license
+or attribution audit.
 
 ## Evaluated conversion backends
 

@@ -43,7 +43,7 @@ class TrustSpineTests(unittest.TestCase):
             "representation": "composite_comparison",
             "anchor_id": None,
             "anchor_ids": ["ANC-01", "ANC-02"],
-            "content": "Composite comparison: the global uniqueness claim and the adjacent proposition summary.",
+            "content": "[Reviewer comparison] The global uniqueness claim differs from the adjacent proposition summary.",
         })
         ledger_path.write_text(json.dumps(ledger, indent=2) + "\n", encoding="utf-8")
         verification_path = target / "evidence" / "verification.json"
@@ -234,6 +234,78 @@ class TrustSpineTests(unittest.TestCase):
             run = json.loads((target / "run.json").read_text(encoding="utf-8"))
             errors = MODULE.validate_trust_spine(target, run, ledger, MODULE.validate_schema)
             self.assertTrue(any("component checks are incomplete" in error and "ANC-02" in error for error in errors), errors)
+
+    def test_recognized_prefixes_require_matching_representations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.copy_fixture(tmp)
+            ledger = json.loads((target / "findings.json").read_text(encoding="utf-8"))
+            run = json.loads((target / "run.json").read_text(encoding="utf-8"))
+            evidence = ledger["findings"][0]["evidence"][0]
+            cases = {
+                "[Reviewer comparison]": "composite_comparison",
+                "[Reviewer observation]": "reviewer_observation",
+                "[Figure observation]": "reviewer_observation",
+                "[Table observation]": "reviewer_observation",
+                "[Computation]": "computed_result",
+                "[Checked absence]": "checked_absence",
+                "[Rendered transcription]": "normalized_transcription",
+            }
+            for prefix, expected in cases.items():
+                with self.subTest(prefix=prefix):
+                    evidence["content"] = prefix + " Synthetic evidence."
+                    evidence["representation"] = "verbatim"
+                    errors = MODULE.validate_trust_spine(target, run, ledger, MODULE.validate_schema)
+                    self.assertTrue(
+                        any(prefix in error and expected in error for error in errors),
+                        errors,
+                    )
+
+    def test_prefixed_normalized_transcription_matches_anchor_after_label(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.copy_fixture(tmp)
+            ledger = json.loads((target / "findings.json").read_text(encoding="utf-8"))
+            manifest = json.loads(
+                (target / "evidence" / "source-manifest.json").read_text(encoding="utf-8")
+            )
+            source = (target / "synthetic-paper.md").read_text(encoding="utf-8")
+            anchor = manifest["anchors"][0]
+            anchor_content = source[anchor["start_char"]:anchor["end_char"]]
+            evidence = ledger["findings"][0]["evidence"][0]
+            evidence["representation"] = "normalized_transcription"
+            evidence["content"] = "[Rendered transcription] " + anchor_content
+            run = json.loads((target / "run.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                MODULE.validate_trust_spine(target, run, ledger, MODULE.validate_schema), []
+            )
+
+    def test_composite_comparison_requires_two_anchors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.copy_fixture(tmp)
+            ledger, _ = self.make_composite(target, complete=True)
+            evidence = ledger["findings"][0]["evidence"][0]
+            evidence["anchor_ids"] = ["ANC-01"]
+            run = json.loads((target / "run.json").read_text(encoding="utf-8"))
+            errors = MODULE.validate_trust_spine(target, run, ledger, MODULE.validate_schema)
+            self.assertTrue(any("requires at least two anchors" in error for error in errors), errors)
+
+    def test_source_linked_evidence_page_must_match_anchor_page(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.copy_fixture(tmp)
+            manifest = json.loads(
+                (target / "evidence" / "source-manifest.json").read_text(encoding="utf-8")
+            )
+            manifest["anchors"][0]["locator"] = "PDF p. 4, block synthetic-1"
+            (target / "evidence" / "source-manifest.json").write_text(
+                json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+            )
+            ledger = json.loads((target / "findings.json").read_text(encoding="utf-8"))
+            ledger["findings"][0]["evidence"][0]["locator"]["page"] = 5
+            run = json.loads((target / "run.json").read_text(encoding="utf-8"))
+            errors = MODULE.validate_trust_spine(target, run, ledger, MODULE.validate_schema)
+            self.assertTrue(
+                any("locator.page 5 disagrees" in error and "ANC-01 is on page 4" in error for error in errors),
+                errors,
+            )
 
     def test_narrative_verification_cannot_override_failed_structured_check(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

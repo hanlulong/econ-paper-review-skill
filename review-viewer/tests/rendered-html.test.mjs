@@ -5,7 +5,12 @@ import test from "node:test";
 async function render() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
+  let { default: worker } = await import(workerUrl.href);
+  if (typeof worker?.fetch !== "function") {
+    const localWorkerUrl = new URL("../dist/server/local-worker.js", import.meta.url);
+    localWorkerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
+    ({ default: worker } = await import(localWorkerUrl.href));
+  }
 
   return worker.fetch(
     new Request("http://localhost/", { headers: { accept: "text/html" } }),
@@ -27,13 +32,17 @@ test("server-renders the Review Desk shell without starter metadata", async () =
 });
 
 test("ships the evidence-first interaction model", async () => {
-  const [workspace, css, packageJson, localPackage, markdownRenderer, actionStorage] = await Promise.all([
+  const [workspace, css, packageJson, localPackage, markdownRenderer, actionStorage, evidenceContract, ledgerContract, textEvidencePresentation, locatorFormatter] = await Promise.all([
     readFile(new URL("../app/review-workspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../lib/local-review-package.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/markdown-content.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/review-action-storage.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/review-evidence-contract.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/review-ledger-contract.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/review-text-evidence-presentation.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/review-locator.ts", import.meta.url), "utf8"),
   ]);
 
   for (const label of [
@@ -60,8 +69,22 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(workspace, /This tab only/);
   assert.match(workspace, /missing-exhibit/);
   assert.match(workspace, /source-manifest\.json/);
-  assert.match(workspace, /sha256Hex\(manuscript\.slice\(start, end\)\)/);
+  assert.match(workspace, /exactAnchorExcerpt\(manuscript, activeSourceAnchor, sha256Hex\)/);
   assert.match(workspace, /Verified source anchor/);
+  assert.match(workspace, /evidence\/computations\.json/);
+  assert.match(workspace, /validateReviewComputations/);
+  assert.match(workspace, /validateReviewComputationLinks/);
+  assert.match(workspace, /ComputationProvenance/);
+  assert.match(workspace, /sourceAnchorPageLabel\(locator\)/);
+  assert.match(workspace, /Full locator:/);
+  for (const label of ["Recorded computation", "Input anchors", "Artifact record", "SHA-256", "Tolerance"]) {
+    assert.match(workspace, new RegExp(label));
+  }
+  assert.match(workspace, /does not run the method or open the artifact/);
+  assert.match(workspace, /Comparison source anchors/);
+  assert.match(workspace, /conciseSourceAnchorLabel/);
+  assert.match(workspace, /data-source-anchor=/);
+  assert.match(workspace, /evidence\.anchor_ids/);
   assert.match(workspace, /MAX_NOTE_CHARS = 10_000/);
   assert.match(workspace, /maxLength=\{MAX_NOTE_CHARS\}/);
   assert.match(workspace, /setPersistenceWarning/);
@@ -127,20 +150,26 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(workspace, /aria-keyshortcuts="J K A C P N"/);
   assert.match(workspace, /event\.isComposing/);
   assert.match(workspace, /closest\("input, textarea, select, button, a/);
+  const shortcutHandler = workspace.slice(workspace.indexOf("const onKey = (event: globalThis.KeyboardEvent)"), workspace.indexOf("window.addEventListener(\"keydown\", onKey)"));
+  assert.ok(shortcutHandler.indexOf("if (event.key === \"Escape\"") < shortcutHandler.indexOf("if (interactive) return;"), "Escape handling must remain available in interactive controls");
+  assert.ok(shortcutHandler.indexOf("if (interactive) return;") < shortcutHandler.indexOf("event.key.toLowerCase() === \"o\""), "interactive controls must suppress every global letter shortcut");
+  assert.doesNotMatch(shortcutHandler, /findingControl|interactive &&/);
   assert.match(workspace, /focusAfterFilter/);
   assert.match(workspace, /nextLedger\.review_id !== nextRun\.review_id/);
-  assert.match(workspace, /validEvidenceLocator\(item\.locator\)/);
+  assert.match(workspace, /validateReviewLedger as validateLedger/);
   assert.match(workspace, /value\.target\.venue === null/);
-  assert.match(workspace, /value\.paragraph && `para\./);
-  assert.match(workspace, /value\.lines && `lines/);
-  assert.match(workspace, /typeof field === "string"/);
-  assert.match(workspace, /raw\.fix\.resolved_when/);
+  assert.match(workspace, /formatUserFacingLocator\(value\)/);
+  assert.match(locatorFormatter, /value\.paragraph && `para\./);
+  assert.match(locatorFormatter, /value\.lines && `lines/);
+  assert.doesNotMatch(locatorFormatter, /value\.file/);
+  assert.match(evidenceContract, /typeof field === "string"/);
+  assert.match(ledgerContract, /raw\.fix\.resolved_when/);
   assert.match(workspace, /value\.target\.venue/);
   assert.match(workspace, /setManuscript\(nextManuscript\)/);
   assert.match(workspace, /contains invalid JSON/);
   assert.match(localPackage, /Multiple manuscript files were selected/);
   assert.match(workspace, /useMemo\(\(\) => \{/);
-  assert.match(workspace, /online appendix/i);
+  assert.match(locatorFormatter, /online appendix/i);
   assert.match(workspace, /filtered\.find\(\(finding\) => finding\.id === selectedId\)/);
   assert.match(workspace, /aria-pressed=/);
   assert.match(workspace, /compact-progress/);
@@ -173,6 +202,17 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(workspace, /ref=\{evidenceHeading\} tabIndex=\{-1\}/);
   assert.match(workspace, /EquationEvidence/);
   assert.match(workspace, /View raw equation/);
+  assert.match(workspace, /View raw evidence/);
+  assert.match(workspace, /equationEvidencePresentation/);
+  assert.match(workspace, /EvidenceSemanticFrame/);
+  assert.match(workspace, /<EvidenceSemanticFrame representation=\{evidence\?\.representation\}/);
+  assert.match(workspace, /evidence\?\.type === "equation"/);
+  assert.match(workspace, /\["code", "table_cell"\]\.includes/);
+  assert.doesNotMatch(workspace, /quote-mark/);
+  assert.match(textEvidencePresentation, /verbatim:\s*"Verbatim source excerpt"/);
+  assert.match(textEvidencePresentation, /reviewer_observation:\s*"Reviewer observation"/);
+  assert.match(textEvidencePresentation, /createElement\("blockquote"/);
+  assert.match(textEvidencePresentation, /role:\s*"note"/);
   assert.match(css, /prefers-reduced-motion/);
   assert.match(css, /\.report-reader/);
   assert.match(css, /\.report-document \.katex-display/);
@@ -182,8 +222,8 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(css, /:focus-visible/);
   assert.match(css, /\.workspace-grid\s*\{[^}]*grid-template-columns:\s*340px minmax\(0, 1fr\)/);
   assert.match(css, /\.app-shell\s*\{\s*height:\s*100vh/);
-  assert.doesNotMatch(css, /\.evidence-sheet blockquote\s*\{[^}]*margin:\s*auto/);
-  assert.match(css, /\.evidence-sheet blockquote\s*\{[^}]*white-space:\s*pre-wrap/);
+  assert.doesNotMatch(css, /\.evidence-sheet blockquote\s*\{/);
+  assert.match(css, /\.evidence-sheet \.source-excerpt\s*\{[^}]*white-space:\s*pre-wrap/);
   assert.match(css, /\.document-pane\s*\{[^}]*display:\s*none/);
   assert.match(css, /outline:\s*3px solid #0b6b63/);
   assert.match(css, /\.topbar\s*\{[^}]*height:\s*64px/);
@@ -233,8 +273,15 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(css, /\.status-dot\s*\{[^}]*border:\s*2px solid #737e83/);
   assert.match(css, /\.filter-help\s*\{[^}]*color:\s*#5c686d/);
   assert.match(css, /\.exhibit-image-link/);
+  assert.match(css, /\.comparison-source-switcher/);
+  assert.match(css, /\.computation-provenance/);
   assert.match(css, /@media \(max-width: 1080px\) and \(min-width: 761px\)/);
   assert.match(css, /\.equation-render \.katex-display/);
+  assert.match(css, /\.equation-render-prose/);
+  assert.match(css, /\.equation-evidence\s*\{[^}]*max-width:\s*100%[^}]*overflow:\s*hidden/);
+  assert.match(css, /\.evidence-note\s*\{[^}]*background:\s*#f1f2ef[^}]*border-left:\s*3px solid #7d8a8d/);
+  assert.match(css, /\.compact-evidence-block \.source-excerpt/);
+  assert.doesNotMatch(css, /\.quote-mark/);
   assert.match(css, /overflow-wrap:\s*anywhere/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(packageJson, /remark-math/);
@@ -256,11 +303,12 @@ test("the authorized bundled fixture is synthetic and internally consistent", as
 
   for (const entry of registry.reviews) {
     const base = new URL(`../public/reviews/${entry.slug}/`, import.meta.url);
-    const [ledger, run, synthesis, sourceManifest, manuscript, startHere, report, writingReport, tables, figures] = await Promise.all([
+    const [ledger, run, synthesis, sourceManifest, computations, manuscript, startHere, report, writingReport, tables, figures] = await Promise.all([
       readFile(new URL("findings.json", base), "utf8").then(JSON.parse),
       readFile(new URL("run.json", base), "utf8").then(JSON.parse),
       readFile(new URL("synthesis.json", base), "utf8").then(JSON.parse),
       readFile(new URL("source-manifest.json", base), "utf8").then(JSON.parse),
+      readFile(new URL("computations.json", base), "utf8").then(JSON.parse),
       readFile(new URL("manuscript.md", base), "utf8"),
       readFile(new URL("README.md", base), "utf8"),
       readFile(new URL("report.md", base), "utf8"),
@@ -272,6 +320,8 @@ test("the authorized bundled fixture is synthetic and internally consistent", as
     assert.equal(ledger.review_id, run.review_id);
     assert.equal(synthesis.review_id, run.review_id);
     assert.equal(sourceManifest.review_id, run.review_id);
+    assert.equal(computations.review_id, run.review_id);
+    assert.equal(new Set(computations.computations.map((row) => row.id)).size, computations.computations.length);
     assert.ok(sourceManifest.anchors.length > 0);
     assert.equal(active.length, run.counts.critical + run.counts.major + run.counts.minor + run.counts.info);
     assert.equal(run.schema_version, "0.4");

@@ -1,6 +1,7 @@
 import vinext from "vinext";
 import { defineConfig } from "vite";
 import hostingConfig from "./.openai/hosting.json";
+import { localRuntimeCompatibility } from "./build/local-runtime-vite-plugin";
 import { sites } from "./build/sites-vite-plugin";
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
@@ -40,8 +41,17 @@ export default defineConfig(async () => {
   process.env.WRANGLER_LOG_PATH ??= ".wrangler/logs";
   process.env.MINIFLARE_REGISTRY_PATH ??= ".wrangler/registry";
 
-  // Wrangler snapshots its log path while the Cloudflare plugin is imported.
-  const { cloudflare } = await import("@cloudflare/vite-plugin");
+  // Cloudflare 1.42+ uses module.registerHooks, which Node added after 22.14.
+  // Local review, tests, and generic Vinext builds do not require Cloudflare's
+  // worker adapter, so load it only when the runtime actually supports it.
+  // Capability detection is more durable than guessing from a version string.
+  const nodeModule = await import("node:module");
+  const cloudflarePlugin = "registerHooks" in nodeModule
+    ? (await import("@cloudflare/vite-plugin")).cloudflare({
+        viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
+        config: localBindingConfig,
+      })
+    : null;
 
   return {
     server: isCodexSeatbeltSandbox
@@ -50,10 +60,8 @@ export default defineConfig(async () => {
     plugins: [
       vinext(),
       sites(),
-      cloudflare({
-        viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
-        config: localBindingConfig,
-      }),
+      localRuntimeCompatibility(Boolean(cloudflarePlugin)),
+      ...(cloudflarePlugin ? [cloudflarePlugin] : []),
     ],
   };
 });

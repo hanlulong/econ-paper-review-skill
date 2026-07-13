@@ -100,7 +100,11 @@
             "required": ["anchor_ids"],
             "properties": {
               "anchor_ids": {"minItems": 2},
-              "anchor_id": {"type": "null"}
+              "anchor_id": {"type": "null"},
+              "content": {
+                "type": "string",
+                "pattern": "^\\[Reviewer comparison\\]"
+              }
             }
           }
         }

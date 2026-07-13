@@ -119,6 +119,74 @@ class PdfXmlSanitizationTests(unittest.TestCase):
         self.assertEqual(repairs["action"], "removed_xml_forbidden_controls_from_parser_input")
 
 
+class PdfObjectRegionTests(unittest.TestCase):
+    @staticmethod
+    def block(
+        identifier: str, kind: str, bbox: list[float], text: str,
+    ) -> dict[str, object]:
+        return {
+            "id": identifier, "kind": kind, "bbox": bbox, "raw_text": text,
+            "page_width": 612.0, "page_height": 792.0,
+        }
+
+    def test_caption_above_figure_includes_plot_note_and_excludes_following_prose(self) -> None:
+        caption = self.block("caption", "caption_figure", [100, 70, 510, 84], "Figure 1: Results")
+        rows = [
+            caption,
+            self.block("label", "paragraph", [85, 110, 525, 315], "Panel labels"),
+            self.block(
+                "note", "paragraph", [72, 335, 540, 390],
+                "Note: The lines show estimates and the shaded areas show confidence intervals.",
+            ),
+            self.block(
+                "prose", "paragraph", [72, 430, 540, 520],
+                "This paragraph begins the manuscript discussion after the exhibit and should not be included "
+                "in a crop of the figure because it is ordinary body prose rather than an exhibit note.",
+            ),
+        ]
+        graphics = [{"kind": "rect", "bbox": [82, 102, 530, 326]}]
+        bbox = MODULE.region_from_caption(caption, "figure", rows, graphics)
+        self.assertLessEqual(bbox[0], 72)
+        self.assertLessEqual(bbox[1], 70)
+        self.assertGreaterEqual(bbox[2], 540)
+        self.assertGreaterEqual(bbox[3], 390)
+        self.assertLess(bbox[3], 430)
+
+    def test_caption_below_figure_uses_graphic_above_and_keeps_following_note(self) -> None:
+        caption = self.block("caption", "caption_figure", [150, 430, 462, 444], "Figure 2: Dynamics")
+        rows = [
+            self.block(
+                "prose", "paragraph", [72, 60, 540, 155],
+                "This paragraph precedes the exhibit and contains enough ordinary prose to be recognized as "
+                "manuscript text that should remain outside the resulting figure crop.",
+            ),
+            self.block("label", "paragraph", [105, 205, 505, 400], "Chart labels"),
+            caption,
+            self.block("note", "paragraph", [72, 458, 540, 490], "Source: Authors' calculations."),
+        ]
+        graphics = [{"kind": "image", "bbox": [95, 190, 515, 412]}]
+        bbox = MODULE.region_from_caption(caption, "figure", rows, graphics)
+        self.assertGreater(bbox[1], 155)
+        self.assertLessEqual(bbox[1], 190)
+        self.assertGreaterEqual(bbox[3], 490)
+
+    def test_adjacent_captioned_tables_expand_to_cells_without_overlapping(self) -> None:
+        first = self.block("caption-1", "caption_table", [180, 90, 430, 104], "Table 1: First")
+        second = self.block("caption-2", "caption_table", [180, 390, 430, 404], "Table 2: Second")
+        rows = [
+            first,
+            self.block("first-cells", "paragraph", [70, 125, 542, 300], "Variable values"),
+            self.block("first-note", "paragraph", [72, 320, 540, 360], "Robust standard errors in parentheses"),
+            second,
+            self.block("second-cells", "paragraph", [68, 425, 544, 650], "Variable values"),
+        ]
+        first_bbox = MODULE.region_from_caption(first, "table", rows)
+        second_bbox = MODULE.region_from_caption(second, "table", rows)
+        self.assertLessEqual(first_bbox[0], 70)
+        self.assertGreaterEqual(first_bbox[2], 542)
+        self.assertLess(first_bbox[3], second_bbox[1])
+
+
 @unittest.skipUnless(
     all(shutil.which(command) for command in ("pdfinfo", "pdftotext", "pdftoppm")),
     "Poppler commands are required for PDF ingestion integration tests",

@@ -4,10 +4,10 @@
   "license": "UNLICENSED",
   "private": true,
   "engines": {
-    "node": ">=22.18.0"
+    "node": ">=22.14.0"
   },
   "scripts": {
-    "sync-review": "node scripts/sync-review.mjs",
+    "sync-review": "node --experimental-strip-types scripts/sync-review.mjs",
     "clear-review-bundles": "node scripts/clear-review-bundles.mjs",
     "dev": "npm run clear-review-bundles && WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
     "dev:bundled": "ALLOW_PUBLISH=1 npm run sync-review && WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
