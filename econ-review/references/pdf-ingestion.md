@@ -9,23 +9,31 @@ Read [pdf-backends.md](pdf-backends.md) before installing, invoking, or adding a
 Run the dependency check once:
 
 ```bash
-python3 scripts/pdf_ingestion.py doctor
+python3 "$SKILL_ROOT/scripts/pdf_ingestion.py" doctor
 ```
 
 For a PDF-only manuscript, create the source package before reconstruction:
 
 ```bash
-python3 scripts/pdf_ingestion.py ingest manuscript.pdf review \
+python3 "$SKILL_ROOT/scripts/pdf_ingestion.py" ingest manuscript.pdf review \
   --review-id REVIEW-ID --source-id SRC-01 --ocr auto
 ```
 
 This writes `review/evidence/pdf-ingestion/SRC-01/` atomically. Each PDF source receives a separate default directory and source-qualified block, object, and anchor IDs. Use `--role appendix` or `--role supplement` for additional sources; the default role is `manuscript`. Rerunning is idempotent only when the source hash, review/source identity, role, extraction configuration, requested proposal state, and complete toolchain fingerprint match. A changed or invalid existing package requires `--force`. Validate it independently with:
 
 ```bash
-python3 scripts/pdf_ingestion.py check review/evidence/pdf-ingestion/SRC-01
+python3 "$SKILL_ROOT/scripts/pdf_ingestion.py" check review/evidence/pdf-ingestion/SRC-01
 ```
 
-The module never calls a network service. External OCR or equation transcription is outside this contract and requires explicit user permission plus a separately recorded privacy boundary.
+Here `SKILL_ROOT` is the absolute directory containing the loaded `SKILL.md`,
+whether Claude Code installed it under `.claude/skills` or Codex installed it
+under `.codex/skills` or `.agents/skills`. Install core Python dependencies with
+`python3 -m pip install -r "$SKILL_ROOT/requirements-core.txt"`; the optional
+Docling and Mathpix environments use the corresponding manifests beside it.
+
+The core evidence path is local. With the default `--semantic-backend auto`, Docling runs only when its command and model artifacts are locally available; otherwise ingestion records a bounded warning and continues. Use `--semantic-backend none` for a strict Poppler/pdfplumber/Tesseract-only run. Model downloads are disabled unless `--allow-model-downloads` is supplied.
+
+The only implemented external path is the optional Mathpix premium proposal. It requires all of `--mathpix`, `--authorize-external-upload mathpix`, and `--accept-mathpix-retention`, plus `MATHPIX_APP_ID` and `MATHPIX_APP_KEY` in the process environment. The service receives the complete PDF. Do not use it for a confidential manuscript unless the user has authority to upload it and the deployment's provider agreement, retention policy, and data-processing terms have been reviewed. No credentials are written into the package.
 
 ## Outputs and authority
 
@@ -39,7 +47,29 @@ The module never calls a network service. External OCR or equation transcription
 - `objects/equations/`: rendered crops plus raw glyph candidates; generic PDF text is never labeled verified LaTeX.
 - `ingestion.json`: hashes, tool versions, per-page methods and warnings, typed blocks/objects, symbol occurrences, and quality state.
 - `source-manifest.generated.json`: a valid single-source manifest that can seed or be merged into `review/evidence/source-manifest.json` after checking source-ID and anchor-ID uniqueness.
-- `proposals/markitdown.md`: an optional, non-authoritative proposal written only when `--markitdown-proposal` is explicitly requested and a local `markitdown` command is installed. Its engine version and hash are recorded; it never changes canonical Markdown or evidence authority.
+- `reconciliation/page-packets.json`: a deterministic routing manifest linking each page render and adjacent-page context to selected/native/OCR text, stable blocks, object crops, normalized backend candidates, and material disagreement signals. It contains no adjudication decision and cannot rewrite canonical Markdown.
+- `proposals/docling/`: optional local Markdown, structured JSON, referenced images, and a sanitized run log. The proposal is attempted by `--semantic-backend auto` when locally available or required by `--semantic-backend docling`.
+- `proposals/markitdown.md`: optional local Markdown written only when `--markitdown-proposal` is explicitly requested and a local `markitdown` command is installed.
+- `proposals/mathpix/`: optional hosted Mathpix Markdown, line-level JSON, and a deletion receipt. It is created only under the explicit external-upload gate above.
+
+Every proposal records its engine, version, input hash, artifact hashes, processing mode, and warnings in `ingestion.json`. Proposal files are immutable comparison surfaces. They never change canonical Markdown, stable anchors, or evidence authority automatically.
+
+The page packets define a strict decision vocabulary for a later human or agent pass. Agreement among converters is useful triage but is not visual verification. Only a decision that records direct render comparison may support an exact quotation or a change to a load-bearing equation, table cell, symbol, sign, value, or label. Preserve `bounded` wherever the render or source does not resolve the conflict.
+
+Persist inspected scope in a separate `reconciliation-decisions.json` that
+conforms to `assets/pdf-reconciliation-decisions.schema.json`. Validate it with:
+
+```bash
+python3 "$SKILL_ROOT/scripts/pdf_reconciliation.py" \
+  review/evidence/pdf-ingestion/SRC-01 \
+  review/evidence/pdf-ingestion/SRC-01/reconciliation-decisions.json
+```
+
+Each decision must identify its block or object, page, exact evidence hashes,
+transcription and alternatives, unreadable regions, verifier/model provenance,
+and a concrete render-comparison note. `model_adjudicated` remains a proposal;
+`render_verified` requires the page render and, for an object, its crop hash.
+The ledger verifies only its declared scope and never rewrites canonical Markdown.
 
 Do not list the source PDF or complete page renders in the author-facing review document manifest. The local Review Desk may consume the generated Markdown and selected audit crops, but a public build must never bundle manuscript-derived assets without explicit publication authorization.
 
@@ -50,7 +80,8 @@ Use the richest source without weakening visual verification:
 1. When TeX or structured Markdown exists, use it for semantic structure, equations, and tables, align it to PDF pages, and keep the PDF renders as visual authority.
 2. For a born-digital PDF with usable Unicode, use native prose blocks but verify every load-bearing formula, symbol, table, and figure against its render.
 3. For missing or damaged text layers, use local OCR for prose only. Preserve the native alternative and warnings; keep tables and equations image-backed.
-4. If extraction and the rendered page conflict, the visible page controls what the paper actually communicates. Resolve manually or mark the object bounded.
+4. Use Docling, MarkItDown, Mathpix, or an LLM-assisted reading to locate likely structure and transcription disagreements, not to settle them.
+5. If extraction and the rendered page conflict, the visible page controls what the paper actually communicates. Resolve the conflict against the render or structured source, or mark the object bounded.
 
 Never normalize mathematical text with NFKC. It can collapse distinctions among symbols, superscripts, compatibility glyphs, and formatting. The ingester preserves raw UTF-8 block content and records Unicode codepoints and warnings.
 
@@ -93,7 +124,13 @@ Pay special attention to Latin/Greek lookalikes, `l/1`, `O/0`, `v/ν`, minus/hyp
 
 The preflight also uses `pypdf` only as a non-executing structural inspector. Encryption fails closed. Document JavaScript, open/additional actions, annotation actions, forms, portfolios, and embedded files are recorded as warnings; no action runs and no attachment is opened. Repeated page-level and annotation-action findings are grouped by type with sorted page ranges, while document-level OpenAction remains a distinct warning.
 
-MarkItDown is never invoked by default. Its proposal is a convenience comparison, not a fallback completion gate, verified quotation source, equation transcription, or table authority. Do not enable it merely because the native extraction is weak; resolve weak extraction from the rendered PDF and the appropriate source files.
+Docling is a non-authoritative local proposal. `auto` may use cached models; `docling` fails closed when the backend cannot run. `--allow-model-downloads` authorizes downloading model artifacts, not uploading the manuscript. Formula enrichment is disabled by default because it can be slow and model-generated; `--docling-formulas` does not waive render verification.
+
+MarkItDown is never invoked by default. Its proposal is a convenience comparison, not a fallback completion gate, verified quotation source, equation transcription, or table authority.
+
+Mathpix is never invoked by default. The adapter uploads the complete PDF, retrieves Mathpix Markdown and line data, and requests deletion in a `finally` path. Ingestion fails if deletion cannot be confirmed. A completed package records the provider request ID; retain any request ID shown in a failed-job error for operator follow-up. Provider documentation allows retention windows and short-lived caches that a successful delete response may not erase instantly. Treat the output as a proposal and independently verify it against the render. Do not use Mathpix output to train or develop a competing conversion model without written permission and legal review.
+
+A review agent may inspect saved page images using the user's active model subscription when that processing is within the authorized environment. This is visual adjudication, not a second canonical converter: record which pages and objects were inspected, retain the render-backed result or boundary, and never infer that a subscription grants permission to send a confidential manuscript to an unrelated API.
 
 Use the following states honestly:
 
@@ -114,6 +151,6 @@ Before reconstruction or finalization:
 5. Quotations resolve to Markdown spans whose markers map back to PDF page and bounding box.
 6. The generated source-manifest fragment has been merged without duplicate IDs and the normal trust-spine validation passes.
 
-The package check recomputes hashes for the original PDF, canonical Markdown, selected/native/OCR page text, every page render, every object crop, candidate table Markdown/CSV, and any MarkItDown proposal. It also verifies page order, source-qualified and unique IDs, page/bounding-box references, block spans, symbol references, object-to-block links, quality flags, and the generated source-manifest fragment.
+The package check recomputes hashes for the original PDF, canonical Markdown, selected/native/OCR page text, every page render, every object crop, candidate table Markdown/CSV, and every declared proposal artifact. It also verifies page order, source-qualified and unique IDs, page/bounding-box references, block spans, symbol references, object-to-block links, proposal input hashes and processing declarations, reconciliation counts, quality flags, and the generated source-manifest fragment. For a remote proposal it additionally checks that explicit authorization and confirmed deletion were recorded and that credential fields were not persisted.
 
 Passing ingestion means the extraction package is internally intact. It does not mean that automatic Markdown, table grids, formulas, or symbols are substantively correct; that requires the separate reconstruction, exhibit, technical, and verification passes.

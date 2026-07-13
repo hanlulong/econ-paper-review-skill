@@ -33,6 +33,8 @@ ROOT_FILES = {
     Path("README.md"),
     Path("THIRD_PARTY_NOTICES.md"),
     Path("install.sh"),
+    Path("requirements-docling.txt"),
+    Path("requirements-mathpix.txt"),
     Path("requirements.txt"),
 }
 EXCLUDED_DIRECTORY_NAMES = {

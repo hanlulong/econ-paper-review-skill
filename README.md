@@ -8,7 +8,7 @@ The architecture is intended for empirical, experimental, descriptive, structura
 
 - `quick` and `full` modes with a method-agnostic reconstruction core
 - claim-family, derivation, methods, terminology/variable, reader-claim, analytical, figure, and table audits
-- offline PDF-to-structured-Markdown ingestion with page/bounding-box provenance, complete page renders, table/figure/equation crops, and symbol warnings
+- render-backed PDF-to-structured-Markdown ingestion with page/bounding-box provenance, complete page renders, table/figure/equation crops, symbol warnings, and optional non-authoritative semantic proposals
 - rendered inspection of figures and tables, with extraction conflicts resolved against the page image
 - conditional DiD, IV, RDD, and cross-cutting inference lenses activated by design facts rather than paper labels
 - fairness rules for inherent, disclosed, claim-bounded data limitations
@@ -33,17 +33,44 @@ From a local checkout:
 cd /path/to/econ-paper-review-skill
 python3 -m pip install -r requirements.txt
 ./install.sh                         # Claude Code and Codex, globally
+./install.sh --global --claude      # Claude Code only
 ./install.sh --global --codex       # Codex only
 ./install.sh --local /path/to/repo  # project-local install
 ```
 
-The requirements file installs the schema validator plus permissively licensed PDF parsing/cropping libraries. PDF ingestion also requires separately installed Poppler commands (`pdfinfo`, `pdftotext`, and `pdftoppm`); local Tesseract OCR is optional. Those executables are not bundled. Check the machine with `python3 econ-review/scripts/pdf_ingestion.py doctor`. The canonical package is `econ-review/`; installers copy that one tree rather than maintaining platform-specific source variants. See `THIRD_PARTY_NOTICES.md` and `econ-review/references/pdf-backends.md` before adding or distributing another conversion backend.
+The requirements file installs the schema validator plus permissively licensed PDF parsing/cropping libraries. PDF ingestion also requires separately installed Poppler commands (`pdfinfo`, `pdftotext`, and `pdftoppm`); local Tesseract OCR is optional. Those executables are not bundled. Check the machine with `python3 econ-review/scripts/pdf_ingestion.py doctor`.
+
+Docling is an optional local semantic-structure backend and is deliberately kept out of the lightweight environment:
+
+```bash
+python3 -m pip install -r requirements-docling.txt
+```
+
+Install the hosted premium adapter only in the server environment that needs it:
+
+```bash
+python3 -m pip install -r requirements-mathpix.txt
+```
+
+The default `--semantic-backend auto` uses Docling only when its command and required model artifacts are already available. It does not download models unless `--allow-model-downloads` is supplied. Review the code and model licenses before enabling downloads in a distributed product. The canonical package is `econ-review/`; installers copy that one tree rather than maintaining platform-specific source variants. See `THIRD_PARTY_NOTICES.md` and `econ-review/references/pdf-backends.md` before adding, invoking, or distributing another conversion backend.
 
 ## Use
 
 Put the manuscript in your working directory and give the agent its path. Supply the PDF plus LaTeX or Markdown source when available; for a Word manuscript, include a PDF export so equations, tables, figures, and page layout can be checked against the rendered document. Add the appendix and replication materials if they are in scope.
 
-If only a PDF is available, the skill now creates a local verified-transcription package before review. It produces structured Markdown for reading and stable quotation anchors, while preserving rendered pages and separate crops as authority for tables, figures, equations, and ambiguous symbols. It does not upload manuscripts or claim that generic PDF extraction can recover mathematical notation perfectly.
+If only a PDF is available, the skill creates a local render-backed ingestion package before review. It produces structured Markdown for reading and stable quotation anchors, while preserving rendered pages and separate crops as authority for tables, figures, equations, and ambiguous symbols. A local Docling or MarkItDown result can be stored beside that evidence as a proposal; it never silently replaces the canonical page/block map.
+
+Hosted premium deployments may request a Mathpix proposal, but only after the user authorizes that specific manuscript upload and acknowledges the provider's retention policy. Credentials must come from server-side environment variables, never browser code or review artifacts:
+
+```bash
+export MATHPIX_APP_ID='...'
+export MATHPIX_APP_KEY='...'
+python3 econ-review/scripts/pdf_ingestion.py ingest manuscript.pdf review \
+  --review-id REVIEW-ID --source-id SRC-01 --mathpix \
+  --authorize-external-upload mathpix --accept-mathpix-retention
+```
+
+The integration downloads the proposal and requests remote deletion even when processing fails. A confirmed deletion request does not imply instantaneous removal from every provider cache or billing/audit system. The package also emits hashed page-adjudication packets that route renders, native blocks, detected objects, and proposal artifacts without changing canonical Markdown. Mathpix output, Docling output, and LLM-assisted visual readings remain unverified until disagreements and load-bearing objects are adjudicated against the saved page renders or supplied source.
 
 ```text
 Use $econ-review in full mode to review this paper for a leading field journal.

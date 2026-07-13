@@ -195,6 +195,58 @@ class InstallerTests(unittest.TestCase):
             self.assertFalse((destination / "old.txt").exists())
             self.assertFalse(list(destination.parent.glob(".econ-review.*")))
 
+    def test_codex_and_claude_global_and_project_install_contracts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            project = root / "project"
+            project.mkdir()
+            global_result = self.run_installer(
+                ROOT / "install.sh", "--global", "--all", env={"HOME": str(home)},
+            )
+            self.assertIn("Claude Code (global)", global_result.stdout)
+            self.assertIn("Codex (global)", global_result.stdout)
+            global_destinations = [
+                home / ".claude" / "skills" / "econ-review",
+                home / ".codex" / "skills" / "econ-review",
+            ]
+            for destination in global_destinations:
+                self.assertTrue((destination / "SKILL.md").is_file())
+                self.assertTrue((destination / "references" / "workflow.md").is_file())
+                self.assertTrue((destination / "requirements-core.txt").is_file())
+                self.assertTrue((destination / "requirements-docling.txt").is_file())
+                self.assertTrue((destination / "requirements-mathpix.txt").is_file())
+                self.assertTrue(os.access(destination / "scripts" / "validate_review.py", os.X_OK))
+
+            project_result = self.run_installer(
+                ROOT / "install.sh", "--local", str(project), "--all", env={"HOME": str(home)},
+            )
+            self.assertIn("Claude Code (project)", project_result.stdout)
+            self.assertIn("Codex (project)", project_result.stdout)
+            project_destinations = [
+                project / ".claude" / "skills" / "econ-review",
+                project / ".agents" / "skills" / "econ-review",
+            ]
+            for destination in project_destinations:
+                self.assertTrue((destination / "SKILL.md").is_file())
+                self.assertTrue((destination / "scripts" / "pdf_ingestion.py").is_file())
+
+    def test_platform_specific_config_directory_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            claude_root = root / "claude-config"
+            codex_root = root / "codex-home"
+            self.run_installer(
+                ROOT / "install.sh", "--global", "--all",
+                env={
+                    "HOME": str(root / "home"),
+                    "CLAUDE_CONFIG_DIR": str(claude_root),
+                    "CODEX_HOME": str(codex_root),
+                },
+            )
+            self.assertTrue((claude_root / "skills" / "econ-review" / "SKILL.md").is_file())
+            self.assertTrue((codex_root / "skills" / "econ-review" / "SKILL.md").is_file())
+
     def test_remote_install_requires_url_and_checksum(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             installer = Path(tmp) / "install.sh"

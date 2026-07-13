@@ -140,9 +140,10 @@ class PdfIngestionTests(unittest.TestCase):
             )
 
     def ingest(self, pdf: Path, review: Path, *extra: str, source_id: str = "SRC-01") -> Path:
+        backend = () if "--semantic-backend" in extra else ("--semantic-backend", "none")
         self.run_cli(
             "ingest", str(pdf), str(review), "--review-id", "PDF-TEST",
-            "--source-id", source_id, "--ocr", "never", "--dpi", "150", *extra,
+            "--source-id", source_id, "--ocr", "never", "--dpi", "150", *backend, *extra,
         )
         return package(review, source_id)
 
@@ -162,6 +163,7 @@ class PdfIngestionTests(unittest.TestCase):
             result = self.run_cli(
                 "ingest", str(pdf), str(root / "review-a"), "--review-id", "PDF-TEST",
                 "--source-id", "SRC-01", "--ocr", "never", "--dpi", "150",
+                "--semantic-backend", "none",
             )
             self.assertIn("already current", result.stdout)
             self.assertEqual((first / "ingestion.json").read_bytes(), before)
@@ -292,7 +294,58 @@ class PdfIngestionTests(unittest.TestCase):
                 )
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("requires the local markitdown command", result.stderr)
-        self.assertIn("network: disabled by design", self.run_cli("doctor").stdout)
+        self.assertIn("network: forbidden by default", self.run_cli("doctor").stdout)
+
+    def test_mathpix_requires_two_explicit_authorizations_before_credentials_or_network(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pdf = root / "synthetic.pdf"
+            make_pdf(pdf)
+            missing_upload = self.run_cli(
+                "ingest", str(pdf), str(root / "review-a"), "--review-id", "PDF-MATHPIX",
+                "--semantic-backend", "none", "--mathpix", check=False,
+            )
+            self.assertNotEqual(missing_upload.returncode, 0)
+            self.assertIn("--authorize-external-upload mathpix", missing_upload.stderr)
+            missing_retention = self.run_cli(
+                "ingest", str(pdf), str(root / "review-b"), "--review-id", "PDF-MATHPIX",
+                "--semantic-backend", "none", "--mathpix",
+                "--authorize-external-upload", "mathpix", check=False,
+            )
+            self.assertNotEqual(missing_retention.returncode, 0)
+            self.assertIn("--accept-mathpix-retention", missing_retention.stderr)
+
+    def test_legacy_v01_package_remains_verifiable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pdf, review = root / "synthetic.pdf", root / "review"
+            make_pdf(pdf)
+            current = self.ingest(pdf, review, "--semantic-backend", "none")
+            manifest = json.loads((current / "ingestion.json").read_text())
+            manifest["schema_version"] = "0.1"
+            manifest.pop("proposals")
+            manifest.pop("reconciliation")
+            manifest["toolchain"].pop("semantic_backends")
+            manifest["configuration"] = {
+                key: manifest["configuration"][key]
+                for key in ("dpi", "ocr", "max_pages", "max_bytes", "markitdown_proposal", "network_services")
+            }
+            manifest["pipeline_fingerprint"] = MODULE.pipeline_fingerprint(
+                {
+                    **manifest["configuration"], "source_id": manifest["source_id"],
+                    "source_role": manifest["source_role"],
+                },
+                manifest["toolchain"], pipeline_version="0.1",
+            )
+            ingestion_bytes = MODULE.canonical_json(manifest)
+            (current / "ingestion.json").write_bytes(ingestion_bytes)
+            generated = json.loads((current / "source-manifest.generated.json").read_text())
+            extraction = generated["sources"][0]["extraction"]
+            extraction["ingestion_manifest_sha256"] = MODULE.sha256_bytes(ingestion_bytes)
+            extraction["pipeline_fingerprint"] = manifest["pipeline_fingerprint"]
+            (current / "source-manifest.generated.json").write_bytes(MODULE.canonical_json(generated))
+            result = self.run_cli("check", str(current), check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

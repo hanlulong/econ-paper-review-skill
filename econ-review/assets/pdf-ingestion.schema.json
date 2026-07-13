@@ -1,16 +1,35 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openecon.ai/econ-review/pdf-ingestion.schema.json",
-  "title": "econ-review verified PDF transcription package",
+  "title": "econ-review verified PDF transcription and proposal package",
   "type": "object",
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {"properties": {"schema_version": {"const": "0.2"}}},
+      "then": {
+        "required": ["proposals", "reconciliation"],
+        "properties": {
+          "toolchain": {"required": ["semantic_backends"]},
+          "configuration": {
+            "required": [
+              "semantic_backend", "allow_model_downloads", "docling_formulas",
+              "docling_timeout", "docling_device", "mathpix", "mathpix_timeout",
+              "mathpix_poll_interval", "external_upload_authorization",
+              "mathpix_retention_accepted"
+            ]
+          }
+        }
+      }
+    }
+  ],
   "required": [
     "schema_version", "review_id", "source_id", "source_role", "pipeline_fingerprint", "parser_repairs", "source",
     "toolchain", "configuration", "markdown", "pages", "blocks", "tables", "figures",
     "equations", "symbols", "proposal", "quality"
   ],
   "properties": {
-    "schema_version": {"const": "0.1"},
+    "schema_version": {"enum": ["0.1", "0.2"]},
     "review_id": {"type": "string", "minLength": 1},
     "source_id": {"type": "string", "pattern": "^SRC-[0-9]{2,}$"},
     "source_role": {"enum": ["manuscript", "appendix", "supplement"]},
@@ -51,7 +70,8 @@
         "renderer": {"$ref": "#/$defs/tool"},
         "table_extractor": {"$ref": "#/$defs/toolOrNull"},
         "ocr": {"$ref": "#/$defs/toolOrNull"},
-        "proposal": {"$ref": "#/$defs/toolOrNull"}
+        "proposal": {"$ref": "#/$defs/toolOrNull"},
+        "semantic_backends": {"type": "array", "items": {"$ref": "#/$defs/tool"}}
       }
     },
     "configuration": {
@@ -63,7 +83,17 @@
         "max_pages": {"type": "integer", "minimum": 1},
         "max_bytes": {"type": "integer", "minimum": 1},
         "markitdown_proposal": {"type": "boolean"},
-        "network_services": {"const": "forbidden"}
+        "semantic_backend": {"enum": ["none", "auto", "docling"]},
+        "allow_model_downloads": {"type": "boolean"},
+        "docling_formulas": {"type": "boolean"},
+        "docling_timeout": {"type": "integer", "minimum": 60, "maximum": 86400},
+        "docling_device": {"enum": ["auto", "cpu", "mps", "cuda", "xpu"]},
+        "mathpix": {"type": "boolean"},
+        "mathpix_timeout": {"type": "integer", "minimum": 60, "maximum": 86400},
+        "mathpix_poll_interval": {"type": "number", "minimum": 0.1, "maximum": 60},
+        "external_upload_authorization": {"oneOf": [{"type": "null"}, {"const": "mathpix"}]},
+        "mathpix_retention_accepted": {"type": "boolean"},
+        "network_services": {"enum": ["forbidden", "mathpix_authorized"]}
       }
     },
     "markdown": {
@@ -133,6 +163,8 @@
         {"$ref": "#/$defs/proposal"}
       ]
     },
+    "proposals": {"type": "array", "items": {"$ref": "#/$defs/genericProposal"}},
+    "reconciliation": {"$ref": "#/$defs/reconciliation"},
     "symbols": {
       "type": "array",
       "items": {
@@ -214,6 +246,84 @@
         "version": {"type": "string", "minLength": 1},
         "authoritative": {"const": false},
         "warnings": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "proposalArtifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256", "media_type"],
+      "properties": {
+        "path": {"$ref": "#/$defs/safePath"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "media_type": {"type": "string", "minLength": 1}
+      }
+    },
+    "modelRevision": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "revision"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "revision": {"type": "string", "pattern": "^[A-Za-z0-9._/-]{4,160}$"}
+      }
+    },
+    "proposalProcessing": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "manuscript_uploaded", "user_authorized", "credential_source",
+        "retention_policy", "remote_deletion", "request_id"
+      ],
+      "properties": {
+        "manuscript_uploaded": {"type": "boolean"},
+        "user_authorized": {"type": "boolean"},
+        "credential_source": {"enum": ["none", "environment"]},
+        "retention_policy": {"type": ["string", "null"]},
+        "remote_deletion": {"enum": ["not_applicable", "confirmed", "unconfirmed", "failed"]},
+        "request_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9_-]{4,160}$"}
+      }
+    },
+    "genericProposal": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "id", "engine", "version", "role", "mode", "authoritative",
+        "input_sha256", "artifacts", "model_revisions", "processing", "warnings"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^PRP-[A-Z0-9-]+$"},
+        "engine": {"enum": ["markitdown", "docling", "mathpix"]},
+        "version": {"type": "string", "minLength": 1},
+        "role": {"enum": ["semantic_structure", "scientific_ocr"]},
+        "mode": {"enum": ["local", "remote"]},
+        "authoritative": {"const": false},
+        "input_sha256": {"$ref": "#/$defs/sha256"},
+        "artifacts": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/proposalArtifact"}},
+        "model_revisions": {"type": "array", "items": {"$ref": "#/$defs/modelRevision"}},
+        "processing": {"$ref": "#/$defs/proposalProcessing"},
+        "warnings": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "reconciliation": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "status", "policy", "canonical_path", "canonical_sha256",
+        "packets_path", "packets_sha256", "unresolved", "warnings"
+      ],
+      "properties": {
+        "status": {"const": "packets_ready"},
+        "policy": {"const": "render_authority_native_glyph_preservation"},
+        "canonical_path": {"$ref": "#/$defs/safePath"},
+        "canonical_sha256": {"$ref": "#/$defs/sha256"},
+        "packets_path": {"$ref": "#/$defs/safePath"},
+        "packets_sha256": {"$ref": "#/$defs/sha256"},
+        "unresolved": {
+          "type": "object", "additionalProperties": false,
+          "required": ["pages", "tables", "figures", "equations"],
+          "properties": {
+            "pages": {"type": "integer", "minimum": 0},
+            "tables": {"type": "integer", "minimum": 0},
+            "figures": {"type": "integer", "minimum": 0},
+            "equations": {"type": "integer", "minimum": 0}
+          }
+        },
+        "warnings": {"type": "array", "items": {"type": "string", "minLength": 1}}
       }
     }
   }

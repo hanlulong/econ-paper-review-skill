@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Create and verify a local, render-backed PDF transcription package.
+"""Create and verify a render-backed PDF transcription package.
 
 Markdown is a reading surface. Page renders and typed page/bounding-box records
 remain authoritative for tables, figures, equations, and uncertain glyphs.
-No network service is called by this module.
+Networking is forbidden by default. Mathpix is called only behind explicit
+upload and retention authorization flags.
 """
 
 from __future__ import annotations
@@ -30,9 +31,26 @@ from typing import Any, Iterable
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from pdf_backends import (  # noqa: E402
+    BackendError,
+    docling_executable,
+    docling_runtime_version,
+    docling_version,
+    run_docling,
+    run_mathpix,
+)
+from pdf_reconciliation import (  # noqa: E402
+    build_page_packets,
+    load_proposal_page_index,
+    packet_errors,
+)
+
 SKILL_ROOT = SCRIPT_DIR.parent
 SCHEMA_PATH = SKILL_ROOT / "assets" / "pdf-ingestion.schema.json"
-PIPELINE_VERSION = "0.1"
+PIPELINE_VERSION = "0.2"
 DEFAULT_OUTPUT_ROOT = Path("evidence/pdf-ingestion")
 MIN_NATIVE_CHARACTERS = 24
 MAX_PAGES_DEFAULT = 2_000
@@ -151,6 +169,8 @@ def doctor() -> int:
         ("Pillow", python_package_version("Pillow") or "unavailable", True),
         ("jsonschema", python_package_version("jsonschema") or "unavailable", True),
         ("markitdown", command_version("markitdown", ["--version"]), False),
+        ("docling", docling_version() or "unavailable", False),
+        ("requests", python_package_version("requests") or "unavailable", False),
     ]
     missing_required = False
     for name, version, required in rows:
@@ -158,7 +178,7 @@ def doctor() -> int:
         print(f"{name}: {version} ({state})")
         if required and version == "unavailable":
             missing_required = True
-    print("network: disabled by design")
+    print("network: forbidden by default; Mathpix requires explicit upload and retention authorization")
     return 1 if missing_required else 0
 
 
@@ -245,6 +265,11 @@ def toolchain_for(args: argparse.Namespace) -> dict[str, Any]:
     proposal_version = command_version("markitdown", ["--version"]) if args.markitdown_proposal else "unavailable"
     if args.markitdown_proposal and proposal_version == "unavailable":
         raise IngestionError("--markitdown-proposal requires the local markitdown command")
+    semantic_backends: list[dict[str, str]] = []
+    if args.semantic_backend in {"auto", "docling"} and docling_version() and docling_executable():
+        semantic_backends.append({"name": "docling", "version": docling_runtime_version() or "unavailable"})
+    if args.mathpix:
+        semantic_backends.append({"name": "mathpix", "version": "v3/pdf"})
     return {
         "primary": {"name": "pdftotext-bbox-layout", "version": command_version("pdftotext", ["-v"])},
         "renderer": {"name": "pdftoppm", "version": command_version("pdftoppm", ["-v"])},
@@ -254,6 +279,7 @@ def toolchain_for(args: argparse.Namespace) -> dict[str, Any]:
                 if ocr_available else None),
         "proposal": ({"name": "markitdown", "version": proposal_version}
                      if args.markitdown_proposal else None),
+        "semantic_backends": semantic_backends,
     }
 
 
@@ -549,7 +575,7 @@ def crop_render(render: Path, bbox: list[float], page_size: tuple[float, float],
     try:
         from PIL import Image
     except ImportError as exc:
-        raise IngestionError("Pillow is required for object crops; install requirements.txt") from exc
+        raise IngestionError(f"Pillow is required for object crops; install {SKILL_ROOT / 'requirements-core.txt'}") from exc
     with Image.open(render) as image:
         sx, sy = image.width / page_size[0], image.height / page_size[1]
         left = max(0, math.floor(bbox[0] * sx) - 12)
@@ -802,9 +828,11 @@ def build_source_manifest(
     }
 
 
-def pipeline_fingerprint(configuration: dict[str, Any], toolchain: dict[str, Any]) -> str:
+def pipeline_fingerprint(
+    configuration: dict[str, Any], toolchain: dict[str, Any], *, pipeline_version: str = PIPELINE_VERSION,
+) -> str:
     return sha256_bytes(canonical_json({
-        "pipeline_version": PIPELINE_VERSION, "configuration": configuration,
+        "pipeline_version": pipeline_version, "configuration": configuration,
         "tools": toolchain,
         "normalization": (
             "raw UTF-8 blocks with LF line endings; no NFKC or dehyphenation; "
@@ -817,7 +845,7 @@ def validate_schema(value: dict[str, Any]) -> list[str]:
     try:
         import jsonschema
     except ImportError as exc:
-        raise IngestionError("jsonschema is required; install requirements.txt") from exc
+        raise IngestionError(f"jsonschema is required; install {SKILL_ROOT / 'requirements-core.txt'}") from exc
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     validator = jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker())
     return [f"{'/'.join(str(part) for part in error.absolute_path) or '<root>'}: {error.message}" for error in validator.iter_errors(value)]
@@ -945,8 +973,91 @@ def verify_package(package_dir: Path, *, quiet: bool = False) -> list[str]:
     proposal = value.get("proposal")
     if isinstance(proposal, dict):
         artifacts.append((proposal.get("path"), proposal.get("sha256"), "MarkItDown proposal"))
+    proposals = value.get("proposals", []) if isinstance(value.get("proposals"), list) else []
+    proposal_ids = [row.get("id") for row in proposals if isinstance(row, dict)]
+    if len(proposal_ids) != len(set(proposal_ids)):
+        errors.append("semantic proposal IDs are not unique")
+    proposal_engines = [row.get("engine") for row in proposals if isinstance(row, dict)]
+    if len(proposal_engines) != len(set(proposal_engines)):
+        errors.append("semantic proposal engines are not unique")
+    source_sha = value.get("source", {}).get("sha256")
+    for proposal_row in proposals:
+        if proposal_row.get("input_sha256") != source_sha:
+            errors.append(f"{proposal_row.get('id')} input hash differs from the source PDF")
+        processing = proposal_row.get("processing", {})
+        if proposal_row.get("mode") == "remote":
+            if processing.get("manuscript_uploaded") is not True or processing.get("user_authorized") is not True:
+                errors.append(f"{proposal_row.get('id')} remote upload lacks affirmative authorization")
+            if processing.get("credential_source") != "environment":
+                errors.append(f"{proposal_row.get('id')} remote credentials must come from the environment")
+            if processing.get("remote_deletion") != "confirmed":
+                errors.append(f"{proposal_row.get('id')} remote deletion is not confirmed")
+        else:
+            if processing.get("manuscript_uploaded") is not False:
+                errors.append(f"{proposal_row.get('id')} local backend cannot declare a manuscript upload")
+            if processing.get("credential_source") != "none":
+                errors.append(f"{proposal_row.get('id')} local backend cannot declare remote credentials")
+        for index, artifact in enumerate(proposal_row.get("artifacts", []), 1):
+            artifacts.append((
+                artifact.get("path"), artifact.get("sha256"),
+                f"{proposal_row.get('id', 'proposal')} artifact {index}",
+            ))
     for path, expected, label in artifacts:
         verify_artifact(path, expected, label)
+
+    if value.get("schema_version") == "0.2":
+        configuration = value.get("configuration", {})
+        if configuration.get("mathpix") != ("mathpix" in proposal_engines):
+            errors.append("Mathpix configuration and proposal inventory disagree")
+        if configuration.get("network_services") == "forbidden" and any(
+            row.get("mode") == "remote" for row in proposals
+        ):
+            errors.append("a remote proposal exists although network services are forbidden")
+        serialized = json.dumps(value, sort_keys=True).casefold()
+        for forbidden_key in ('"app_key"', '"mathpix_app_key"', '"authorization"'):
+            if forbidden_key in serialized:
+                errors.append("ingestion manifest contains a forbidden credential field")
+        reconciliation = value.get("reconciliation", {})
+        verify_artifact(
+            reconciliation.get("packets_path"), reconciliation.get("packets_sha256"),
+            "reconciliation page packets",
+        )
+        if reconciliation.get("canonical_path") != value.get("markdown", {}).get("path"):
+            errors.append("reconciliation canonical path differs from the evidence Markdown")
+        if reconciliation.get("canonical_sha256") != value.get("markdown", {}).get("sha256"):
+            errors.append("reconciliation canonical hash differs from the evidence Markdown")
+        unresolved = reconciliation.get("unresolved", {})
+        expected_unresolved = {
+            "pages": sum(1 for row in value.get("pages", []) if row.get("status") == "bounded"),
+            "tables": len(value.get("tables", [])),
+            "figures": len(value.get("figures", [])),
+            "equations": len(value.get("equations", [])),
+        }
+        if unresolved != expected_unresolved:
+            errors.append("reconciliation unresolved counts differ from the package inventory")
+        packets_path = reconciliation.get("packets_path")
+        if isinstance(packets_path, str):
+            try:
+                packets = json.loads(package_path(review_dir, packets_path).read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError, IngestionError) as exc:
+                errors.append(f"cannot read reconciliation page packets: {exc}")
+            else:
+                errors.extend(packet_errors(packets, value))
+                expected_packets = build_page_packets(
+                    source_sha256=value["source"]["sha256"], pages=value["pages"],
+                    blocks=value["blocks"], tables=value["tables"], figures=value["figures"],
+                    equations=value["equations"], proposals=value["proposals"],
+                    proposal_page_index=load_proposal_page_index(
+                        review_dir,
+                        str(Path(value["source"]["package_path"]).parent.parent),
+                        value["proposals"],
+                    ),
+                )
+                if packets != expected_packets:
+                    errors.append("reconciliation page packets are not reproducible from declared evidence")
+        expected_reconciliation = "packets_ready"
+        if reconciliation.get("status") != expected_reconciliation:
+            errors.append("reconciliation status differs from the proposal inventory")
 
     markdown_path = value.get("markdown", {}).get("path")
     markdown = ""
@@ -983,6 +1094,7 @@ def verify_package(package_dir: Path, *, quiet: bool = False) -> list[str]:
             "source_role": value.get("source_role"),
         },
         value.get("toolchain", {}),
+        pipeline_version=value.get("schema_version", PIPELINE_VERSION),
     )
     if value.get("pipeline_fingerprint") != expected_fingerprint:
         errors.append("pipeline fingerprint does not match the declared configuration and toolchain")
@@ -1116,12 +1228,24 @@ def verify_package(package_dir: Path, *, quiet: bool = False) -> list[str]:
 
 
 def ingest(args: argparse.Namespace) -> Path:
+    if not 1 <= args.max_pages <= MAX_PAGES_DEFAULT:
+        raise IngestionError(f"--max-pages must be between 1 and {MAX_PAGES_DEFAULT}")
+    if not 1 <= args.max_bytes <= MAX_BYTES_DEFAULT:
+        raise IngestionError(f"--max-bytes must be between 1 and {MAX_BYTES_DEFAULT}")
+    if not 60 <= args.docling_timeout <= 86_400:
+        raise IngestionError("--docling-timeout must be between 60 and 86400 seconds")
+    if not 60 <= args.mathpix_timeout <= 86_400:
+        raise IngestionError("--mathpix-timeout must be between 60 and 86400 seconds")
+    if not 0.1 <= args.mathpix_poll_interval <= 60:
+        raise IngestionError("--mathpix-poll-interval must be between 0.1 and 60 seconds")
     for required in ("pdfinfo", "pdftotext", "pdftoppm"):
         if not command_path(required):
             raise IngestionError(f"{required} is required; install Poppler and run the doctor command")
     for package in ("pypdf", "Pillow", "jsonschema"):
         if not python_package_version(package):
-            raise IngestionError(f"Python package {package} is required; install requirements.txt")
+            raise IngestionError(
+                f"Python package {package} is required; install {SKILL_ROOT / 'requirements-core.txt'}"
+            )
     source_id = validate_source_id(args.source_id)
     source = regular_file(args.pdf, "input PDF")
     if source.suffix.casefold() != ".pdf":
@@ -1134,9 +1258,24 @@ def ingest(args: argparse.Namespace) -> Path:
     output_rel = safe_relative(output)
     destination = package_path(review_dir, output_rel)
     source_sha = sha256_file(source)
+    if args.mathpix and args.authorize_external_upload != "mathpix":
+        raise IngestionError("Mathpix requires --authorize-external-upload mathpix")
+    if args.mathpix and not args.accept_mathpix_retention:
+        raise IngestionError("Mathpix requires --accept-mathpix-retention")
     configuration = {
         "dpi": args.dpi, "ocr": args.ocr, "max_pages": args.max_pages, "max_bytes": args.max_bytes,
-        "markitdown_proposal": args.markitdown_proposal, "network_services": "forbidden",
+        "markitdown_proposal": args.markitdown_proposal,
+        "semantic_backend": args.semantic_backend,
+        "allow_model_downloads": args.allow_model_downloads,
+        "docling_formulas": args.docling_formulas,
+        "docling_timeout": args.docling_timeout,
+        "docling_device": args.docling_device,
+        "mathpix": args.mathpix,
+        "mathpix_timeout": args.mathpix_timeout,
+        "mathpix_poll_interval": args.mathpix_poll_interval,
+        "external_upload_authorization": args.authorize_external_upload,
+        "mathpix_retention_accepted": args.accept_mathpix_retention,
+        "network_services": "mathpix_authorized" if args.mathpix else "forbidden",
     }
     toolchain = toolchain_for(args)
     fingerprint = pipeline_fingerprint(
@@ -1258,6 +1397,7 @@ def ingest(args: argparse.Namespace) -> Path:
         )
         symbols = symbol_inventory(blocks)
         proposal: dict[str, Any] | None = None
+        proposals: list[dict[str, Any]] = []
         if args.markitdown_proposal:
             proposal_text = run_markitdown_proposal(source_copy)
             proposal_relative = Path("proposals/markitdown.md")
@@ -1270,6 +1410,57 @@ def ingest(args: argparse.Namespace) -> Path:
                     "This optional local proposal is not canonical evidence and must not replace render-backed verification."
                 ],
             }
+            proposals.append({
+                "id": "PRP-MARKITDOWN", "engine": "markitdown",
+                "version": toolchain["proposal"]["version"], "role": "semantic_structure",
+                "mode": "local", "authoritative": False, "input_sha256": source_sha,
+                "artifacts": [{
+                    "path": proposal["path"], "sha256": proposal["sha256"],
+                    "media_type": "text/markdown",
+                }],
+                "model_revisions": [],
+                "processing": {
+                    "manuscript_uploaded": False, "user_authorized": True,
+                    "credential_source": "none", "retention_policy": None,
+                    "remote_deletion": "not_applicable", "request_id": None,
+                },
+                "warnings": proposal["warnings"],
+            })
+        docling_warning: str | None = None
+        if args.semantic_backend in {"auto", "docling"}:
+            try:
+                proposals.append(run_docling(
+                    source_copy, stage, output_rel,
+                    allow_model_downloads=args.allow_model_downloads,
+                    enrich_formulas=args.docling_formulas,
+                    timeout=args.docling_timeout,
+                    device=args.docling_device,
+                ))
+            except BackendError as exc:
+                if args.semantic_backend == "docling":
+                    raise IngestionError(str(exc)) from exc
+                docling_warning = f"Docling auto proposal was unavailable: {exc}"
+                overall_warnings.append(docling_warning)
+        if args.mathpix:
+            try:
+                proposals.append(run_mathpix(
+                    source_copy, stage, output_rel,
+                    app_id=os.environ.get("MATHPIX_APP_ID", ""),
+                    app_key=os.environ.get("MATHPIX_APP_KEY", ""),
+                    timeout=args.mathpix_timeout,
+                    poll_interval=args.mathpix_poll_interval,
+                    expected_pages=page_count,
+                ))
+            except BackendError as exc:
+                raise IngestionError(str(exc)) from exc
+        proposal_page_index = load_proposal_page_index(stage, output_rel, proposals)
+        packets = build_page_packets(
+            source_sha256=source_sha, pages=page_records, blocks=blocks,
+            tables=tables, figures=figures, equations=equations, proposals=proposals,
+            proposal_page_index=proposal_page_index,
+        )
+        packets_relative = Path("reconciliation/page-packets.json")
+        private_write(stage / packets_relative, canonical_json(packets))
         bounded_pages = [row["page"] for row in page_records if row["status"] == "bounded"]
         if bounded_pages:
             overall_warnings.append("pages without usable text: " + ", ".join(map(str, bounded_pages)))
@@ -1286,6 +1477,26 @@ def ingest(args: argparse.Namespace) -> Path:
             "markdown": {"path": f"{output_rel}/manuscript.md", "sha256": sha256_file(stage / "manuscript.md"), "normalization": "none"},
             "pages": page_records, "blocks": blocks, "tables": tables, "figures": figures,
             "equations": equations, "symbols": symbols, "proposal": proposal,
+            "proposals": proposals,
+            "reconciliation": {
+                "status": "packets_ready",
+                "policy": "render_authority_native_glyph_preservation",
+                "canonical_path": f"{output_rel}/manuscript.md",
+                "canonical_sha256": sha256_file(stage / "manuscript.md"),
+                "packets_path": f"{output_rel}/{packets_relative.as_posix()}",
+                "packets_sha256": sha256_file(stage / packets_relative),
+                "unresolved": {
+                    "pages": len(bounded_pages),
+                    "tables": len(tables),
+                    "figures": len(figures),
+                    "equations": len(equations),
+                },
+                "warnings": [
+                    "Backend proposals have not been promoted automatically; reconcile disagreements against page renders before relying on load-bearing content."
+                ] if proposals else [
+                    "No semantic proposal backend ran; use native text only within its recorded evidence boundary."
+                ],
+            },
             "quality": {
                 "status": "bounded" if bounded_pages else "ready_for_review",
                 "page_count_match": len(page_records) == page_count,
@@ -1329,6 +1540,7 @@ def ingest(args: argparse.Namespace) -> Path:
         print(f"PDF ingestion created: {destination}")
         print(f"Markdown reading surface: {destination / 'manuscript.md'}")
         print(f"Pages: {page_count}; tables: {len(tables)}; figures: {len(figures)}; equation candidates: {len(equations)}")
+        print("Semantic proposals: " + (", ".join(row["engine"] for row in proposals) if proposals else "none"))
         return destination
     finally:
         if stage is not None and stage.exists() and stage.is_dir():
@@ -1362,6 +1574,34 @@ def parser() -> argparse.ArgumentParser:
         "--markitdown-proposal", action="store_true",
         help="Write a non-authoritative local MarkItDown proposal when the command is installed",
     )
+    ingest_parser.add_argument(
+        "--semantic-backend", choices=("none", "auto", "docling"), default="auto",
+        help="Local semantic proposal backend; auto records a bounded fallback when unavailable",
+    )
+    ingest_parser.add_argument(
+        "--allow-model-downloads", action="store_true",
+        help="Allow Docling to download model artifacts; the manuscript itself remains local",
+    )
+    ingest_parser.add_argument(
+        "--docling-formulas", action="store_true",
+        help="Enable Docling formula enrichment (slow on unsupported accelerators)",
+    )
+    ingest_parser.add_argument("--docling-timeout", type=int, default=1_200)
+    ingest_parser.add_argument("--docling-device", choices=("auto", "cpu", "mps", "cuda", "xpu"), default="auto")
+    ingest_parser.add_argument(
+        "--mathpix", action="store_true",
+        help="Upload the complete PDF to Mathpix v3/pdf as a non-authoritative premium proposal",
+    )
+    ingest_parser.add_argument(
+        "--authorize-external-upload", choices=("mathpix",), default=None,
+        help="Explicitly authorize the named remote provider to receive this PDF",
+    )
+    ingest_parser.add_argument(
+        "--accept-mathpix-retention", action="store_true",
+        help="Acknowledge Mathpix endpoint retention terms before upload",
+    )
+    ingest_parser.add_argument("--mathpix-timeout", type=int, default=1_800)
+    ingest_parser.add_argument("--mathpix-poll-interval", type=float, default=2.0)
     ingest_parser.add_argument("--force", action="store_true", help="Atomically replace a stale ingestion package")
     check = commands.add_parser("check", help="Validate hashes, paths, pages, and Markdown spans")
     check.add_argument("package_dir", type=Path)
