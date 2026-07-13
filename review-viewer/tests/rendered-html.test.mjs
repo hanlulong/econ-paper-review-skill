@@ -56,16 +56,21 @@ test("ships the evidence-first interaction model", async () => {
     "Review document reader",
     "Principal concerns",
     "Undo status",
+    "Action history",
   ]) assert.match(workspace, new RegExp(label));
 
   assert.match(workspace, /localStorage/);
-  assert.match(actionStorage, /review-desk:v\$\{REVIEW_ACTION_STORAGE_VERSION\}:\$\{reviewId\}:/);
+  assert.match(actionStorage, /review-desk:v\$\{REVIEW_ACTION_STORAGE_VERSION\}:\$\{encodeURIComponent\(reviewId\)\}:/);
   assert.match(actionStorage, /complete prior payload remains archived/i);
   assert.match(workspace, /reviewLedgerFingerprint\(ledger\.findings\)/);
   assert.match(workspace, /openFinding\(\s*linkedFinding\.id/);
   assert.match(workspace, /parseReviewUrlState/);
   assert.match(workspace, /addEventListener\("popstate"/);
-  assert.match(workspace, /Non-final review package/);
+  assert.match(workspace, /Package not verified as final/);
+  assert.match(workspace, /Finalized · integrity verified/);
+  assert.match(workspace, /No comments are recorded in this package/);
+  assert.match(workspace, /An empty findings ledger does not by itself establish that the review is complete/);
+  assert.doesNotMatch(workspace, /Review complete|No active comments remain/);
   assert.match(workspace, /This tab only/);
   assert.match(workspace, /missing-exhibit/);
   assert.match(workspace, /source-manifest\.json/);
@@ -119,6 +124,9 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(workspace, /channelLabel/);
   assert.match(workspace, /lazy\(\(\) => import\("\.\/markdown-content"\)\)/);
   assert.match(workspace, /<Suspense fallback=/);
+  assert.match(workspace, /MarkdownRenderBoundary/);
+  assert.match(workspace, /Formatted view unavailable/);
+  assert.match(workspace, /The original review text remains available below/);
   assert.doesNotMatch(workspace, /from "react-markdown"/);
   assert.match(markdownRenderer, /ReactMarkdown/);
   assert.match(markdownRenderer, /remarkGfm/);
@@ -129,7 +137,7 @@ test("ships the evidence-first interaction model", async () => {
   assert.doesNotMatch(workspace, /<span>Possible fix<\/span>/);
   assert.match(workspace, /report\.md/);
   assert.match(workspace, /writing-report\.md/);
-  assert.match(workspace, /Optional context<\/strong><span>synthesis\.json · review-manifest\.json · all report\/audit Markdown/);
+  assert.match(workspace, /Optional context<\/strong><span>finalization\.json · synthesis\.json · review-manifest\.json · all report\/audit Markdown/);
   assert.match(workspace, /Open a review without uploading it/);
   assert.match(workspace, /Open review folder/);
   assert.match(workspace, /npm run dev:bundled/);
@@ -148,10 +156,13 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(workspace, /event\.key\.toLowerCase\(\) === "j"/);
   assert.match(workspace, /event\.key\.toLowerCase\(\) === "k"/);
   assert.match(workspace, /aria-keyshortcuts="J K A C P N"/);
+  assert.match(workspace, /\["ArrowDown", "ArrowUp", "Home", "End"\]/);
   assert.match(workspace, /event\.isComposing/);
   assert.match(workspace, /closest\("input, textarea, select, button, a/);
   const shortcutHandler = workspace.slice(workspace.indexOf("const onKey = (event: globalThis.KeyboardEvent)"), workspace.indexOf("window.addEventListener(\"keydown\", onKey)"));
   assert.ok(shortcutHandler.indexOf("if (event.key === \"Escape\"") < shortcutHandler.indexOf("if (interactive) return;"), "Escape handling must remain available in interactive controls");
+  assert.match(shortcutHandler, /topMenu\.current\?\.open/);
+  assert.match(shortcutHandler, /reportView !== "none"/);
   assert.ok(shortcutHandler.indexOf("if (interactive) return;") < shortcutHandler.indexOf("event.key.toLowerCase() === \"o\""), "interactive controls must suppress every global letter shortcut");
   assert.doesNotMatch(shortcutHandler, /findingControl|interactive &&/);
   assert.match(workspace, /focusAfterFilter/);
@@ -195,6 +206,10 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(workspace, /validateReviewDocumentManifest\(manifestValue\)/);
   assert.match(workspace, /MAX_SELECTED_FILE_COUNT/);
   assert.match(workspace, /localLoadSequence/);
+  assert.match(workspace, /const sequence = \+\+localLoadSequence\.current/);
+  assert.match(workspace, /cancelled \|\| sequence !== localLoadSequence\.current/);
+  assert.match(workspace, /stagedObjectUrls/);
+  assert.match(workspace, /for \(const url of stagedObjectUrls\) URL\.revokeObjectURL\(url\)/);
   assert.match(workspace, /matchReferencedImagePaths/);
   assert.match(workspace, /summary, \[contenteditable/);
   assert.match(workspace, /reportView !== "none" \|\| !filtered\.length/);
@@ -206,6 +221,8 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(workspace, /equationEvidencePresentation/);
   assert.match(workspace, /EvidenceSemanticFrame/);
   assert.match(workspace, /<EvidenceSemanticFrame representation=\{evidence\?\.representation\}/);
+  assert.match(workspace, /evidence\.support_record_id/);
+  assert.match(workspace, /Support record/);
   assert.match(workspace, /evidence\?\.type === "equation"/);
   assert.match(workspace, /\["code", "table_cell"\]\.includes/);
   assert.doesNotMatch(workspace, /quote-mark/);
@@ -303,24 +320,28 @@ test("the authorized bundled fixture is synthetic and internally consistent", as
 
   for (const entry of registry.reviews) {
     const base = new URL(`../public/reviews/${entry.slug}/`, import.meta.url);
-    const [ledger, run, synthesis, sourceManifest, computations, manuscript, startHere, report, writingReport, tables, figures] = await Promise.all([
+    const [ledger, run, synthesis, sourceManifest, computations, manuscript, startHere, report, writingReport, tables, figures, finalization] = await Promise.all([
       readFile(new URL("findings.json", base), "utf8").then(JSON.parse),
       readFile(new URL("run.json", base), "utf8").then(JSON.parse),
       readFile(new URL("synthesis.json", base), "utf8").then(JSON.parse),
-      readFile(new URL("source-manifest.json", base), "utf8").then(JSON.parse),
-      readFile(new URL("computations.json", base), "utf8").then(JSON.parse),
-      readFile(new URL("manuscript.md", base), "utf8"),
+      readFile(new URL("evidence/source-manifest.json", base), "utf8").then(JSON.parse),
+      readFile(new URL("evidence/computations.json", base), "utf8").then(JSON.parse),
+      readFile(new URL("synthetic-paper.md", base), "utf8"),
       readFile(new URL("README.md", base), "utf8"),
       readFile(new URL("report.md", base), "utf8"),
       readFile(new URL("writing-report.md", base), "utf8"),
-      readFile(new URL("tables.json", base), "utf8").then(JSON.parse),
-      readFile(new URL("figures.json", base), "utf8").then(JSON.parse),
+      readFile(new URL("evidence/tables.json", base), "utf8").then(JSON.parse),
+      readFile(new URL("evidence/figures.json", base), "utf8").then(JSON.parse),
+      readFile(new URL("finalization.json", base), "utf8").then(JSON.parse),
     ]);
     const active = ledger.findings.filter((finding) => !["dismissed", "resolved"].includes(finding.status));
     assert.equal(ledger.review_id, run.review_id);
     assert.equal(synthesis.review_id, run.review_id);
     assert.equal(sourceManifest.review_id, run.review_id);
     assert.equal(computations.review_id, run.review_id);
+    assert.equal(finalization.review_id, run.review_id);
+    assert.equal(finalization.contract_version, "0.4");
+    assert.ok(finalization.artifacts["evidence/source-manifest.json"]);
     assert.equal(new Set(computations.computations.map((row) => row.id)).size, computations.computations.length);
     assert.ok(sourceManifest.anchors.length > 0);
     assert.equal(active.length, run.counts.critical + run.counts.major + run.counts.minor + run.counts.info);
@@ -332,7 +353,10 @@ test("the authorized bundled fixture is synthetic and internally consistent", as
     assert.match(writingReport, /Detailed Writing Comments \(1\)/);
     assert.deepEqual(new Set(active.map((finding) => finding.report_channel)), new Set(["substance", "writing"]));
     assert.doesNotMatch(manuscript, /Place-Based Green|Racial Inequality in Housing/);
-    for (const row of [...tables.tables.map((value) => ({ paths: value.render_paths })), ...figures.figures.map((value) => ({ paths: value.extraction_paths }))]) {
+    for (const row of [
+      ...tables.tables.map((value) => ({ paths: value.rendered_assets?.map((asset) => asset.path) || value.render_paths })),
+      ...figures.figures.map((value) => ({ paths: value.rendered_assets?.map((asset) => asset.path) || value.extraction_paths })),
+    ]) {
       assert.ok(row.paths.length > 0);
       for (const path of row.paths) await readFile(new URL(path, base));
     }

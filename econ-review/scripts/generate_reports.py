@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate v0.3 referee and detailed-comment Markdown from canonical JSON state."""
+"""Generate the v0.3+ referee presentation from canonical JSON state."""
 
 from __future__ import annotations
 
@@ -7,11 +7,13 @@ import argparse
 import json
 import re
 import sys
+from datetime import date
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from safe_io import atomic_write_text  # noqa: E402
+from safe_io import atomic_write_text, canonical_portable_path, strict_json_load  # noqa: E402
 
 
 POSTURE = {
@@ -24,6 +26,14 @@ POSTURE = {
 
 NAVIGATION_START = "<!-- review-navigation:start -->"
 NAVIGATION_END = "<!-- review-navigation:end -->"
+ASSESSMENT_BOUNDARY_HEADING = re.compile(
+    r"^#{1,6}[ \t]+Assessment[ \t-]+Boundar(?:y|ies)\b.*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+JOURNAL_FIT_HEADING = re.compile(
+    r"^#{1,6}[ \t]+Journal[ \t-]+fit\b.*$",
+    re.MULTILINE | re.IGNORECASE,
+)
 
 
 def review_navigation(include_writing: bool) -> str:
@@ -82,7 +92,7 @@ def manifest_slug(value: str) -> str:
 
 
 def load(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = strict_json_load(path)
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain a JSON object")
     return value
@@ -114,6 +124,89 @@ def string_list(mapping: dict[str, Any], key: str, context: str) -> list[str]:
             raise ValueError(f"{context}.{key}[{index}] must be a non-empty string")
         output.append(item.strip())
     return output
+
+
+def _iso_date(value: Any, context: str) -> date:
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+        raise ValueError(f"{context} must be a valid ISO date (YYYY-MM-DD)")
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{context} must be a valid ISO date (YYYY-MM-DD)") from exc
+
+
+def _https_url(value: Any, context: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{context} must be a non-empty HTTPS URL")
+    candidate = value.strip()
+    try:
+        parsed = urlsplit(candidate)
+    except ValueError as exc:
+        raise ValueError(f"{context} must be a valid HTTPS URL") from exc
+    if parsed.scheme != "https" or not parsed.netloc or not parsed.hostname:
+        raise ValueError(f"{context} must use HTTPS and include a host")
+    return candidate
+
+
+def validate_current_venue_fit(
+    venue: dict[str, Any],
+    journal_requested: bool,
+    *,
+    current_date: date | None = None,
+) -> list[dict[str, Any]]:
+    """Enforce the current opt-in venue contract, including live-evidence safety."""
+    if not isinstance(venue, dict):
+        raise ValueError("evidence/writing.json.venue_fit must be an object")
+    status = venue.get("status")
+    if journal_requested and status not in {"assessed", "bounded"}:
+        raise ValueError("requested journal_fit requires venue_fit.status assessed or bounded")
+    if not journal_requested and status != "not_requested":
+        raise ValueError("unrequested journal_fit requires venue_fit.status not_requested")
+    raw_candidates = venue.get("candidates")
+    raw_finding_ids = venue.get("finding_ids")
+    if not isinstance(raw_candidates, list):
+        raise ValueError("evidence/writing.json.venue_fit.candidates must be an array")
+    if not isinstance(raw_finding_ids, list):
+        raise ValueError("evidence/writing.json.venue_fit.finding_ids must be an array")
+    if not journal_requested:
+        if venue.get("as_of_date") is not None or raw_candidates or raw_finding_ids:
+            raise ValueError(
+                "unrequested journal_fit must not retain dated, candidate, or finding payload"
+            )
+        return []
+
+    today = current_date or date.today()
+    raw_as_of_date = venue.get("as_of_date")
+    assessment_date = None
+    if raw_as_of_date is not None:
+        assessment_date = _iso_date(
+            raw_as_of_date,
+            "evidence/writing.json.venue_fit.as_of_date",
+        )
+        if assessment_date > today:
+            raise ValueError("venue_fit.as_of_date cannot be later than the current date")
+    if status == "assessed" and (assessment_date is None or not raw_candidates):
+        raise ValueError("assessed journal_fit requires an as_of_date and at least one candidate")
+
+    candidates: list[dict[str, Any]] = []
+    evidence_cutoff = assessment_date or today
+    for index, candidate in enumerate(raw_candidates):
+        context = f"evidence/writing.json.venue_fit.candidates[{index}]"
+        if not isinstance(candidate, dict):
+            raise ValueError(f"{context} must be an object")
+        _https_url(candidate.get("official_scope_url"), f"{context}.official_scope_url")
+        comparator_urls = candidate.get("recent_comparator_urls")
+        if not isinstance(comparator_urls, list):
+            raise ValueError(f"{context}.recent_comparator_urls must be an array")
+        for url_index, url in enumerate(comparator_urls):
+            _https_url(url, f"{context}.recent_comparator_urls[{url_index}]")
+        evidence_date = _iso_date(candidate.get("evidence_date"), f"{context}.evidence_date")
+        if evidence_date > evidence_cutoff:
+            raise ValueError(
+                f"{context}.evidence_date cannot be later than the venue assessment/current date"
+            )
+        candidates.append(candidate)
+    return candidates
 
 
 def finding_rows(ledger: dict[str, Any]) -> list[dict[str, Any]]:
@@ -182,6 +275,43 @@ def evidence_text(row: dict[str, Any]) -> str:
 
 def quote(value: str) -> str:
     return "\n".join("> " + line if line else ">" for line in value.splitlines())
+
+
+AUTHOR_EVIDENCE_PREFIXES = (
+    "[Rendered transcription]",
+    "[Reviewer observation]",
+    "[Reviewer comparison]",
+    "[Figure observation]",
+    "[Table observation]",
+    "[Checked absence]",
+    "[Computation]",
+)
+
+
+def relevant_evidence(row: dict[str, Any]) -> str:
+    """Render evidence without exposing internal provenance tokens.
+
+    Canonical ``representation`` metadata—not bracketed prose—carries the
+    provenance contract. Source excerpts retain Markdown quotation semantics;
+    reviewer-created observations, comparisons, computations, and absence
+    notes render as ordinary evidence notes so they cannot be mistaken for
+    manuscript quotations.
+    """
+    displayed = display_evidence(row)
+    content = evidence_text(row)
+    for prefix in AUTHOR_EVIDENCE_PREFIXES:
+        if content.startswith(prefix):
+            content = content[len(prefix):].lstrip()
+            break
+    representation = displayed.get("representation")
+    if representation in {
+        "reviewer_observation",
+        "composite_comparison",
+        "checked_absence",
+        "computed_result",
+    }:
+        return content
+    return quote(content)
 
 
 def heading_location(value: str) -> str:
@@ -257,7 +387,7 @@ def detail_block(number: int, row: dict[str, Any]) -> str:
         f"**Issue**: {issue}",
         "",
         "**Relevant text**:",
-        quote(evidence_text(row)),
+        relevant_evidence(row),
         "",
         f"**Concern**: {concern}",
         "",
@@ -271,7 +401,7 @@ def active_rows(ledger: dict[str, Any], channel: str) -> list[dict[str, Any]]:
     rows = [
         row for row in finding_rows(ledger)
         if row.get("status") not in {"dismissed", "resolved"}
-        and row.get("severity") in {"critical", "major", "minor"}
+        and row.get("severity") in {"critical", "major", "minor", "info"}
         and row.get("report_channel", "substance") == channel
     ]
     return sorted(rows, key=lambda row: row.get("importance_rank", 10**9))
@@ -322,6 +452,9 @@ def canonical_manifest(
         "verification.md": ("package-verification", "Package verification", 90),
     }
     for index, path in enumerate(sorted((review_dir / "evidence").glob("*.md"))):
+        relative_path = canonical_portable_path(
+            path.relative_to(review_dir).as_posix()
+        )
         identifier, title, order = evidence_metadata.get(
             path.name,
             (f"evidence-{manifest_slug(path.stem)}", path.stem.replace("-", " ").title(), 100 + index),
@@ -330,7 +463,7 @@ def canonical_manifest(
             "id": identifier,
             "title": title,
             "group": "audit",
-            "path": path.relative_to(review_dir).as_posix(),
+            "path": relative_path,
             "order": order,
         })
 
@@ -345,7 +478,7 @@ def canonical_manifest(
             context = f"review-manifest.json.documents[{index}]"
             if not isinstance(row, dict):
                 raise ValueError(f"{context} must be an object")
-            path = required_text(row, "path", context)
+            path = canonical_portable_path(required_text(row, "path", context))
             relative = Path(path)
             if relative.is_absolute() or ".." in relative.parts or relative.suffix.lower() != ".md":
                 raise ValueError(f"{context}.path must be a safe package-relative Markdown path")
@@ -401,7 +534,7 @@ def author_documents(review_dir: Path, include_writing: bool) -> list[tuple[str,
             context = f"review-manifest.json.documents[{index}]"
             if not isinstance(row, dict):
                 raise ValueError(f"{context} must be an object")
-            path = required_text(row, "path", context)
+            path = canonical_portable_path(required_text(row, "path", context))
             if Path(path).is_absolute() or ".." in Path(path).parts or not path.endswith(".md"):
                 raise ValueError(f"{context}.path must be a safe package-relative Markdown path")
             if path == "writing-report.md" and not include_writing:
@@ -414,7 +547,7 @@ def author_documents(review_dir: Path, include_writing: bool) -> list[tuple[str,
             documents[path] = (title, group, path, order)
     else:
         for path in sorted((review_dir / "evidence").glob("*.md")):
-            relative = path.relative_to(review_dir).as_posix()
+            relative = canonical_portable_path(path.relative_to(review_dir).as_posix())
             title = path.stem.replace("-", " ").title()
             documents[relative] = (title, "Audit", relative, 100)
 
@@ -445,7 +578,10 @@ def source_coverage(run: dict[str, Any]) -> str:
         counts[status] = counts.get(status, 0) + 1
     if not counts:
         return "no source files were recorded"
-    return ", ".join(f"{count} {humanize(status)}" for status, count in sorted(counts.items()))
+    return ", ".join(
+        f"{counted(count, 'source')} {humanize(status)}"
+        for status, count in sorted(counts.items())
+    )
 
 
 def render_landing_page(
@@ -455,7 +591,7 @@ def render_landing_page(
     run: dict[str, Any],
     include_writing: bool,
 ) -> str:
-    """Create the deterministic author entry point for a v0.3 package."""
+    """Create the deterministic author entry point for a v0.3+ package."""
     posture_key = required_text(synthesis, "review_posture", "synthesis.json")
     if posture_key not in POSTURE:
         raise ValueError(f"synthesis.json.review_posture has unsupported value {posture_key!r}")
@@ -586,7 +722,7 @@ def render_report(
         posture_rationale,
     ])
     if upgrade_conditions:
-        lines.extend(["", "The assessment would improve if the revision:", ""])
+        lines.extend(["", "The assessment would improve with these revisions:", ""])
         lines.extend(f"- {value}" for value in upgrade_conditions)
     lines.extend(["", "## Issues that could prevent publication", ""])
     concerns = synthesis.get("principal_concerns")
@@ -645,7 +781,331 @@ def render_report(
     return "\n".join(lines).rstrip() + "\n"
 
 
-def render_writing_report(review_dir: Path, ledger: dict[str, Any]) -> str:
+def markdown_cell(value: Any) -> str:
+    """Render one structured value safely inside a Markdown table cell."""
+    return " ".join(str(value or "—").split()).replace("|", r"\|")
+
+
+def finding_id_list(row: dict[str, Any]) -> str:
+    raw_ids = row.get("finding_ids", [])
+    if not isinstance(raw_ids, list):
+        raise ValueError("writing audit finding_ids must be an array")
+    ids = [value for value in raw_ids if isinstance(value, str) and value]
+    return ", ".join(f"`{value}`" for value in ids) or "—"
+
+
+def render_current_writing_report(
+    ledger: dict[str, Any],
+    writing_audit: dict[str, Any],
+    run: dict[str, Any],
+) -> str:
+    """Project the current writing report entirely from canonical JSON state."""
+    if writing_audit.get("schema_version") != "0.4":
+        raise ValueError("canonical writing-report generation requires writing audit schema_version 0.4")
+    if writing_audit.get("review_id") != ledger.get("review_id") or run.get("review_id") != ledger.get("review_id"):
+        raise ValueError("run, findings, and writing audit review_id values must match")
+
+    requested_addons = (
+        []
+        if "requested_addons" not in run
+        and not (run.get("schema_version") == "0.4" and run.get("mode") == "full")
+        else string_list(run, "requested_addons", "run.json")
+    )
+    unknown_addons = sorted(set(requested_addons) - {"journal_fit"})
+    if unknown_addons:
+        raise ValueError("run.json.requested_addons contains unsupported values: " + ", ".join(unknown_addons))
+    journal_requested = "journal_fit" in requested_addons
+
+    venue = writing_audit.get("venue_fit")
+    if not isinstance(venue, dict):
+        raise ValueError("evidence/writing.json.venue_fit must be an object")
+    venue_status = venue.get("status")
+    venue_candidates = validate_current_venue_fit(venue, journal_requested)
+
+    writing_rows = active_rows(ledger, "writing")
+    writing_by_id = {
+        row["id"]: row
+        for row in writing_rows
+        if isinstance(row.get("id"), str)
+    }
+    highest_ids = string_list(
+        writing_audit,
+        "highest_return_finding_ids",
+        "evidence/writing.json",
+    )
+
+    lines = [
+        "# Writing report",
+        "",
+        review_navigation(include_writing=True),
+        "",
+        "## Writing assessment",
+        "",
+        required_text(writing_audit, "assessment_summary", "evidence/writing.json"),
+        "",
+        f"**Paper-specific lens:** {required_text(writing_audit, 'paper_type_lens', 'evidence/writing.json')}",
+        "",
+        "**Strengths to preserve**",
+        "",
+    ]
+    strengths = string_list(writing_audit, "strengths", "evidence/writing.json")
+    lines.extend(f"- {strength}" for strength in strengths)
+
+    lines.extend(["", "## Highest-return writing revisions", ""])
+    if highest_ids:
+        for index, finding_id in enumerate(highest_ids, start=1):
+            row = writing_by_id.get(finding_id)
+            if row is None:
+                raise ValueError(
+                    f"evidence/writing.json highest-return ID {finding_id} is not an active writing finding"
+                )
+            context = finding_context(row)
+            title = optional_text(row, "title", context) or required_text(row, "issue", context)
+            punctuated_title = title if title.endswith((".", "?", "!")) else title + "."
+            lines.append(f"{index}. **`{finding_id}` — {punctuated_title}** {constructive_feedback(row)}")
+    else:
+        lines.append("No active writing finding currently requires a prioritized revision.")
+
+    section_rows = writing_audit.get("section_audit")
+    if not isinstance(section_rows, list):
+        raise ValueError("evidence/writing.json.section_audit must be an array")
+    lines.extend([
+        "",
+        "## Section-by-section reader audit",
+        "",
+        "| Section | Current job | What works | Reader friction | Revision direction | Findings |",
+        "|---|---|---|---|---|---|",
+    ])
+    for index, row in enumerate(section_rows):
+        if not isinstance(row, dict):
+            raise ValueError(f"evidence/writing.json.section_audit[{index}] must be an object")
+        lines.append(
+            "| "
+            + " | ".join([
+                markdown_cell(row.get("section")),
+                markdown_cell(row.get("current_job")),
+                markdown_cell(row.get("what_works")),
+                markdown_cell(row.get("reader_friction")),
+                markdown_cell(row.get("revision_direction")),
+                finding_id_list(row),
+            ])
+            + " |"
+        )
+
+    consistency_rows = writing_audit.get("consistency_groups")
+    if not isinstance(consistency_rows, list):
+        raise ValueError("evidence/writing.json.consistency_groups must be an array")
+    lines.extend([
+        "",
+        "## Terminology, definitions, and notation",
+        "",
+        required_text(writing_audit, "terminology_summary", "evidence/writing.json"),
+        "",
+        "| Object | Status | Preferred form | Variants checked | Locations checked | Findings |",
+        "|---|---|---|---|---|---|",
+    ])
+    for index, row in enumerate(consistency_rows):
+        if not isinstance(row, dict):
+            raise ValueError(f"evidence/writing.json.consistency_groups[{index}] must be an object")
+        variants = row.get("variants")
+        if not isinstance(variants, list):
+            raise ValueError(f"evidence/writing.json.consistency_groups[{index}].variants must be an array")
+        lines.append(
+            "| "
+            + " | ".join([
+                markdown_cell(row.get("object")),
+                markdown_cell(humanize(row.get("status"))),
+                markdown_cell(row.get("preferred")),
+                markdown_cell("; ".join(str(value) for value in variants)),
+                markdown_cell(row.get("locations_checked")),
+                finding_id_list(row),
+            ])
+            + " |"
+        )
+
+    lines.extend([
+        "",
+        "## Tables and figures as writing",
+        "",
+        required_text(writing_audit, "exhibit_summary", "evidence/writing.json"),
+        "",
+        "## Mechanics and copyedit inventory",
+        "",
+    ])
+    mechanics_rows = writing_audit.get("mechanics")
+    if not isinstance(mechanics_rows, list):
+        raise ValueError("evidence/writing.json.mechanics must be an array")
+    for index, row in enumerate(mechanics_rows):
+        if not isinstance(row, dict):
+            raise ValueError(f"evidence/writing.json.mechanics[{index}] must be an object")
+        group_id = required_text(row, "id", f"evidence/writing.json.mechanics[{index}]")
+        lines.extend([
+            f"### {group_id}: {humanize(row.get('kind')).capitalize()}",
+            "",
+            f"**Result:** {humanize(row.get('status')).capitalize()}. "
+            f"**Priority:** {humanize(row.get('priority'))}. **Findings:** {finding_id_list(row)}",
+            "",
+        ])
+        occurrences = row.get("occurrences")
+        if not isinstance(occurrences, list):
+            raise ValueError(f"evidence/writing.json.mechanics[{index}].occurrences must be an array")
+        if occurrences:
+            for occurrence_index, occurrence in enumerate(occurrences):
+                if not isinstance(occurrence, dict):
+                    raise ValueError(
+                        f"evidence/writing.json.mechanics[{index}].occurrences[{occurrence_index}] must be an object"
+                    )
+                locator = required_text(
+                    occurrence,
+                    "locator",
+                    f"evidence/writing.json.mechanics[{index}].occurrences[{occurrence_index}]",
+                )
+                before = required_text(
+                    occurrence,
+                    "quote",
+                    f"evidence/writing.json.mechanics[{index}].occurrences[{occurrence_index}]",
+                )
+                after = required_text(
+                    occurrence,
+                    "correction",
+                    f"evidence/writing.json.mechanics[{index}].occurrences[{occurrence_index}]",
+                )
+                provenance = humanize(occurrence.get("source_provenance"))
+                verification = humanize(occurrence.get("render_verification"))
+                lines.append(
+                    f"- **{locator}:** “{clean_join(before)}” → “{clean_join(after)}” "
+                    f"_({provenance}; {verification})_"
+                )
+            lines.append("")
+        lines.extend([
+            f"**Reader consequence:** {required_text(row, 'reader_consequence', f'evidence/writing.json.mechanics[{index}]')}",
+            "",
+            f"**Checked:** {required_text(row, 'notes', f'evidence/writing.json.mechanics[{index}]')}",
+            "",
+        ])
+
+    style_rows = writing_audit.get("style_suggestions")
+    if not isinstance(style_rows, list):
+        raise ValueError("evidence/writing.json.style_suggestions must be an array")
+    redundancy_rows = writing_audit.get("redundancy_map")
+    if not isinstance(redundancy_rows, list):
+        raise ValueError("evidence/writing.json.redundancy_map must be an array")
+    lines.extend(["## Style and writing improvements", ""])
+    if style_rows:
+        lines.extend([
+            "| Location | Current friction | Suggested revision | Priority | Findings |",
+            "|---|---|---|---|---|",
+        ])
+        for index, row in enumerate(style_rows):
+            if not isinstance(row, dict):
+                raise ValueError(f"evidence/writing.json.style_suggestions[{index}] must be an object")
+            lines.append(
+                "| "
+                + " | ".join([
+                    markdown_cell(row.get("locator")),
+                    markdown_cell(row.get("current_problem")),
+                    markdown_cell(row.get("suggested_revision")),
+                    markdown_cell(humanize(row.get("priority"))),
+                    finding_id_list(row),
+                ])
+                + " |"
+            )
+    else:
+        lines.append("No additional style revision is recommended beyond the prioritized items above.")
+    lines.extend(["", "### Redundancy and repetition", ""])
+    if redundancy_rows:
+        lines.extend([
+            "| Repeated idea | Locations | Recommended home | Findings |",
+            "|---|---|---|---|",
+        ])
+        for index, row in enumerate(redundancy_rows):
+            if not isinstance(row, dict):
+                raise ValueError(f"evidence/writing.json.redundancy_map[{index}] must be an object")
+            locations = row.get("locations")
+            if not isinstance(locations, list):
+                raise ValueError(f"evidence/writing.json.redundancy_map[{index}].locations must be an array")
+            lines.append(
+                "| "
+                + " | ".join([
+                    markdown_cell(row.get("idea")),
+                    markdown_cell("; ".join(str(value) for value in locations)),
+                    markdown_cell(row.get("recommended_home")),
+                    finding_id_list(row),
+                ])
+                + " |"
+            )
+    else:
+        lines.append("No costly repetition or conflicting duplicate framing was identified.")
+
+    if journal_requested:
+        candidates = venue_candidates
+        lines.extend([
+            "",
+            "## Journal fit and submission strategy",
+            "",
+            f"**Assessment status:** {humanize(venue_status)}"
+            + (f" (evidence checked {venue.get('as_of_date')})" if venue.get("as_of_date") else ""),
+            "",
+            f"**Current contribution bar:** {required_text(venue, 'current_contribution_bar', 'evidence/writing.json.venue_fit')}",
+            "",
+            f"**Revision-contingent bar:** {required_text(venue, 'revision_contingent_bar', 'evidence/writing.json.venue_fit')}",
+            "",
+            f"**Recommended sequence:** {required_text(venue, 'recommended_strategy', 'evidence/writing.json.venue_fit')}",
+            "",
+            f"**Related findings:** {finding_id_list(venue)}",
+        ])
+        for index, candidate in enumerate(candidates, start=1):
+            if not isinstance(candidate, dict):
+                raise ValueError(f"evidence/writing.json.venue_fit.candidates[{index - 1}] must be an object")
+            comparator_urls = candidate.get("recent_comparator_urls")
+            if not isinstance(comparator_urls, list):
+                raise ValueError(
+                    f"evidence/writing.json.venue_fit.candidates[{index - 1}].recent_comparator_urls must be an array"
+                )
+            comparator_links = ", ".join(
+                f"[comparator {position}]({url})"
+                for position, url in enumerate(comparator_urls, start=1)
+            )
+            lines.extend([
+                "",
+                f"### {index}. {required_text(candidate, 'journal', f'evidence/writing.json.venue_fit.candidates[{index - 1}]')}",
+                "",
+                f"**Fit category:** {humanize(candidate.get('category'))}",
+                "",
+                f"**Fit:** {required_text(candidate, 'fit', f'evidence/writing.json.venue_fit.candidates[{index - 1}]')}",
+                "",
+                f"**Mismatch:** {required_text(candidate, 'mismatch', f'evidence/writing.json.venue_fit.candidates[{index - 1}]')}",
+                "",
+                f"**Changes that would improve fit:** {required_text(candidate, 'required_changes', f'evidence/writing.json.venue_fit.candidates[{index - 1}]')}",
+                "",
+                f"**Evidence:** [official scope]({required_text(candidate, 'official_scope_url', f'evidence/writing.json.venue_fit.candidates[{index - 1}]')}); "
+                f"{comparator_links}; checked {required_text(candidate, 'evidence_date', f'evidence/writing.json.venue_fit.candidates[{index - 1}]')}",
+            ])
+
+    details = "\n\n".join(
+        detail_block(index, row)
+        for index, row in enumerate(writing_rows, start=1)
+    )
+    lines.extend(["", f"## Detailed Writing Comments ({len(writing_rows)})", ""])
+    if details:
+        lines.append(details)
+    else:
+        lines.append("No active writing comments remain.")
+    rendered = "\n".join(lines).rstrip() + "\n"
+    if ASSESSMENT_BOUNDARY_HEADING.search(rendered):
+        raise ValueError(
+            "canonical writing evidence must not create an author-facing Assessment Boundary section"
+        )
+    rendered_journal_sections = len(JOURNAL_FIT_HEADING.findall(rendered))
+    if rendered_journal_sections != int(journal_requested):
+        raise ValueError(
+            "canonical writing evidence creates a journal-fit section inconsistent with run.json.requested_addons"
+        )
+    return rendered
+
+
+def render_legacy_writing_report(review_dir: Path, ledger: dict[str, Any]) -> str:
+    """Preserve pre-v0.4 preambles for immutable and legacy-compatible packages."""
     destination = review_dir / "writing-report.md"
     if not destination.exists():
         raise ValueError("writing-report.md preamble is required before deterministic detail generation")
@@ -672,6 +1132,23 @@ def render_writing_report(review_dir: Path, ledger: dict[str, Any]) -> str:
     return f"{preamble}\n\n## Detailed Writing Comments ({len(writing)})\n\n{details}\n"
 
 
+def render_writing_report(
+    review_dir: Path,
+    ledger: dict[str, Any],
+    writing_audit: dict[str, Any] | None = None,
+    run: dict[str, Any] | None = None,
+) -> str:
+    """Dispatch to canonical v0.4 rendering while retaining legacy replay."""
+    if writing_audit is None:
+        audit_path = review_dir / "evidence" / "writing.json"
+        writing_audit = load(audit_path) if audit_path.exists() else None
+    if writing_audit is not None and writing_audit.get("schema_version") == "0.4":
+        if run is None:
+            run = load(review_dir / "run.json")
+        return render_current_writing_report(ledger, writing_audit, run)
+    return render_legacy_writing_report(review_dir, ledger)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("review_dir", type=Path)
@@ -687,6 +1164,25 @@ def main() -> int:
         writing_rows = active_rows(ledger, "writing")
         writing_path = args.review_dir / "writing-report.md"
         include_writing = bool(run.get("mode") == "full" or writing_rows or writing_path.exists())
+        writing_audit_path = args.review_dir / "evidence" / "writing.json"
+        writing_audit = load(writing_audit_path) if writing_audit_path.exists() else None
+        frozen_legacy_receipt = False
+        finalization_path = args.review_dir / "finalization.json"
+        if finalization_path.exists():
+            finalization = load(finalization_path)
+            receipt_version = finalization.get("schema_version")
+            frozen_legacy_receipt = receipt_version == "0.1" or (
+                receipt_version == "0.2" and run.get("mode") == "full"
+            )
+        if (
+            contract == "0.4"
+            and run.get("mode") == "full"
+            and not frozen_legacy_receipt
+            and (writing_audit is None or writing_audit.get("schema_version") != "0.4")
+        ):
+            raise ValueError(
+                "current v0.4 full report generation requires evidence/writing.json schema_version 0.4"
+            )
         manifest_path = args.review_dir / "review-manifest.json"
         manifest_output = json.dumps(
             canonical_manifest(args.review_dir, ledger, include_writing),
@@ -709,7 +1205,7 @@ def main() -> int:
             ),
         }
         if include_writing:
-            outputs[writing_path] = render_writing_report(args.review_dir, ledger)
+            outputs[writing_path] = render_writing_report(args.review_dir, ledger, writing_audit, run)
         for destination, output in outputs.items():
             if args.check:
                 if not destination.exists() or destination.read_text(encoding="utf-8") != output:

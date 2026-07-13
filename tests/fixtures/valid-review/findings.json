@@ -10,7 +10,7 @@
       "importance_rank": 1,
       "report_channel": "substance",
       "paper_position": {"source_id": "SRC-01", "anchor_id": "ANC-01", "ordinal": 1},
-      "evidence_boundary": "The quoted proposition and setup establish the boundary conflict; the fixture contains no separate appendix proof.",
+      "evidence_boundary": "No tie-breaking rule or boundary restriction appears in the supplied manuscript.",
       "minimum_repair": "Add a tie-breaking rule or state a set-valued equilibrium at the boundary.",
       "display_evidence_id": "EVD-LOGIC-01-A",
       "related_evidence_ids": [],
@@ -21,13 +21,13 @@
       "claim_ids": [
         "CLM-01"
       ],
-      "reader_effect": "The proposition and comparative static therefore overstate what the model establishes.",
+      "reader_effect": "The proposition and comparative-static summary currently state a stronger global conclusion.",
       "severity": "major",
       "essential": true,
       "status": "open",
       "support_state": "in_conflict",
       "issue": "The proposition asserts strict uniqueness although the stated payoff permits a tie.",
-      "why_it_matters": "The claim is global, but the equality boundary permits two actions.",
+      "why_it_matters": "At equality both actions maximize payoff, so the model supports a set-valued prediction.",
       "evidence": [
         {
           "id": "EVD-LOGIC-01-A",
@@ -38,9 +38,9 @@
           "source_record_id": null,
           "source": "synthetic-paper.md",
           "locator": {
-            "section": "3.1",
+          "section": "3",
             "page": null,
-            "paragraph": "2",
+          "paragraph": "1",
             "lines": null,
             "exhibit": null,
             "equation": null,
@@ -86,7 +86,7 @@
       "importance_rank": 2,
       "report_channel": "writing",
       "paper_position": {"source_id": "SRC-01", "anchor_id": "ANC-02", "ordinal": 2},
-      "evidence_boundary": "The exact source span establishes the agreement error; it does not imply a broader prose problem.",
+      "evidence_boundary": "Only this occurrence was found in the supplied manuscript.",
       "minimum_repair": "Replace “characterize” with “characterizes.”",
       "display_evidence_id": "EVD-WRT-01-A",
       "related_evidence_ids": [],
@@ -95,13 +95,13 @@
       "critique_basis": "reader_clarity",
       "data_limitation": "not_data_related",
       "claim_ids": [],
-      "reader_effect": "The agreement error is therefore unusually visible.",
+      "reader_effect": "The surrounding prose is otherwise concise and readable.",
       "severity": "minor",
       "essential": false,
       "status": "open",
       "support_state": "supported",
       "issue": "A singular subject takes a plural verb in the proposition summary.",
-      "why_it_matters": "The sentence states the paper's main proposition.",
+      "why_it_matters": "The error appears in the sentence summarizing the main proposition, making a simple copyedit unusually visible.",
       "evidence": [
         {
           "id": "EVD-WRT-01-A",
@@ -112,9 +112,9 @@
           "source_record_id": null,
           "source": "synthetic-paper.md",
           "locator": {
-            "section": "3.1",
+          "section": "3",
             "page": null,
-            "paragraph": "3",
+          "paragraph": "2",
             "lines": null,
             "exhibit": null,
             "equation": null,

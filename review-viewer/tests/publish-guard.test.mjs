@@ -38,10 +38,26 @@ test("authorized sync stages and validates before replacing published assets", a
   assert.match(source, /exhibitPaths/);
   assert.match(source, /source-manifest\.json/);
   assert.match(source, /computations\.json/);
+  assert.match(source, /finalization\.json/);
+  assert.match(source, /verifyReviewFinalization/);
+  assert.match(source, /Object\.keys\(receipt\.artifacts\)\.map/);
   assert.match(source, /validateReviewComputationLinks/);
   assert.match(source, /Missing or unsafe exhibit render/);
-  assert.match(source, /exhibitPaths\.map\(\(relativePath\) => copyDeclaredDocument/);
+  assert.match(source, /copyDeclaredDocument\(bundle\.reviewRoot, destination, relativePath\)/);
   assert.match(source, /rename\(stageRoot, publicRoot\)/);
   assert.doesNotMatch(source, /rm\(publicRoot/);
   assert.ok(source.indexOf("const prepared = await Promise.all") < source.indexOf("rename(publicRoot, backupRoot)"));
+});
+
+test("test preservation and cleanup cannot leave a copied backup bundle in the build", async () => {
+  const [preserver, cleanup, harness] = await Promise.all([
+    readFile(new URL("../scripts/preserve-review-bundle.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/clear-review-bundles.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/test-viewer.mjs", import.meta.url), "utf8"),
+  ]);
+  assert.match(preserver, /mkdtemp\(resolve\(dirname\(parent\), "\.review-test-backup-"\)\)/);
+  assert.match(cleanup, /name\.startsWith\("\.review-test-backup-"\)/);
+  assert.match(cleanup, /copiedTestBackups\.map/);
+  assert.match(harness, /finally\s*\{/);
+  assert.match(harness, /scripts\/clear-review-bundles\.mjs/);
 });

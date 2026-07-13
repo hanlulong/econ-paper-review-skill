@@ -3,6 +3,7 @@ export type ExhibitRenderRole = "exhibit_crop" | "saved_exhibit_image" | "full_s
 export type ExhibitRenderInput = {
   sourcePath: string;
   resolvedPath: string;
+  declaredRole?: ExhibitRenderRole;
 };
 
 export type ExhibitRender = ExhibitRenderInput & {
@@ -76,7 +77,7 @@ export function orderExhibitRenders(inputs: ExhibitRenderInput[]): ExhibitRender
     .map((input, originalIndex) => ({
       ...input,
       originalIndex,
-      role: classifyExhibitRender(input.sourcePath),
+      role: input.declaredRole || classifyExhibitRender(input.sourcePath),
     }))
     .sort((left, right) => rolePriority[left.role] - rolePriority[right.role] || left.originalIndex - right.originalIndex);
 

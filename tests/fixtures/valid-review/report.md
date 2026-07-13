@@ -14,11 +14,11 @@ The main strengths worth preserving are:
 
 ## Recommendation and main grounds
 
-**Recommendation**: Weak R&R
+**Recommendation**: Not assessed
 
-The headline proposition requires correction, but the current design can support the repair.
+Without a specified venue or tier, no publication recommendation is assessed. Independently of fit, the headline proposition requires correction, and the current design can support the repair.
 
-The assessment would improve if the revision:
+The assessment would improve with these revisions:
 
 - State a tie-breaking rule or weaken the proposition at the equality boundary.
 
@@ -43,7 +43,7 @@ The mechanism is clear away from the boundary, but the strict global conclusion 
 
 ## Detailed Comments (1)
 
-### 1. Section 3.1: The global uniqueness claim fails at the equality boundary
+### 1. Section 3: The global uniqueness claim fails at the equality boundary
 <!-- finding_id: LOGIC-01 -->
 
 **Issue**: The proposition asserts strict uniqueness although the stated payoff permits a tie.
@@ -51,7 +51,7 @@ The mechanism is clear away from the boundary, but the strict global conclusion 
 **Relevant text**:
 > The equilibrium action is unique for every parameter value.
 
-**Concern**: The claim is global, but the equality boundary permits two actions. The proposition and comparative static therefore overstate what the model establishes. The quoted proposition and setup establish the boundary conflict; the fixture contains no separate appendix proof.
+**Concern**: At equality both actions maximize payoff, so the model supports a set-valued prediction. The proposition and comparative-static summary currently state a stronger global conclusion. No tie-breaking rule or boundary restriction appears in the supplied manuscript.
 
 **Suggestions**: Add a tie-breaking rule or state a set-valued equilibrium at the boundary. Align Proposition 1, its proof, and the comparative static.
 

@@ -8,8 +8,52 @@ import json
 import os
 import stat
 import tempfile
+import unicodedata
 from pathlib import Path
 from typing import Any
+
+
+_WINDOWS_RESERVED_BASENAMES = frozenset(
+    {"con", "prn", "aux", "nul", "clock$"}
+    | {f"com{number}" for number in range(1, 10)}
+    | {f"lpt{number}" for number in range(1, 10)}
+)
+
+
+class StrictJsonError(ValueError):
+    """Raised when JSON is syntactically accepted by Python but contract-ambiguous."""
+
+
+def _reject_duplicate_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise StrictJsonError(f"duplicate JSON key: {key}")
+        value[key] = item
+    return value
+
+
+def _reject_json_constant(value: str) -> None:
+    raise StrictJsonError(f"non-standard JSON numeric constant: {value}")
+
+
+def strict_json_loads(value: str | bytes | bytearray) -> Any:
+    """Parse standards-compliant JSON while rejecting duplicate object keys.
+
+    Python's default decoder accepts duplicate keys with last-value-wins
+    semantics and also accepts NaN/Infinity. Both behaviors make signed review
+    artifacts ambiguous across implementations, so every contract-bearing
+    loader uses this function instead.
+    """
+    return json.loads(
+        value,
+        object_pairs_hook=_reject_duplicate_pairs,
+        parse_constant=_reject_json_constant,
+    )
+
+
+def strict_json_load(path: Path) -> Any:
+    return strict_json_loads(path.read_text(encoding="utf-8"))
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -22,6 +66,33 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def canonical_portable_path(value: str) -> str:
+    """Return a browser/ZIP-portable canonical relative package path.
+
+    Review receipts are consumed by Python and browser runtimes on different
+    filesystems. Reject aliases and names whose meaning differs across those
+    runtimes instead of signing a package that the viewer cannot verify.
+    """
+    if not isinstance(value, str) or not value:
+        raise ValueError("package path must be a nonempty string")
+    if value != value.strip() or value != unicodedata.normalize("NFC", value):
+        raise ValueError(f"package path is not canonical Unicode text: {value!r}")
+    if value.startswith("/") or "\\" in value or ":" in value:
+        raise ValueError(f"package path is not portable: {value!r}")
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        raise ValueError(f"package path contains a control character: {value!r}")
+    parts = value.split("/")
+    if any(
+        part in {"", ".", ".."}
+        or part != part.strip()
+        or part.endswith(".")
+        or part.split(".", 1)[0].casefold() in _WINDOWS_RESERVED_BASENAMES
+        for part in parts
+    ):
+        raise ValueError(f"package path is not a canonical relative path: {value!r}")
+    return "/".join(parts)
 
 
 def _contained_path(root: Path, relative: str | Path, *, create_parents: bool) -> Path:
@@ -67,6 +138,10 @@ def safe_read_text(root: Path, relative: str | Path) -> str:
     return safe_read_bytes(root, relative).decode("utf-8")
 
 
+def safe_read_json(root: Path, relative: str | Path) -> Any:
+    return strict_json_loads(safe_read_bytes(root, relative))
+
+
 def atomic_write_bytes(root: Path, relative: str | Path, value: bytes) -> Path:
     destination = _contained_path(root, relative, create_parents=True)
     descriptor, temporary = tempfile.mkstemp(prefix=f".{destination.name}.", dir=destination.parent)
@@ -97,4 +172,8 @@ def atomic_write_text(root: Path, relative: str | Path, value: str) -> Path:
 
 
 def atomic_write_json(root: Path, relative: str | Path, value: Any) -> Path:
-    return atomic_write_text(root, relative, json.dumps(value, indent=2, ensure_ascii=False) + "\n")
+    return atomic_write_text(
+        root,
+        relative,
+        json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + "\n",
+    )

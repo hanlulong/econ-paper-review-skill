@@ -2,6 +2,14 @@
 
 Run this protocol after drafting and before presenting any output as final.
 
+## Contents
+
+- [Structured finding verification](#1-build-the-structured-verification-ledger)
+- [Negative and directional claims](#2-verify-negative-claims)
+- [Literature verification](#4-verify-literature-statements)
+- [Artifact consistency](#5-verify-artifact-consistency)
+- [Atomic ship gate](#6-atomic-ship-gate)
+
 ## 1. Build the structured verification ledger
 
 For every surviving finding, including minor comments, record:
@@ -26,7 +34,15 @@ For every surviving finding, including minor comments, record:
 | Report, ledger, and fix plan map consistently | pass/fail |
 | Every table finding verified against the rendered page, not extraction alone | pass/fail/not applicable |
 | All seven analytical-ledger domains present; adverse and bounded states resolved | pass/fail |
+| Every headline claim has a source-specific economic link, object-role map, alternative channel or ordering, and strongest supported contribution | pass/fail |
+| Every load-bearing comparison records all differential content before its target object, including intervention prompts, tasks, routing, and timing when applicable | pass/fail/not applicable |
+| Cross-result relationships, promised or measured evidence objects, magnitude context, and sample/domain transport are completely reconciled | pass/fail/not applicable |
+| Every load-bearing diagnostic is classified by evidentiary role; its shared assumptions, limits, and assessment-changing outcomes are stated without treating nonrejection as proof | pass/fail/not applicable |
+| Any activated research-integrity or data-governance concern is source-triggered, current-rule verified when rule-specific, non-accusatory, and limited to the least intrusive disclosure or scope repair | pass/fail/not applicable |
+| Any replication conclusion distinguishes static traceability, authorized execution, reproduced output, scientific correctness, package failure, result mismatch, and reviewer-side boundary | pass/fail/not applicable |
+| Figure rows are bound to immutable rendered assets whose visible identity matches the declared figure label and PDF page | pass/fail/not applicable |
 | Critical/major feedback has a reader decision, minimum repair, and observable resolution condition | pass/fail |
+| Alternative repair paths are distinguished from cumulative requirements, and each requested analysis has at least one plausible result that changes the claim or assessment | pass/fail/not applicable |
 | Detailed-comment boilerplate and acronym lints pass | pass/fail |
 
 Store the canonical results in `review/evidence/verification.json` and generate `review/evidence/verification.md` from that state. Each finding record must identify each evidence item, its evidence representation, the source anchor or computation/external-source record that verifies it, the result, and any boundary. Prose that says a check passed without resolving those links is not verification.
@@ -76,11 +92,18 @@ Open every named source. Confirm metadata and the exact claim attributed. Do not
 - Full mode must include a complete `evidence/coverage.md` matrix and satisfy the recorded comment policy without truncating verified issues; enforce a maximum only when the user explicitly requested one.
 - Full-mode coverage must record reader clarity, cross-section claim consistency, terminology/variable definitions, data-limitation fairness, review tone, and writing/typographical passes.
 - Every table coverage unit must appear exactly once in the separate rendered-table audit. Extraction/render conflicts must be resolved or bounded, and every adverse table state must map to an active finding.
-- The analytical audit must contain all seven ledger domains. Every adverse entry or check must map to an active finding; every bounded or inapplicable domain must explain why.
+- The analytical audit must contain all seven ledger domains. In v0.2, every evidence locator must bind through `record_ref` to the same canonical record cited directly by its entry, and its source, locator, and representation-appropriate content must reconcile to that record. Every adverse entry or check must map to an active finding; every bounded entry or check propagates to a bounded domain and reciprocal coverage dimension; every bounded or inapplicable domain must explain why.
+- New claims-audit v0.2 packages must cover every headline claim in the economic-link ledger and include reciprocal coverage rows for the economic argument, comparison content, cross-result coherence, evidence-object completeness, magnitude plausibility, and population/domain transport. Every adverse state maps to an active finding; a not-applicable state names the absent paper object.
+- For each load-bearing evidence object, verify that the prose distinguishes direct evidence, falsification or implication checks, sensitivity, targeted fit, independent validation, numerical diagnostics, and external benchmarks as applicable. A clean diagnostic cannot be described as proving a maintained assumption merely because it fails to reject, and several checks that share the same failure mode cannot be presented as independent triangulation.
+- An experimental treatment is the full arm-differential experience through each outcome. Verify the order of prompts, required responses, routing, checks, delays, and platform features before accepting a component-level attribution. Apply the same compound-comparison rule to models, counterfactuals, robustness comparisons, and theory cases.
+- Every figure in claims-audit-era output must map to one coverage unit and one or more hash-verified rendered assets. At least one inspected asset must visibly identify the declared figure on a declared source page. A crop filename, ordinal position, caption-only inference, or existence check is not semantic verification.
 - The detailed-comment section must follow the reader-decision style: critical and major comments end with an observable resolution condition, minor mechanics remain compact, and prohibited repeated boilerplate or malformed acronyms are absent.
 - Every synthesis strength, posture rationale, convincingness judgment, principal concern, and upgrade condition must link to existing claim IDs, finding IDs, and/or evidence IDs. Synthesis cannot create unsupported facts or concerns.
-- Every claimed arithmetic, statistical, algebraic, simulation, or numerical mismatch must resolve to a computation record with immutable inputs, method, tolerance, output, and artifact hash. A prose description of hand arithmetic is insufficient.
-- Every quote-like display must be generated from an evidence record whose representation permits quotation. Reviewer observations, comparisons, computations, and checked absences must remain visibly labeled as such.
+- Every claimed arithmetic, statistical, algebraic, simulation, or numerical mismatch must resolve to a computation record with immutable inputs, method, tolerance, output, and artifact hash. Computation-to-finding links are reciprocal. A clean audit-only computation is allowed only under computation schema v0.2 when its reciprocal `audit_links` name the analytical or magnitude row that canonically cites it. A prose description of hand arithmetic is insufficient.
+- Every quote-like display must be generated from an evidence record whose representation permits quotation. Reviewer observations, comparisons, computations, and checked absences render as unquoted evidence notes; their typed representation remains available in canonical state without an author-facing bracket label.
+- Every requested additional analysis must have an assessment-changing branch. When claim narrowing, reframing, analysis, new evidence, or redesign are alternative ways to close one finding, the report and fix plan must identify the minimum path and must not require all alternatives cumulatively.
+- Every activated research-integrity or data-governance finding must resolve to a source fact and scoped absence search. Never infer misconduct or illegality from missing prose; verify venue-, registry-, provider-, or jurisdiction-specific requirements from current official sources or mark specific compliance bounded.
+- Every code or replication finding must record whether it arose from static inspection or authorized execution, the execution boundary actually used, data and environment availability, and the command/output or source anchors supporting it. A successful run does not certify scientific correctness, and a failed run must be reconciled against environment, data, dependency, resource, randomness, and reviewer-side limits before it becomes a package defect.
 
 ## 6. Atomic ship gate
 
@@ -95,4 +118,4 @@ On failure:
 
 Set `run.json.status` to `verification_failed` until the corrected artifacts pass. Never hide a failed check in an appendix while presenting the report as final.
 
-Use one finalization command for the current contract. It must stage the generated files and completed run state, reject symlinked or escaping paths, run every gate, commit the staged artifacts atomically, and write the hash receipt last as the completion marker. A failure must leave the package visibly non-complete and must not partially replace a previously valid report. Do not hand-edit a generated report after finalization; change canonical state and finalize again.
+Use one finalization command for the current contract. It must stage the generated files and completed run state, reject symlinked or escaping paths, run every gate, replace each generated artifact atomically, attempt rollback on ordinary failures, and write the hash receipt last so an interruption cannot leave a receipt-valid partial package. Do not claim filesystem-wide multi-file atomicity. A caught failure must restore the prior generated package; a process kill or power loss may require rerunning finalization, but cannot leave a valid receipt for mixed bytes. Do not hand-edit a generated report after finalization; change canonical state and finalize again.

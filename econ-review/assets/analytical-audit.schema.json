@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "review_id", "scope", "domains"],
   "properties": {
-    "schema_version": {"const": "0.1"},
+    "schema_version": {"enum": ["0.1", "0.2"]},
     "review_id": {"type": "string", "minLength": 1},
     "scope": {
       "type": "object",
@@ -51,6 +51,7 @@
                 "object": {"type": "string", "minLength": 1},
                 "status": {"enum": ["clear", "issue", "bounded"]},
                 "coverage_unit_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+                "evidence_refs": {"$ref": "#/$defs/evidenceRefs"},
                 "evidence_locators": {
                   "type": "array",
                   "minItems": 1,
@@ -61,7 +62,11 @@
                     "properties": {
                       "source": {"type": "string", "minLength": 1},
                       "locator": {"type": "string", "minLength": 1},
-                      "content": {"type": "string", "minLength": 1}
+                      "content": {"type": "string", "minLength": 1},
+                      "coverage_unit_id": {"type": "string", "minLength": 1},
+                      "anchor_id": {"type": ["string", "null"], "pattern": "^ANC-[0-9]{2,}$"},
+                      "representation": {"enum": ["verbatim", "normalized_transcription", "reviewer_observation", "checked_absence", "computed_result", "external_source"]},
+                      "record_ref": {"$ref": "#/$defs/evidenceRef"}
                     }
                   }
                 },
@@ -110,5 +115,73 @@
         ]
       }
     }
-  }
+  },
+  "$defs": {
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": {"enum": ["anchor", "finding_evidence", "computation", "external_source"]},
+        "id": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {"if": {"properties": {"kind": {"const": "anchor"}}, "required": ["kind"]}, "then": {"properties": {"id": {"pattern": "^ANC-[0-9]{2,}$"}}}},
+        {"if": {"properties": {"kind": {"const": "finding_evidence"}}, "required": ["kind"]}, "then": {"properties": {"id": {"pattern": "^EVD-[A-Z0-9_-]+$"}}}},
+        {"if": {"properties": {"kind": {"const": "computation"}}, "required": ["kind"]}, "then": {"properties": {"id": {"pattern": "^CMP-[0-9]{2,}$"}}}},
+        {"if": {"properties": {"kind": {"const": "external_source"}}, "required": ["kind"]}, "then": {"properties": {"id": {"pattern": "^EXT-[0-9]{2,}$"}}}}
+      ]
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/evidenceRef"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"schema_version": {"const": "0.2"}}, "required": ["schema_version"]},
+      "then": {
+        "properties": {
+          "domains": {
+            "items": {
+              "properties": {
+                "entries": {
+                  "items": {
+                    "required": ["evidence_refs"],
+                    "properties": {
+                      "evidence_locators": {
+                        "items": {
+                          "required": ["coverage_unit_id", "anchor_id", "representation", "record_ref"],
+                          "allOf": [
+                            {
+                              "if": {"properties": {"representation": {"enum": ["verbatim", "normalized_transcription", "reviewer_observation"]}}, "required": ["representation"]},
+                              "then": {"properties": {"record_ref": {"properties": {"kind": {"enum": ["anchor", "finding_evidence"]}}}}}
+                            },
+                            {
+                              "if": {"properties": {"representation": {"const": "checked_absence"}}, "required": ["representation"]},
+                              "then": {"properties": {"record_ref": {"properties": {"kind": {"enum": ["anchor", "finding_evidence"]}}}}}
+                            },
+                            {
+                              "if": {"properties": {"representation": {"const": "computed_result"}}, "required": ["representation"]},
+                              "then": {"properties": {"record_ref": {"properties": {"kind": {"const": "computation"}}}}}
+                            },
+                            {
+                              "if": {"properties": {"representation": {"const": "external_source"}}, "required": ["representation"]},
+                              "then": {"properties": {"record_ref": {"properties": {"kind": {"const": "external_source"}}}}}
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

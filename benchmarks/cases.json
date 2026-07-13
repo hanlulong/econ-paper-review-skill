@@ -1,16 +1,24 @@
 {
-  "schema_version": "0.1",
+  "schema_version": "0.3",
+  "case_contract": "rubric_only_seed",
+  "executed_packages_directory": "reviews/<case-id>",
   "cases": [
     {
       "id": "empirical-randomized",
       "family": "empirical",
       "paper": "papers/empirical-randomized.md",
-      "required_active_burdens": ["logical_validity", "technical_validity", "methodological_validity", "causal_identification", "measurement", "sampling_or_randomization_uncertainty", "external_validity", "reproducibility"],
-      "required_not_applicable_burdens": ["formal_proof", "structural_identification"],
+      "required_active_burdens": ["causal_identification", "sampling_or_randomization_uncertainty"],
+      "required_not_applicable_burdens": [],
+      "required_active_parent_burdens": ["logical_validity", "technical_validity", "methodological_validity", "measurement_validity", "identification_validity", "uncertainty_and_inference", "scope_and_transport", "reproducibility"],
+      "required_not_applicable_parent_burdens": [],
+      "forbidden_active_burden_ids": ["formal_proof", "structural_identification"],
       "required_issue_concepts": [
         {"id": "attrition", "patterns": ["attrition", "return.*rate", "follow-up.*selection"]},
         {"id": "post-treatment-trimming", "patterns": ["post-treatment.*trim", "outcome.*trim", "trim.*random"]},
-        {"id": "claim-scope", "patterns": ["all.*workers", "external valid", "volunteer.*sample", "population.*scope"]}
+        {"id": "claim-scope", "patterns": ["all.*workers", "external valid", "volunteer.*sample", "population.*scope"]},
+        {"id": "treatment-only-prompt", "patterns": ["treatment-only.*(question|prompt)", "treated.*additional.*question", "(?:question|prompt|prim(e|ed|ing)|demand effect).*(?:one arm|treated|treatment)", "(?:one arm|treated|treatment).*(?:question|prompt|prim(e|ed|ing)|demand effect)", "(?:question|prompt).*(?:before|preced).*(?:outcome|choice|behavior)", "bundled treatment"]},
+        {"id": "collected-unreported-outcome", "patterns": ["collected.*(?:not report|unreported|omit)", "(?:not report|unreported|omit).*(?:collected|outcome|amount|dollar.*sav)", "(?:dollar.*sav|saving amount).*(?:not report|unreported|omit)"]},
+        {"id": "comparison-magnitude-context", "patterns": ["(?:control|arm-specific|comparison-specific|pooled).*(?:mean|rate|baseline|denominator|magnitude)", "(?:mean|rate|baseline|denominator|magnitude).*(?:control|arm-specific|comparison-specific|pooled)"]}
       ],
       "forbidden_issue_concepts": [
         {"id": "ritual-clustering", "patterns": ["cluster.*standard error", "cluster-robust"]}
@@ -20,72 +28,109 @@
       "id": "descriptive-index",
       "family": "descriptive",
       "paper": "papers/descriptive-index.md",
-      "required_active_burdens": ["logical_validity", "technical_validity", "methodological_validity", "measurement", "sampling_or_randomization_uncertainty", "external_validity", "reproducibility"],
-      "required_not_applicable_burdens": ["causal_identification", "formal_proof", "structural_identification"],
+      "required_active_burdens": [],
+      "required_not_applicable_burdens": ["causal_identification"],
+      "required_active_parent_burdens": ["logical_validity", "technical_validity", "methodological_validity", "measurement_validity", "uncertainty_and_inference", "scope_and_transport", "source_support", "reproducibility"],
+      "required_not_applicable_parent_burdens": ["identification_validity"],
+      "forbidden_active_burden_ids": ["causal_identification", "structural_identification", "formal_proof"],
       "required_issue_concepts": [
         {"id": "changing-weights", "patterns": ["changing weight", "composition", "fixed weight", "chain"]},
         {"id": "missingness", "patterns": ["missing", "nonresponse", "coverage"]},
-        {"id": "uncertainty", "patterns": ["uncertaint", "sampling error", "confidence interval"]}
+        {"id": "uncertainty", "patterns": ["uncertaint", "sampling error", "confidence interval"]},
+        {"id": "index-interpretation-bridge", "patterns": ["(?:index|basket).*(?:price growth|interpret|measurement bridge)", "(?:price growth|interpret|measurement bridge).*(?:index|basket)", "available-item.*(?:set|composition)"]},
+        {"id": "promised-unreported-decomposition", "patterns": ["promis.*(?:decomposition|not report|missing)", "(?:decomposition|price.*coverage).*(?:not report|omit|missing)", "(?:not report|omit|missing).*(?:decomposition|coverage)"]},
+        {"id": "cross-summary-coherence", "patterns": ["(?:national|aggregate).*(?:median|town).*(?:reconcile|coher|broad)", "(?:median|town).*(?:national|aggregate).*(?:reconcile|coher|broad)", "broad-based.*(?:unsupported|not establish)"]}
       ],
       "forbidden_issue_concepts": [
-        {"id": "invented-causal-claim", "patterns": ["parallel trend", "instrument.*exclusion", "treatment effect"]}
+        {"id": "invented-causal-claim", "patterns": ["parallel trend", "instrument.*exclusion", "treatment effect"]},
+        {"id": "invented-alternative-causal-channel", "patterns": ["alternative causal channel", "omitted mechanism.*caus"]},
+        {"id": "invented-transport-overreach", "patterns": ["generaliz.*(?:all households|all outlets|nonparticipating)", "claim.*(?:all households|all outlets)"]}
       ]
     },
     {
       "id": "structural-counterfactual",
       "family": "structural-quantitative",
       "paper": "papers/structural-counterfactual.md",
-      "required_active_burdens": ["logical_validity", "technical_validity", "methodological_validity", "measurement", "structural_identification", "calibration_and_computation", "equilibrium_counterfactual_validity", "external_validity", "reproducibility"],
-      "required_not_applicable_burdens": ["formal_proof"],
+      "required_active_burdens": ["structural_identification"],
+      "required_not_applicable_burdens": [],
+      "required_active_parent_burdens": ["logical_validity", "technical_validity", "methodological_validity", "measurement_validity", "identification_validity", "uncertainty_and_inference", "computational_validity", "validation_and_fit", "counterfactual_validity", "scope_and_transport", "reproducibility"],
+      "required_not_applicable_parent_burdens": [],
+      "forbidden_active_burden_ids": ["causal_identification", "formal_proof"],
       "required_issue_concepts": [
         {"id": "parameter-identification", "patterns": ["identify.*eta", "same moment", "parameter.*moment"]},
         {"id": "counterfactual-invariance", "patterns": ["held fixed", "policy invariant", "counterfactual.*eta"]},
-        {"id": "numerical-convergence", "patterns": ["converg", "multiple start", "tolerance", "numerical"]}
+        {"id": "numerical-convergence", "patterns": ["converg", "multiple start", "tolerance", "numerical"]},
+        {"id": "promised-unreported-objects", "patterns": ["promis.*(?:price|welfare|decomposition|not report)", "(?:price distribution|welfare decomposition).*(?:not report|omit|missing)", "(?:not report|omit|missing).*(?:price distribution|welfare decomposition)"]},
+        {"id": "fit-counterfactual-coherence", "patterns": ["(?:model fit|validation|price moment).*(?:counterfactual|welfare|reproduc)", "(?:counterfactual|welfare).*(?:model fit|validation|price moment)", "18 percent.*price"]},
+        {"id": "alternative-policy-channel", "patterns": ["(?:application|compliance|potential entr).*(?:channel|fixed|ruled out|omitted margin|invariant|bypass)", "(?:fix(?:es|ed)?|hold(?:s|ing)? fixed).*(?:application|compliance|potential entr)", "(?:alternative|bypass|policy).*(?:application|compliance|entrant pool)"]},
+        {"id": "welfare-magnitude-definition", "patterns": ["welfare.*(?:baseline|consumption-equivalent|unit|denominator|fee revenue|transfer)", "(?:baseline|consumption-equivalent|unit|denominator|fee revenue|transfer).*welfare"]},
+        {"id": "counterfactual-transport-scope", "patterns": ["any retail market", "transport.*market", "external valid.*counterfactual", "one calibration.*(?:scope|generaliz)"]}
       ],
       "forbidden_issue_concepts": [
-        {"id": "ritual-parallel-trends", "patterns": ["parallel trend"]}
+        {"id": "ritual-parallel-trends", "patterns": ["parallel trend"]},
+        {"id": "mandatory-randomized-trial", "patterns": ["must.*randomized trial", "require.*field experiment"]}
       ]
     },
     {
       "id": "macro-transition",
       "family": "macro",
       "paper": "papers/macro-transition.md",
-      "required_active_burdens": ["logical_validity", "technical_validity", "methodological_validity", "measurement", "calibration_and_computation", "equilibrium_counterfactual_validity", "external_validity", "reproducibility"],
-      "required_not_applicable_burdens": ["causal_identification", "formal_proof"],
+      "required_active_burdens": [],
+      "required_not_applicable_burdens": [],
+      "required_active_parent_burdens": ["logical_validity", "technical_validity", "methodological_validity", "measurement_validity", "uncertainty_and_inference", "computational_validity", "counterfactual_validity", "scope_and_transport", "reproducibility"],
+      "required_not_applicable_parent_burdens": [],
+      "forbidden_active_burden_ids": ["causal_identification", "structural_identification", "formal_proof"],
       "required_issue_concepts": [
         {"id": "stock-flow-timing", "patterns": ["stock.*flow", "timing", "debt.*interest"]},
         {"id": "shock-units", "patterns": ["shock.*unit", "basis point", "normalization"]},
-        {"id": "transition-feasibility", "patterns": ["transition", "feasib", "terminal", "resource constraint"]}
+        {"id": "transition-feasibility", "patterns": ["transition", "feasib", "terminal", "resource constraint"]},
+        {"id": "direct-alternative-channel", "patterns": ["direct.*(?:borrowing|interest).*(?:channel|output)", "(?:borrowing cost|household borrowing rate).*(?:channel|mechanism)", "bypass.*debt"]},
+        {"id": "promised-unreported-objects", "patterns": ["promis.*(?:consumption|welfare|not report)", "(?:consumption|welfare).*(?:not report|omit|missing)", "(?:not report|omit|missing).*(?:consumption|welfare)"]},
+        {"id": "cross-result-coherence", "patterns": ["(?:negative|falls).*(?:positive|cumulative).*(?:reconcile|coher|inconsisten)", "(?:positive|cumulative).*(?:negative|falls).*(?:reconcile|coher|inconsisten)", "every horizon.*(?:contradict|inconsisten)"]},
+        {"id": "calibration-transport-scope", "patterns": ["small open econom.*(?:scope|transport|generaliz)", "one calibration.*(?:scope|transport|generaliz|validation)"]}
       ],
       "forbidden_issue_concepts": [
-        {"id": "ritual-rdd", "patterns": ["bandwidth", "density test", "running variable"]}
+        {"id": "ritual-rdd", "patterns": ["bandwidth", "density test", "running variable"]},
+        {"id": "invented-causal-design-demand", "patterns": ["parallel trend", "instrument.*exclusion", "randomized control"]}
       ]
     },
     {
       "id": "formal-theory-existence",
       "family": "theory",
       "paper": "papers/formal-theory-existence.md",
-      "required_active_burdens": ["logical_validity", "technical_validity", "methodological_validity", "formal_proof", "external_validity", "reproducibility"],
-      "required_not_applicable_burdens": ["causal_identification", "sampling_or_randomization_uncertainty", "structural_identification"],
+      "required_active_burdens": [],
+      "required_not_applicable_burdens": [],
+      "required_active_parent_burdens": ["logical_validity", "technical_validity", "methodological_validity", "formal_validity", "counterfactual_validity", "scope_and_transport", "reproducibility"],
+      "required_not_applicable_parent_burdens": [],
+      "forbidden_active_burden_ids": ["causal_identification", "sampling_or_randomization_uncertainty", "structural_identification"],
       "required_issue_concepts": [
         {"id": "nonattainment", "patterns": ["not attain", "open interval", "supremum", "existence"]},
         {"id": "uniqueness", "patterns": ["unique", "tie", "indiffer"]},
-        {"id": "verbal-overreach", "patterns": ["all market", "universal", "domain", "interpretation"]}
+        {"id": "verbal-overreach", "patterns": ["all market", "universal", "domain", "interpretation"]},
+        {"id": "delay-mechanism-bridge", "patterns": ["delay.*(?:not model|absent|no timing|no cost)", "(?:choice date|delay cost).*(?:absent|missing|not model)", "mechanism.*delay"]},
+        {"id": "promised-unmodeled-welfare", "patterns": ["promis.*welfare", "welfare.*(?:not report|absent|not model|missing)", "(?:not report|absent|not model|missing).*welfare"]},
+        {"id": "cross-proposition-coherence", "patterns": ["proposition.*(?:reconcile|jointly|coher|inconsisten|do not establish)", "nonattain.*(?:multiple equilibr|coordination)", "same.*mechanism.*(?:unsupported|not establish)"]}
       ],
       "forbidden_issue_concepts": [
-        {"id": "invented-standard-errors", "patterns": ["standard error", "cluster", "statistical significance"]}
+        {"id": "invented-standard-errors", "patterns": ["standard error", "cluster", "statistical significance"]},
+        {"id": "mandatory-empirical-validation", "patterns": ["must.*collect data", "must.*run.*regression", "require.*empirical test"]},
+        {"id": "invented-magnitude-benchmark", "patterns": ["effect size.*mean", "percentage-point baseline", "statistical power"]}
       ]
     },
     {
       "id": "hybrid-mechanism",
       "family": "hybrid",
       "paper": "papers/hybrid-mechanism.md",
-      "required_active_burdens": ["logical_validity", "technical_validity", "methodological_validity", "causal_identification", "measurement", "sampling_or_randomization_uncertainty", "formal_proof", "external_validity", "reproducibility"],
-      "required_not_applicable_burdens": ["structural_identification"],
+      "required_active_burdens": ["causal_identification", "formal_proof"],
+      "required_not_applicable_burdens": [],
+      "required_active_parent_burdens": ["logical_validity", "technical_validity", "methodological_validity", "measurement_validity", "identification_validity", "uncertainty_and_inference", "formal_validity", "scope_and_transport", "reproducibility"],
+      "required_not_applicable_parent_burdens": [],
+      "forbidden_active_burden_ids": ["structural_identification"],
       "required_issue_concepts": [
-        {"id": "model-evidence-bridge", "patterns": ["model.*outcome", "bridge", "proposition.*measure", "effort.*sales"]},
+        {"id": "model-evidence-bridge", "patterns": ["model.*outcome", "economic bridge", "mapping.*effort.*sales", "proposition.*measure", "effort.*sales"]},
         {"id": "multiple-testing", "patterns": ["multiple", "familywise", "false discovery", "outcome.*search"]},
-        {"id": "mechanism-claim", "patterns": ["mechanism", "discriminate", "alternative explanation"]}
+        {"id": "mechanism-claim", "patterns": ["mechanism", "discriminate", "alternative explanation"]},
+        {"id": "direct-alternative-channel", "patterns": ["direct.*channel", "customer.*demand", "bypass.*effort", "poster.*customer", "outcome.*without.*effort"]}
       ],
       "forbidden_issue_concepts": [
         {"id": "structural-estimation-demand", "patterns": ["estimate.*structural", "simulated method of moments"]}

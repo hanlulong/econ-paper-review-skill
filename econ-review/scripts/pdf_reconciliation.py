@@ -18,6 +18,11 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+from safe_io import canonical_portable_path, strict_json_load  # noqa: E402
+
 
 DECISION_STATES = [
     "model_adjudicated",
@@ -34,7 +39,23 @@ def load_proposal_page_index(
 ) -> dict[str, dict[int, dict[str, Any]]]:
     """Load only normalized backend indexes; raw outputs remain separate."""
     result: dict[str, dict[int, dict[str, Any]]] = {}
-    prefix = Path(output_prefix)
+    try:
+        prefix = Path(canonical_portable_path(output_prefix))
+    except ValueError:
+        return result
+    resolved_root = root.resolve()
+
+    def safe_file(relative: Path) -> Path | None:
+        candidate = root.joinpath(*relative.parts)
+        if candidate.is_symlink():
+            return None
+        try:
+            resolved = candidate.resolve(strict=True)
+            resolved.relative_to(resolved_root)
+        except (FileNotFoundError, OSError, RuntimeError, ValueError):
+            return None
+        return resolved if resolved.is_file() else None
+
     for proposal in proposals:
         normalized = next(
             (row for row in proposal.get("artifacts", []) if row.get("path", "").endswith("/normalized.json")),
@@ -42,18 +63,30 @@ def load_proposal_page_index(
         )
         if normalized is None:
             continue
-        relative = Path(normalized["path"])
-        candidates = [root / relative]
+        raw_path = normalized.get("path")
+        if not isinstance(raw_path, str):
+            continue
         try:
-            candidates.append(root / relative.relative_to(prefix))
+            relative = Path(canonical_portable_path(raw_path))
+            package_relative = relative.relative_to(prefix)
         except ValueError:
-            pass
-        path = next((candidate for candidate in candidates if candidate.is_file()), None)
+            continue
+        path = next(
+            (
+                candidate
+                for candidate in (
+                    safe_file(relative),
+                    safe_file(package_relative),
+                )
+                if candidate is not None
+            ),
+            None,
+        )
         if path is None:
             continue
         try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError):
+            value = strict_json_load(path)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
             continue
         page_map: dict[int, dict[str, Any]] = {}
         for page in value.get("pages", []):
@@ -342,7 +375,7 @@ def decision_errors(
     try:
         import jsonschema
         schema_path = Path(__file__).resolve().parents[1] / "assets/pdf-reconciliation-decisions.schema.json"
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        schema = strict_json_load(schema_path)
         validator = jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker())
         errors.extend(
             f"{'/'.join(str(part) for part in error.absolute_path) or '<root>'}: {error.message}"
@@ -416,11 +449,11 @@ def main() -> int:
     parser.add_argument("decisions", type=Path)
     args = parser.parse_args()
     try:
-        manifest = json.loads((args.package_dir / "ingestion.json").read_text(encoding="utf-8"))
+        manifest = strict_json_load(args.package_dir / "ingestion.json")
         packets_path = args.package_dir / "reconciliation/page-packets.json"
-        packets = json.loads(packets_path.read_text(encoding="utf-8"))
-        decisions = json.loads(args.decisions.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        packets = strict_json_load(packets_path)
+        decisions = strict_json_load(args.decisions)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         print(f"PDF reconciliation validation failed: {exc}", file=sys.stderr)
         return 1
     observed_packets = hashlib.sha256(packets_path.read_bytes()).hexdigest()

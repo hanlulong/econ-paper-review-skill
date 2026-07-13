@@ -33,6 +33,29 @@ class StatRecomputeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "total must be positive"):
             MODULE.run({"checks": [{"type": "share_from_count", "count": 1, "total": 0}]})
 
+    def test_domain_inputs_fail_closed_instead_of_being_coerced(self) -> None:
+        cases = (
+            (
+                {"type": "t_from_beta_se", "beta": 0.5, "se": -0.2},
+                "se must be positive",
+            ),
+            (
+                {"type": "share_from_count", "count": 1, "total": 4, "percent": "false"},
+                "percent must be a boolean",
+            ),
+            (
+                {"type": "grim_mean", "mean": "2.00", "n": 10, "decimals": 1.5},
+                "decimals must be an integer",
+            ),
+            (
+                {"type": "grim_mean", "mean": "2.00", "n": 10, "decimals": True},
+                "decimals must be an integer",
+            ),
+        )
+        for check, message in cases:
+            with self.subTest(check=check), self.assertRaisesRegex(ValueError, message):
+                MODULE.run({"checks": [check]})
+
     def test_grim_check(self) -> None:
         consistent = MODULE.run({"checks": [
             {"id": "grim", "type": "grim_mean", "mean": "2.00", "n": 10, "decimals": 2},

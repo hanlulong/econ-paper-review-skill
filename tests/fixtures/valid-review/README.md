@@ -1,6 +1,6 @@
 # Start here: paper review
 
-**Recommendation:** Weak R&R
+**Recommendation:** Not assessed
 
 The Markdown reports and revision plan contain the full review; the local Review Desk is optional.
 
@@ -18,7 +18,7 @@ The Markdown reports and revision plan contain the full review; the local Review
 
 ## Review coverage at a glance
 
-- **Materials:** 1 fully read; appendix not available.
+- **Materials:** 1 source fully read; appendix not available.
 - **Rendered/formal evidence:** figures not present; equations source preserved.
 - **External checks and limits:** live literature search not available; replication code not supplied. No external literature claim was made.
 

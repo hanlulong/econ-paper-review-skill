@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -40,20 +39,36 @@ test("renders the problem field outside the preceding evidence quote", () => {
   assert.doesNotMatch(html, /<blockquote>[\s\S]*Concern[\s\S]*<\/blockquote>/);
 });
 
-test("renders every private test-paper comment with an isolated evidence quote when available", async (t) => {
-  let markdown;
-  let reports;
-  try {
-    const [report, writing] = await Promise.all([
-      readFile(new URL("../../test_paper2/review/report.md", import.meta.url), "utf8"),
-      readFile(new URL("../../test_paper2/review/writing-report.md", import.meta.url), "utf8"),
-    ]);
-    reports = [report, writing];
-    markdown = `${report}\n${writing}`;
-  } catch (error) {
-    if (error?.code === "ENOENT") return t.skip("private test_paper2 package is not present");
-    throw error;
-  }
+test("renders every synthetic detailed comment with one isolated evidence quote", () => {
+  const reports = [
+    [
+      "### 1. Boundary multiplicity",
+      "**Issue**: The proposition states uniqueness at an equality boundary.",
+      "",
+      "**Relevant text**:",
+      "> At $\\theta=0$, both actions maximize payoff.",
+      "",
+      "**Concern**: The displayed proposition and its boundary case conflict.",
+      "",
+      "**Suggestions**: State a tie-breaking rule or a set-valued result.",
+      "",
+      "**Status**: [Pending]",
+    ].join("\n"),
+    [
+      "### 1. Subject-verb agreement",
+      "**Issue**: A singular subject takes a plural verb.",
+      "",
+      "**Relevant text**:",
+      "> The result imply a unique action away from the boundary.",
+      "",
+      "**Concern**: The agreement error interrupts an otherwise concise summary.",
+      "",
+      "**Suggestions**: Replace ‘imply’ with ‘implies’.",
+      "",
+      "**Status**: [Pending]",
+    ].join("\n"),
+  ];
+  const markdown = reports.join("\n");
   const detailedSections = reports.flatMap((report) => report.split(/(?=^### \d+\. .+$)/m))
     .filter((section) => /^### \d+\. .+$/m.test(section) && !/<!-- principal_concern_id:/.test(section));
   assert.ok(detailedSections.length > 0);
@@ -67,7 +82,7 @@ test("renders every private test-paper comment with an isolated evidence quote w
     );
     const blocks = html.match(/<blockquote>[\s\S]*?<\/blockquote>/g) || [];
     assert.equal(blocks.length, 1, section.match(/^### .+$/m)?.[0]);
-    assert.doesNotMatch(blocks[0], /Problem and concern|Constructive feedback|Status/);
+    assert.doesNotMatch(blocks[0], /Concern|Suggestions|Status/);
   }
   const fullHtml = renderToStaticMarkup(
     React.createElement(

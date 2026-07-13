@@ -29,6 +29,51 @@
       "end_char": 480,
       "content_sha256": "c495cbeaabccf3876e6f425e5790ea3de6a4e148497bb4e0f04ffb5a22fbcc0d",
       "locator": "Section 3, paragraph 2"
+    },
+    {
+      "id": "ANC-03",
+      "source_id": "SRC-01",
+      "kind": "scope",
+      "start_char": 0,
+      "end_char": 481,
+      "content_sha256": "393cc4d5f9701fab039c77807fe6b47aaef9618fec9ee942652ad218fe5e53e5",
+      "locator": "Complete synthetic manuscript"
+    },
+    {
+      "id": "ANC-100",
+      "source_id": "SRC-01",
+      "kind": "text_span",
+      "start_char": 0,
+      "end_char": 47,
+      "content_sha256": "3f0cda147fe079bd359055a2067b8abf3145b1b5460326f8e6b58cb8172cf440",
+      "locator": "Heading 1 (level 1): A Boundary Case in a Static Signaling Model"
+    },
+    {
+      "id": "ANC-101",
+      "source_id": "SRC-01",
+      "kind": "text_span",
+      "start_char": 47,
+      "end_char": 207,
+      "content_sha256": "96cea32cbf370200d1045905890c1bc2fe5eff44d592d9385f94c93720c7bd97",
+      "locator": "Heading 2 (level 2): 1. Setup"
+    },
+    {
+      "id": "ANC-102",
+      "source_id": "SRC-01",
+      "kind": "text_span",
+      "start_char": 207,
+      "end_char": 340,
+      "content_sha256": "b01b672b656aad8187a4ce587f8f58ca2820c59d085381c9456c860af28e1488",
+      "locator": "Heading 3 (level 2): 2. Result"
+    },
+    {
+      "id": "ANC-103",
+      "source_id": "SRC-01",
+      "kind": "text_span",
+      "start_char": 340,
+      "end_char": 481,
+      "content_sha256": "0423409b387da2dce770e887f60add1662913da9cc03fb0ab181dc13870e830f",
+      "locator": "Heading 4 (level 2): 3. Proposition"
     }
   ]
 }

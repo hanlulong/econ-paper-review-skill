@@ -1,31 +1,369 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openecon.ai/econ-review/external-sources.schema.json",
-  "title": "econ-review external source ledger",
+  "title": "econ-review external source and literature-frontier ledger",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "review_id", "search_confidentiality", "sources"],
   "properties": {
-    "schema_version": {"const": "0.1"},
+    "schema_version": {"enum": ["0.1", "0.2", "0.3"]},
     "review_id": {"type": "string", "minLength": 1},
     "search_confidentiality": {"enum": ["forbidden", "deidentified", "exact_allowed"]},
     "sources": {
       "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["id", "title", "stable_id", "url", "accessed_at", "supported_propositions", "snapshot_path", "snapshot_sha256"],
+      "items": {"$ref": "#/$defs/source"}
+    },
+    "frontier_audit": {"$ref": "#/$defs/frontierAudit"}
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "title", "stable_id", "url", "accessed_at",
+        "supported_propositions", "snapshot_path", "snapshot_sha256"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^EXT-[0-9]{2,}$"},
+        "title": {"type": "string", "minLength": 1},
+        "stable_id": {"type": "string", "minLength": 1},
+        "url": {"type": "string", "format": "uri"},
+        "accessed_at": {"type": "string", "format": "date"},
+        "supported_propositions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "snapshot_kind": {
+          "enum": ["source_capture", "official_metadata", "reviewer_note"]
+        },
+        "support_records": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/supportRecord"}
+        },
+        "snapshot_path": {"type": "string", "minLength": 1},
+        "snapshot_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "supportRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "proposition", "support_state", "access_scope", "locator",
+        "snapshot_excerpt", "snapshot_start", "snapshot_end",
+        "snapshot_excerpt_sha256", "boundary_reason", "finding_ids"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"},
+        "proposition": {"type": "string", "minLength": 1},
+        "proposition_kind": {
+          "enum": [
+            "bibliographic_metadata", "reported_question", "reported_main_result",
+            "method_detail", "sample_detail", "source_level_absence",
+            "frontier_exhaustiveness", "other"
+          ]
+        },
+        "support_state": {"enum": ["supported", "partial", "conflict", "inconclusive"]},
+        "access_scope": {"enum": ["full_text", "abstract", "official_summary", "metadata", "other"]},
+        "scope_complete": {"type": "boolean"},
+        "scope_complete_basis": {"type": ["string", "null"], "minLength": 1},
+        "locator": {"type": "string", "minLength": 1},
+        "snapshot_excerpt": {"type": ["string", "null"], "minLength": 1},
+        "snapshot_start": {"type": ["integer", "null"], "minimum": 0},
+        "snapshot_end": {"type": ["integer", "null"], "minimum": 1},
+        "snapshot_excerpt_sha256": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+          ]
+        },
+        "boundary_reason": {"type": ["string", "null"], "minLength": 1},
+        "finding_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]*-[0-9]{2,}$"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"support_state": {"enum": ["supported", "partial", "conflict"]}},
+            "required": ["support_state"]
+          },
+          "then": {
+            "properties": {
+              "snapshot_excerpt": {"type": "string", "minLength": 1},
+              "snapshot_start": {"type": "integer", "minimum": 0},
+              "snapshot_end": {"type": "integer", "minimum": 1},
+              "snapshot_excerpt_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+              "boundary_reason": {"type": "null"}
+            }
+          },
+          "else": {
+            "properties": {
+              "snapshot_excerpt": {"type": "null"},
+              "snapshot_start": {"type": "null"},
+              "snapshot_end": {"type": "null"},
+              "snapshot_excerpt_sha256": {"type": "null"},
+              "boundary_reason": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      ]
+    },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "affected_scope", "impact", "completion_condition"],
+      "properties": {
+        "reason": {
+          "enum": [
+            "outbound_search_forbidden",
+            "confidentiality_policy",
+            "network_unavailable",
+            "search_interface_unavailable",
+            "source_access_incomplete",
+            "insufficient_metadata",
+            "outside_assessment_scope",
+            "other"
+          ]
+        },
+        "affected_scope": {"type": "string", "minLength": 1},
+        "impact": {"type": "string", "minLength": 1},
+        "completion_condition": {"type": "string", "minLength": 1}
+      }
+    },
+    "queryLog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "query_text", "executed_at", "search_system",
+        "disclosure_classification", "result_source_ids", "notes"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^QRY-[0-9]{2,}$"},
+        "query_text": {"type": "string", "minLength": 1},
+        "executed_at": {"type": "string", "format": "date"},
+        "search_system": {"type": "string", "minLength": 1},
+        "disclosure_classification": {
+          "enum": ["deidentified", "public_metadata", "exact_manuscript_identity"]
+        },
+        "result_source_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^EXT-[0-9]{2,}$"}
+        },
+        "notes": {"type": "string"}
+      }
+    },
+    "queryFamily": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "family", "rationale", "status", "query_logs", "boundary"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^QRYF-[0-9]{2,}$"},
+        "family": {"type": "string", "minLength": 1},
+        "rationale": {"type": "string", "minLength": 1},
+        "status": {"enum": ["completed", "blocked_by_policy", "inaccessible"]},
+        "query_logs": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/queryLog"}
+        },
+        "boundary": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/boundary"}
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "completed"}}, "required": ["status"]},
+          "then": {
+            "properties": {
+              "query_logs": {"minItems": 1},
+              "boundary": {"type": "null"}
+            }
+          },
+          "else": {
+            "properties": {
+              "boundary": {"$ref": "#/$defs/boundary"}
+            }
+          }
+        }
+      ]
+    },
+    "closestPaper": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id", "citation", "question", "design_or_object", "main_result",
+        "supported_proposition", "overlap", "difference", "selection_rationale", "confidence"
+      ],
+      "properties": {
+        "source_id": {"type": "string", "pattern": "^EXT-[0-9]{2,}$"},
+        "support_record_id": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"},
+        "field_support_records": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["citation", "question", "design_or_object", "main_result"],
+          "properties": {
+            "citation": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"},
+            "question": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"},
+            "design_or_object": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"},
+            "main_result": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"}
+          }
+        },
+        "manuscript_anchor_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"}
+        },
+        "comparison_status": {"enum": ["complete", "bounded"]},
+        "comparison_boundary": {"type": ["string", "null"], "minLength": 1},
+        "citation": {"type": "string", "minLength": 1},
+        "question": {"type": "string", "minLength": 1},
+        "design_or_object": {"type": "string", "minLength": 1},
+        "main_result": {"type": "string", "minLength": 1},
+        "supported_proposition": {"type": "string", "minLength": 1},
+        "overlap": {"type": "string", "minLength": 1},
+        "difference": {"type": "string", "minLength": 1},
+        "selection_rationale": {"type": "string", "minLength": 1},
+        "confidence": {"enum": ["high", "medium", "low"]}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"comparison_status": {"const": "complete"}},
+            "required": ["comparison_status"]
+          },
+          "then": {"properties": {"comparison_boundary": {"type": "null"}}}
+        },
+        {
+          "if": {
+            "properties": {"comparison_status": {"const": "bounded"}},
+            "required": ["comparison_status"]
+          },
+          "then": {"properties": {"comparison_boundary": {"type": "string", "minLength": 1}}}
+        }
+      ]
+    },
+    "frontierAudit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status", "scope_summary", "contribution_dimensions", "assessed_at",
+        "query_families", "closest_papers", "boundary", "notes"
+      ],
+      "properties": {
+        "status": {"enum": ["complete", "bounded", "not_assessed"]},
+        "scope_summary": {"type": "string", "minLength": 1},
+        "contribution_dimensions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "assessed_at": {"type": "string", "format": "date"},
+        "query_families": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/queryFamily"}
+        },
+        "closest_papers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/closestPaper"}
+        },
+        "boundary": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/boundary"}
+          ]
+        },
+        "notes": {"type": "string"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "complete"}}, "required": ["status"]},
+          "then": {
+            "properties": {
+              "query_families": {"minItems": 1},
+              "closest_papers": {"minItems": 1},
+              "boundary": {"type": "null"}
+            }
+          },
+          "else": {
+            "properties": {
+              "boundary": {"$ref": "#/$defs/boundary"}
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"schema_version": {"enum": ["0.2", "0.3"]}}, "required": ["schema_version"]},
+      "then": {"required": ["frontier_audit"]}
+    },
+    {
+      "if": {"properties": {"schema_version": {"const": "0.3"}}, "required": ["schema_version"]},
+      "then": {
         "properties": {
-          "id": {"type": "string", "pattern": "^EXT-[0-9]{2,}$"},
-          "title": {"type": "string", "minLength": 1},
-          "stable_id": {"type": "string", "minLength": 1},
-          "url": {"type": "string", "format": "uri"},
-          "accessed_at": {"type": "string", "format": "date"},
-          "supported_propositions": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
-          "snapshot_path": {"type": "string", "minLength": 1},
-          "snapshot_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+          "sources": {
+            "items": {
+              "allOf": [
+                {"$ref": "#/$defs/source"},
+                {
+                  "required": ["snapshot_kind", "support_records"],
+                  "properties": {
+                    "url": {"type": "string", "pattern": "^https://"},
+                    "support_records": {
+                      "items": {
+                        "allOf": [
+                          {"$ref": "#/$defs/supportRecord"},
+                          {
+                            "required": [
+                              "proposition_kind", "scope_complete", "scope_complete_basis"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "frontier_audit": {
+            "allOf": [
+              {"$ref": "#/$defs/frontierAudit"},
+              {
+                "properties": {
+                  "closest_papers": {
+                    "items": {
+                      "allOf": [
+                        {"$ref": "#/$defs/closestPaper"},
+                        {
+                          "required": [
+                            "support_record_id", "field_support_records",
+                            "manuscript_anchor_ids", "comparison_status",
+                            "comparison_boundary"
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
         }
       }
     }
-  }
+  ]
 }

@@ -17,6 +17,7 @@ export type Evidence = {
   anchor_ids?: string[];
   computation_id?: string | null;
   source_record_id?: string | null;
+  support_record_id?: string | null;
   content: string | null;
   scope_checked?: string | null;
   source: string;
@@ -109,7 +110,7 @@ export function validateReviewLedger(value: unknown): Ledger {
       || !["potentially_dispositive", "posture_material", "revision_value", "polish"].includes(String(raw.decision_role))
       || !["within_current_design", "claim_narrowing", "additional_analysis", "new_evidence", "redesign", "unclear", "no_clear_fix"].includes(String(raw.repairability))
     )) {
-      throw new Error(`v0.3 finding ${raw.id} is missing title, decision role, or repairability`);
+      throw new Error(`current-contract finding ${raw.id} is missing title, decision role, or repairability`);
     }
     if (
       typeof raw.issue !== "string" || typeof raw.why_it_matters !== "string" || typeof raw.reader_effect !== "string"

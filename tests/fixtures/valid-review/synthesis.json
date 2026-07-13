@@ -6,8 +6,8 @@
   "strengths": [
     "The model is concise and the comparative-static object is easy to reconstruct."
   ],
-  "review_posture": "weak_r_and_r",
-  "posture_rationale": "The headline proposition requires correction, but the current design can support the repair.",
+  "review_posture": "not_assessed",
+  "posture_rationale": "Without a specified venue or tier, no publication recommendation is assessed. Independently of fit, the headline proposition requires correction, and the current design can support the repair.",
   "upgrade_conditions": [
     "State a tie-breaking rule or weaken the proposition at the equality boundary."
   ],
@@ -38,7 +38,7 @@
     },
     {
       "target_type": "posture_rationale", "target_id": null, "target_index": null,
-      "statement": "The headline proposition requires correction, but the current design can support the repair.",
+      "statement": "Without a specified venue or tier, no publication recommendation is assessed. Independently of fit, the headline proposition requires correction, and the current design can support the repair.",
       "claim_ids": [], "finding_ids": ["LOGIC-01"], "evidence_ids": ["EVD-LOGIC-01-A"]
     },
     {

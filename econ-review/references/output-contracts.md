@@ -1,12 +1,21 @@
 # Output Contracts
 
-Use `findings.json` as the canonical detailed state. Contract v0.4 adds source-grounded evidence, compositional audit burdens, canonical paper order, structured verification/computation/external-source records, and atomic finalization while retaining the v0.3 referee presentation. Derive `synthesis.json`, the substance `report.md`, companion `writing-report.md`, and unified `fix-plan.md` from canonical state. Existing v0.1–v0.3 reviews remain valid under their declared contracts without migration.
+Use `findings.json` as the canonical detailed state. Contract v0.4 adds source-grounded evidence, compositional audit burdens, canonical paper order, structured verification/computation/external-source records, and fail-closed finalization while retaining the v0.3 referee presentation. Derive `synthesis.json`, the substance `report.md`, companion `writing-report.md`, and unified `fix-plan.md` from canonical state. Existing v0.1–v0.3 reviews remain valid under their declared contracts without migration.
 
-The installed schemas and validator support v0.4, v0.3, v0.2, and legacy v0.1. New reviews use v0.4. Select the contract explicitly in `run.json`; never relabel an existing review merely to obtain a new presentation or trust marker.
+The installed schemas and validator support v0.4, v0.3, v0.2, and legacy v0.1. New reviews use v0.4. Select the contract explicitly in `run.json`; never relabel an existing review merely to obtain a new presentation or trust marker. Current full v0.4 finalizations use receipt schema v0.3 and carry `structured_audit_v02` plus `burden_coverage_v02`; they require claims, analytical-audit, coverage, and writing schemas v0.2, v0.2, v0.2, and v0.4 respectively plus external-sources schema v0.3, figures v0.2 whenever figures are present, and tables v0.2 whenever tables are present. Current quick finalizations use receipt schema v0.2 without either full-review gate. Immutable v0.4 receipt schemas v0.1 and v0.2 remain readable and verifiable under the guarantees that created them; they do not acquire the newer trust claim unless regenerated.
+
+## Contents
+
+- [`README.md`, run state, actions, and manifest](#readmemd--v03v04-start-here-page)
+- [Canonical findings and synthesis](#findingsjson)
+- [Substance and writing reports](#reportmd--v03v04-substance-report)
+- [Revision plan](#fix-planmd)
+- [Evidence files](#evidence-files)
+- [Ship gate](#ship-gate)
 
 ## `README.md` — v0.3/v0.4 start-here page
 
-Generate this author-facing landing page from `run.json`, `synthesis.json`, `findings.json`, and the available human-readable artifacts. It must show the reviewer posture, active comment counts, reading order, principal concerns, a concise three-line account of what was and was not checked, and a file map. Keep the full assessment boundary in canonical state; do not reintroduce an `Assessment Boundary` section into `report.md`.
+Generate this author-facing landing page from `run.json`, `synthesis.json`, `findings.json`, and the available human-readable artifacts. It must show the reviewer posture, active comment counts, reading order, principal concerns, a concise three-line account of what was and was not checked, and a file map. Keep the full assessment boundary in canonical state; do not reintroduce an `Assessment Boundary` section into either author-facing report.
 
 State plainly that the Markdown reports and plan are complete without the optional local viewer. Explain that checking a plan item records author progress but does not close a finding: later review must verify the `resolved_when` evidence. If `review-actions.json` is used, gloss author dispositions in ordinary language and point to the handoff protocol.
 
@@ -16,13 +25,14 @@ Validate against `assets/run.schema.json`. Record:
 
 - schema version and run status;
 - mode, target venue/tier, paper family, and detected designs;
+- `requested_addons`: an explicit inventory of optional author-facing analyses; current full reviews use `[]` when none were requested and add `journal_fit` only after an explicit venue-analysis request;
 - source inventory and assessment boundary;
 - identity handling (`identity_minimized`, `blinded`, or `not_applied`);
 - stage states and lenses loaded;
 - literature and code-execution availability;
 - counts by severity and verification state;
-- `comment_policy`: requested minimum target, optional maximum (`null` means uncapped), and exhaustive-coverage state.
-- for v0.4, `activated_burdens`: open stable burden IDs, object type, `active`/`not_applicable` state, activation basis, source/claim/required-omission triggers, and a reason for every `not_applicable` burden. Completed full runs must decide `logical_validity`, `technical_validity`, and `methodological_validity` explicitly.
+- `comment_policy`: requested minimum target, maximum, and exhaustive-coverage state. Current v0.4 full reviews require `maximum: null`; bounded quick and legacy contracts retain their declared behavior.
+- for v0.4, `activated_burdens`: a precise row `id`, one stable conceptual `parent_id` from the design audit, object type, `active`/`not_applicable` state, activation basis, source/claim/required-omission triggers, and a reason for every `not_applicable` burden. The parent classifies the row; do not add a duplicate alias or parent row. Completed full runs must decide and self-parent `logical_validity`, `technical_validity`, and `methodological_validity` explicitly.
 - for completed split-report runs, `telemetry`: the names of passes actually completed, the number of agents spawned, and observed wall-clock/token counts when the runtime exposes them. Use `null` for unavailable timing or token counts; never estimate them.
 
 Do not fabricate a manuscript hash. Include it only when a tool computed it.
@@ -78,7 +88,7 @@ Contract v0.4 also requires canonical `paper_position`; stable evidence IDs and 
 
 ## `synthesis.json` — v0.3/v0.4 referee synthesis
 
-Validate against `assets/synthesis.schema.json`. Record the overall assessment, specific strengths, review posture, posture rationale, upgrade conditions, convincingness, companion writing count, and principal concerns. A principal concern may group several findings with one root cause or several findings that jointly determine the posture. Every potentially dispositive finding must appear in a principal concern. Do not create a new concern during synthesis; all linked findings must already be active, verified, and routed to substance. In v0.4, `support_mappings` must cover every overall-assessment, strength, posture, upgrade, principal-concern, and convincingness statement with resolving claim, finding, and/or evidence IDs.
+Validate against `assets/synthesis.schema.json`. Record the overall assessment, specific strengths, review posture, posture rationale, upgrade conditions, convincingness, companion writing count, and principal concerns. When both target venue and tier are unspecified, use `not_assessed` for the publication posture while retaining a decisive technical and revision assessment. A principal concern may group several findings with one root cause or several findings that jointly determine the posture. Every potentially dispositive finding must appear in a principal concern. Do not create a new concern during synthesis; all linked findings must already be active, verification-passed, and routed to substance. In v0.4, `support_mappings` must cover every overall-assessment, strength, posture, upgrade, principal-concern, and convincingness statement with resolving claim, finding, and/or evidence IDs. Current strict full reviews resolve claim IDs only from anchored canonical claim families, never from a finding's self-declared links. Finding and evidence support is eligible only while the owning finding remains active and verification-passed; every evidence ID must name its reciprocal finding owner in the same mapping. A clean strength uses one or more precisely anchored canonical claims without adverse finding evidence. Each principal-concern rationale and upgrade mapping uses exactly that concern's linked active, verification-passed findings. These rules keep a dismissed concern, failed verification, or orphaned quotation from silently supporting the referee synthesis.
 
 ## `report.md` — v0.3/v0.4 substance report
 
@@ -115,7 +125,7 @@ Use this structure:
 **Issue**: [One-sentence diagnosis matching the canonical ledger issue.]
 
 **Relevant text**:
-> [Verbatim manuscript quote, equation, table cell, verified figure evidence, or nearest statement creating an omission burden.]
+[Use a block quote for manuscript text. Use an unquoted note for reviewer observations, comparisons, computations, or checked absences.]
 
 **Concern**: [What the paper establishes, where the evidence stops, and which claim or interpretation is affected.]
 
@@ -124,7 +134,7 @@ Use this structure:
 **Status**: [Pending]
 ```
 
-Render `Relevant text` from the finding's designated display evidence. A `verbatim` record may appear as an ordinary quotation. Prefix other representations inside the block with `[Rendered transcription]`, `[Reviewer observation]`, `[Reviewer comparison]`, `[Figure observation]`, `[Table observation]`, `[Checked absence]`, or `[Computation]` as applicable. Visible labels must agree with canonical representation: `[Rendered transcription]` maps only to `normalized_transcription`; `[Reviewer observation]`, `[Figure observation]`, and `[Table observation]` map to `reviewer_observation`; `[Reviewer comparison]` maps to `composite_comparison`; `[Computation]` maps to `computed_result`; and `[Checked absence]` maps to `checked_absence`. A `[Reviewer comparison]` must cite at least two source anchors and verify every cited component. Never make reviewer prose, a composite comparison, an omission, or a computed result look like manuscript text. Multi-location findings list the related checked anchors in `Concern`. When evidence declares `locator.page`, that page must agree with every referenced source anchor; leave it null for cross-page composites until the contract defines explicit anchor roles.
+Render `Relevant text` from the finding's designated display evidence. Render `verbatim` records and normalized source transcriptions as quotations. Render reviewer observations, comparisons, computations, and checked absences as unquoted evidence notes, without internal bracket labels such as `[Reviewer observation]`. Canonical `representation` metadata—not a prose prefix—preserves provenance. A composite comparison must cite at least two source anchors and verify every cited component. Never make reviewer prose, a composite comparison, an omission, or a computed result look like manuscript text. Multi-location findings list the related checked anchors in `Concern`. When evidence declares `locator.page`, that page must agree with every referenced source anchor; leave it null for cross-page composites until the contract defines explicit anchor roles. Legacy canonical content may retain a matching prefix, but deterministic report generation removes it.
 
 Set `N` to the actual number of surviving substance-channel comments. Do not pad or truncate the list to a target count. Sort by `importance_rank`, not manuscript order. Number comments consecutively and use the visible format exactly:
 
@@ -134,7 +144,7 @@ Set `N` to the actual number of surviving substance-channel comments. Do not pad
 **Issue**: {canonical issue}
 
 **Relevant text**:
-> {evidence}
+{quoted source excerpt or unquoted evidence note}
 
 **Concern**: {evidence boundary and paper-specific consequence}
 
@@ -157,7 +167,7 @@ For an omission, quote the nearest statement that creates the disclosure burden,
 
 For claim-consistency or overclaim findings, link all material occurrences in the ledger even when the visible quote shows only one representative sentence. Name the conflicting or qualifier-dropping locations in `Concern`.
 
-Keep the synthesis prioritized even when the detailed-comment section is long. The cap of three applies only to essential, verdict-determining substance issues. Apply no page or word limit to `report.md`; give every comment enough space for evidence, consequence, fairness, and a concrete repair. Put writing mechanics, venue analysis, scope, and verification logs in their designated companion or evidence files, not in the substance report, and never shorten substantive feedback to meet a length norm.
+Keep the synthesis prioritized even when the detailed-comment section is long. It will normally contain only a few root-cause essentials, but there is no numerical cap: preserve every independently or cumulatively dispositive concern. Apply no page or word limit to `report.md`; give every comment enough space for evidence, consequence, fairness, and a concrete repair. Put writing mechanics, venue analysis, scope, and verification logs in their designated companion or evidence files, not in the substance report, and never shorten substantive feedback to meet a length norm.
 
 ## `writing-report.md` — v0.3/v0.4 companion report
 
@@ -184,6 +194,9 @@ Full mode requires this separate report. Quick mode creates it only when writing
 ## Mechanics and copyedit inventory
 [Exact verified occurrences grouped by correction rule and source provenance. Record a render/source check for every occurrence and separate main text from instruments.]
 
+## Style and writing improvements
+[Concrete optional or recommended revisions plus the redundancy map. Distinguish objective corrections from matters of style.]
+
 ## Detailed Writing Comments (N)
 
 ### 1. Section 3.1: [short writing issue title]
@@ -201,15 +214,17 @@ Full mode requires this separate report. Quick mode creates it only when writing
 **Status**: [Pending]
 ```
 
-Set `N` to the active writing-channel count. Use the same hidden finding link and issue-first, status-last contract as `report.md`. Writing-channel comments are normally compact. Both reports preserve global `importance_rank`; visible numbering is consecutive within each report. Do not impose an artificial comment or length cap on the writing report. New packages use writing-audit schema v0.3 and the six-section structure above; v0.1 and v0.2 packages remain validator-compatible.
+Set `N` to the active writing-channel count. Use the same hidden finding link and issue-first, status-last contract as `report.md`. Writing-channel comments are normally compact. Both reports preserve global `importance_rank`; visible numbering is consecutive within each report. Do not impose an artificial comment or length cap on the writing report. Current full packages use writing-audit schema v0.4 and generate the seven core sections above entirely from `evidence/writing.json`; hand-edited or stale preambles fail synchronization. Older writing-audit and receipt versions remain validator-compatible under their declared guarantees.
 
-Add `## Journal fit and submission strategy` only when the user explicitly requests venue analysis. When requested and current literature access exists, give 3–6 candidate journals. For each, cite dated official scope evidence, verify 1–2 recent comparator papers with URL/DOI and access date, state the evidence standard currently met versus still needed, and include verifiable format constraints when relevant. Give an ambitious-to-safe sequence and revision-contingent fit. Use qualitative tiers only and never invent acceptance probabilities. If search is unavailable, mark the requested assessment `bounded`.
+Add `## Journal fit and submission strategy` only when `run.json.requested_addons` contains `journal_fit`. When the add-on is absent, record `venue_fit.status: not_requested` and emit no placeholder section or dated/candidate/finding payload. When requested and current literature access exists, give 3–6 candidate journals. For each, cite dated official scope evidence, verify 1–2 recent comparator papers with HTTPS links and access dates, state the evidence standard currently met versus still needed, and include verifiable format constraints when relevant. Evidence dates cannot be later than the venue assessment date or current date. Give an ambitious-to-safe sequence and revision-contingent fit. Use qualitative tiers only and never invent acceptance probabilities. If search is unavailable, mark the requested assessment `bounded`.
+
+Do not put an `Assessment Boundary` section in either author-facing report. Scope state remains available in `run.json`, `evidence/writing.json`, the landing page's compact coverage summary, and the readable audit trail.
 
 The split is presentational, not a loss of coverage. `fix-plan.md`, counts, coverage, and evidence artifacts continue to cover all active findings across both channels exactly once.
 
 ## `fix-plan.md`
 
-Start with: “Objective: make the paper more publishable at [venue/tier] by resolving the verified concerns below.”
+Start with: “Objective: improve the paper for [venue/tier or intended audience] by resolving the verified concerns below.”
 
 Use:
 
@@ -238,31 +253,31 @@ Do not convert an unfixable issue into a long task list. State the portfolio cho
 
 ## Evidence files
 
-- `evidence/source-manifest.json`: v0.4 source hashes, normalized extractions, stable anchors, and source-derived paper order.
+- `evidence/source-manifest.json`: v0.4 source hashes, normalized extractions, stable anchors, and source-derived paper order. Manuscript, appendix, supplement, supplied-code, and supplied-data-dictionary rows are internal sources and join exactly to `run.json.assessment_boundary`; external literature records stay outside that boundary in `external-sources.json`.
 - `evidence/verification.json`: v0.4 finding-by-evidence verification records; every pass resolves to an anchor, computation, external source, or checked-absence scope.
-- `evidence/computations.json`: v0.4 reproducible numerical/algebraic checks with input anchors, tool/method, tolerance, result artifact, and hash.
-- `evidence/external-sources.json`: v0.4 confidentiality policy and verified external records with stable IDs, dated access, supported propositions, and snapshots.
+- `evidence/computations.json`: v0.4 reproducible numerical/algebraic checks with input anchors, tool/method, tolerance, result artifact, and hash. Legacy computation schema v0.1 requires reciprocal finding links. Schema v0.2 also permits a clean audit-only computation when its `audit_links` match exactly the analytical entry or magnitude assessment that canonically cites it; orphan and one-way links fail validation.
+- `evidence/external-sources.json`: v0.4 confidentiality policy and verified external records with stable IDs, dated access, supported propositions, and saved snapshots. New or re-finalized full reviews use schema v0.3 and bind every supported proposition to an exact UTF-8 snapshot span and hash, proposition kind, access scope, reviewer-assessed support state, and reciprocal finding links. Scope-completeness claims require a concrete basis; abstract and metadata captures support only narrow statements they actually contain; a single source record cannot certify frontier exhaustiveness. The ledger records a `complete`, `bounded`, or `not_assessed` frontier audit. In each closest-paper row, the citation, question, design/object, and main result resolve to their own source-owned support records, while the overlap and difference cite the manuscript anchors compared. Partial or conflicting load-bearing support makes that comparison bounded. A complete audit contains confidentiality-safe query logs and at least one complete closest-paper comparison. Bounded and not-assessed states carry a structured boundary. Schema v0.2 remains compatible as the frontier-only legacy contract; v0.1 remains compatible with older source-ledger contracts and immutable receipt-schema-v0.1 packages.
 - `evidence/reconstruction.md`: claim inventory, derivation ledger, methods map, digest.
-- `evidence/reader-claim-audit.md`: reader map, cross-section claim ledger, convincingness assessment, data-limitation classifications, and report-tone check.
-- `evidence/claims.json`: schema-valid audit scope, claim families, canonical supported claims, occurrence comparisons, reader map, comprehensive terminology/variable definitions, structured central-argument assessment, and structured writing audit. Its coverage-unit list must match the manuscript coverage inventory. Every unsafe claim occurrence, inconsistent or unresolved reader state, and undefined, inconsistent, or overloaded load-bearing term must map to an active verified finding or an explicit bounded reason permitted by the schema.
+- `evidence/reader-claim-audit.md`: reader map, cross-section claim ledger, economic argument and evidence audit, convincingness assessment, data-limitation classifications, and report-tone check.
+- `evidence/claims.json`: schema-valid audit scope, claim families, canonical supported claims, occurrence comparisons, reader map, comprehensive terminology/variable definitions, structured central-argument assessment, and structured writing audit. New or re-finalized full reviews use claims-audit schema v0.2 and also record economic links, full comparison or intervention content, cross-result relationships, evidence-object completeness, magnitude context, and population/domain transport under `argument_audit`; legacy v0.1 claims audits remain validator-compatible under older contracts and immutable v0.4 receipt-schema-v0.1 packages. Its coverage-unit list must match the manuscript coverage inventory. In the current strict full contract, every claim occurrence binds exact or normalized text and its locator to one precise source anchor, and a claim family's anchors equal the union of its occurrence anchors. Reader rows identify their claim families and resolve back to those anchors; clean reader states also cite a source-wide scope anchor as `checked_absence`. Term rows bind first use to a precise anchor, cite direct support, and use scope-anchored absence for clean or undefined states. Only active, passed finding evidence can satisfy a reciprocal row-to-finding join. Computations and external **support records** may supplement source support but cannot replace the manuscript anchor for a manuscript claim. The `terminology_inventory` adjudicates every PDF-ingestion symbol candidate as `mapped_term`, `standard_unambiguous_notation`, `prose_noise`, `extraction_artifact`, or `non_load_bearing`, with a reason and exact occurrence anchors; non-PDF manuscript sources declare a candidate inventory or a bounded manual scope. Mapped load-bearing terms record first-use and definition anchors, or a scope-anchored definition absence when genuinely undefined. Every unsafe claim occurrence, inconsistent or unresolved reader state, undefined, inconsistent, or overloaded load-bearing term, and adverse v0.2 argument-audit state must map to an active verified finding or a structured bounded state permitted by the schema. Row-level bounded states propagate to collection and coverage status, and a bounded headline argument propagates to the central assessment.
 - `evidence/figures.md`: readable per-figure inventory, visual findings, checked-clean results, and caption/text reconciliation.
-- `evidence/figures.json`: schema-valid separate rendered-figure audit, including extraction paths, pages, visual checks, correspondence status, and finding mappings. A figure-free paper must explicitly confirm that the rendered manuscript contains no figures.
+- `evidence/figures.json`: schema-valid separate rendered-figure audit. New or materially refreshed audits use v0.2 rows that bind each figure to both its source-manifest row and coverage unit, plus hashed full-page and optional crop assets, visible identity evidence, pages, visual checks, correspondence status, and finding mappings. For PDF sources, the asset path, digest, and page must join exactly to the authenticated PDF-ingestion page-render or figure-crop record; legacy v0.1 rows remain valid. A figure-free paper must explicitly confirm that the rendered manuscript contains no figures.
 - `evidence/tables.md`: readable per-table rendered audit, extraction conflicts, table-contract results, checked-clean states, and text/claim reconciliation.
-- `evidence/tables.json`: schema-valid separate rendered-table audit. Every table coverage unit must map exactly once; extraction/render conflicts must be resolved from the rendered page or bounded. A table-free paper must explicitly confirm that the rendered manuscript contains no tables.
+- `evidence/tables.json`: schema-valid separate rendered-table audit. New or materially refreshed populated inventories use schema v0.2, with structured source bindings and immutable, role-declared render assets joined to canonical PDF-ingestion pages and table objects where applicable. Version 0.1 remains readable only for backward compatibility. Every table coverage unit must map exactly once; extraction/render conflicts must be resolved from the rendered page or bounded. A table-free paper must explicitly confirm that the rendered manuscript contains no tables.
 - `evidence/analytical-audit.md`: readable partition/regime, measure-algebra, assumption-implementation, derived-number, comparison-harmonization, timing/test, and availability/exclusivity ledgers.
-- `evidence/analytical-audit.json`: schema-valid analytical ledgers covering all seven domains, with every adverse state mapped to an active finding and every bounded or inapplicable domain explained.
-- `evidence/writing.md`: readable language-mechanics, consistency, style, reference, and venue audit.
-- `evidence/writing.json`: schema-valid mechanics corrections, consistency groups, style suggestions, and optional dated evidence-backed venue candidates. Citation accuracy and source-support verification stay in the substantive source audit, not this writing artifact. Review-contract and writing-audit versions are independent; use a writing schema version actually supported by the installed schema and validator, and preserve legacy packages under their declared versions.
-- `evidence/coverage.md`: section/exhibit matrix, audit-dimension matrix, second-sweep record, and bounded areas.
-- `evidence/coverage.json`: schema-valid coverage units, applicable paper-family branches, finding mappings, and second-sweep state.
-- `evidence/sources.md`: queries, verified records, exact support claims, access dates.
+- `evidence/analytical-audit.json`: schema-valid analytical ledgers covering all seven domains, with every adverse state mapped to an active finding and every bounded or inapplicable domain explained. New or re-finalized full reviews use analytical-audit schema v0.2. Every typed locator has a `record_ref` that appears directly in the entry's evidence references and reconciles the locator's source, locator, and representation-appropriate content to one canonical anchor, finding-evidence, computation, or external-source record. A bounded v0.2 entry or check propagates to the domain and reciprocal coverage dimension. Legacy v0.1 ledgers remain validator-compatible under older contracts and immutable v0.4 receipt-schema-v0.1 packages, and must still contain substantive source-specific evidence.
+- `evidence/writing.md`: readable language-mechanics, consistency, style, and optional venue audit. Routine bibliography and citation-accuracy checking is outside the default writing report; load-bearing source support stays substantive.
+- `evidence/writing.json`: schema-valid assessment, terminology and exhibit summaries; section and redundancy audits; mechanics corrections; consistency groups; style suggestions; and optional dated evidence-backed venue candidates. Current source-derived rows cite canonical evidence and coverage units: issue occurrences bind exact or normalized text to anchors, while checked-clean mechanics and consistent terminology use scope anchors with `checked_absence`. Only active, passed finding evidence can support an adverse row. Citation accuracy and source-support verification stay in the substantive source audit, not this writing artifact. Review-contract and writing-audit versions are independent; current full runs use writing schema v0.4, while legacy packages retain their declared versions.
+- `evidence/coverage.md`: deterministic rendering of source units, source-inventory closure, the activated-burden audit, applicable audit dimensions, second-sweep state, and bounded areas.
+- `evidence/coverage.json`: schema-valid source/anchor-bound units, an exact audit row for every activated burden, extensible descriptive lens tags, applicable structured dimensions, finding mappings, and second-sweep state. Current full reviews also partition every syntax-derived Markdown/LaTeX heading or environment and every authenticated PDF page, block, table, figure, and equation in `source_inventory`; covered objects map to source-bound units and covered PDF tables/figures map reciprocally to rendered-audit rows. Duplicate, false-positive, bounded, and non-substantive outline exclusions are explicit object decisions, never silent omissions. A source-wide scope anchor can support checked absence but cannot certify granular coverage. Every internal source and anchor is covered; a code-range anchor requires a typed code unit. Supplied code, a supplied data dictionary, or a supplied-code capability state (`not_permitted`, `static_only`, or `executed`) activates a reproducibility or computational-validity burden whose audit covers all units derived from those materials. This exhaustive artifact is full-mode only; quick mode records the trigger and active burden without claiming full unit coverage. Family and branch tags are routing metadata only; activated burdens control scope.
+- `evidence/sources.md`: deterministic rendering of the external-source ledger, including actual queries, verified records, supported propositions, access dates, closest-paper comparisons, and structured boundaries.
 - `evidence/verification.md`: pass/fail matrix and corrections made.
-- `finalization.json`: v0.4 receipt listing the gates and hashes of every finalized canonical/generated artifact. It is produced only by the atomic finalizer.
+- `finalization.json`: v0.4 receipt listing the exact version/mode/source gate set and hashes of every finalized canonical/generated artifact. It is produced only by the fail-closed finalizer, after per-file atomic replacement and ordinary-failure rollback; it does not assert filesystem-wide multi-file atomicity. Current full receipts use schema v0.3 and include `structured_audit_v02` plus `burden_coverage_v02`; current quick receipts use schema v0.2 and include neither. Immutable schema-v0.1 and schema-v0.2 receipts retain only their original guarantees.
 
 Any claimed numerical mismatch must link to an auditable recomputation input/output (use `scripts/stat_recompute.py` for its supported identities) and the exact manuscript locator. Hand arithmetic is not verification. Conditional inference findings must record which reconstructed fact activated the check; absence of an irrelevant conventional diagnostic is not a finding.
 
 ## Ship gate
 
-For contract v0.4, run `python3 scripts/finalize_review.py <review-dir>` from the skill package (or the equivalent absolute path) as the only completion path. The finalizer stages a completed run plus generated reports/plans, verifies source integrity and structured evidence, rejects unsafe paths, validates the staged package, commits the staged artifacts atomically, and writes the hashed finalization receipt last as the completion marker. Use `--check` and the individual generators or validator to diagnose failures, not to bypass the transaction.
+For contract v0.4, run `python3 "$SKILL_ROOT/scripts/finalize_review.py" <review-dir>` as the only completion path. The finalizer stages a completed run plus generated reports/plans, verifies source integrity and structured evidence, rejects unsafe paths, validates the staged package, replaces each generated artifact atomically, attempts rollback on ordinary failures, and writes the hashed finalization receipt last so an interruption cannot leave a receipt-valid partial package. Use `--check` and the individual generators or validator to diagnose failures, not to bypass the transaction.
 
 Contract v0.3 uses `generate_reports.py --check`, `generate_fix_plan.py --check`, and `validate_review.py`; v0.1/v0.2 use only gates applicable to their archived layouts. Fix every error and do not deliver a nonpassing package as final. Archived v0.3 reports remain structurally valid, but current deterministic generation requires `Issue`, `Relevant text`, `Concern`, `Suggestions`, and `Status`.

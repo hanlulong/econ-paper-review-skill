@@ -18,6 +18,44 @@ const EVIDENCE_NOTE_LABELS: Partial<Record<ReviewEvidenceRepresentation, string>
   checked_absence: "Checked absence",
 };
 
+const INTERNAL_PREFIXES: Partial<Record<ReviewEvidenceRepresentation, RegExp>> = {
+  normalized_transcription: /^\[Rendered transcription\]\s*/,
+  reviewer_observation: /^\[(?:Reviewer|Figure|Table) observation\]\s*/,
+  composite_comparison: /^\[Reviewer comparison\]\s*/,
+  computed_result: /^\[Computation\]\s*/,
+  checked_absence: /^\[Checked absence\]\s*/,
+};
+
+/** Remove a matching legacy storage token from visible evidence text. */
+export function evidenceDisplayText(
+  content: string,
+  representation?: ReviewEvidenceRepresentation,
+): string {
+  const prefix = representation ? INTERNAL_PREFIXES[representation] : undefined;
+  return prefix ? content.replace(prefix, "") : content;
+}
+
+/** Clean old generated report blocks without changing their stored Markdown. */
+export function authorReportDisplayMarkdown(markdown: string): string {
+  const lines = markdown.split("\n");
+  let derivedBlock = false;
+  return lines.map((line) => {
+    const derived = line.match(
+      /^>\s*\[(?:Reviewer observation|Figure observation|Table observation|Reviewer comparison|Checked absence|Computation)\]\s*(.*)$/,
+    );
+    if (derived) {
+      derivedBlock = true;
+      return derived[1];
+    }
+    if (derivedBlock) {
+      const continuation = line.match(/^>\s?(.*)$/);
+      if (continuation) return continuation[1];
+      derivedBlock = false;
+    }
+    return line.replace(/^>\s*\[Rendered transcription\]\s*/, "> ");
+  }).join("\n");
+}
+
 /**
  * Choose outer semantics for canonical evidence. Quotation styling depends on
  * provenance representation, not the source object's type. Missing legacy

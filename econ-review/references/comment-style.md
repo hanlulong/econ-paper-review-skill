@@ -2,12 +2,20 @@
 
 Use the v0.3/v0.4 issue-first, status-last presentation in both detailed-comment sections: substance findings in `report.md` and writing findings in `writing-report.md`. Existing v0.1 and v0.2 reviews retain their legacy formats. Make the reasoning reader-centered and recognizably useful to an author rather than diagnosis-only feedback.
 
+## Contents
+
+- [Field order](#fixed-current-contract-field-order)
+- [Reader-decision style and clarity register](#reader-decision-style)
+- [Major and design-specific variants](#major-technical-comment)
+- [Minor corrections](#minor-correction)
+- [Tone, repair, and lint rules](#tone-and-title-rules)
+
 ## Fixed current-contract field order
 
 Use these visible fields exactly once and in this order:
 
 1. `Issue`: a one-sentence paper-specific diagnosis matching the ledger.
-2. `Relevant text`: the shortest sufficient verbatim passage. For a normalized render transcription, reviewer observation, figure/table observation, computation, reviewer comparison, or checked absence, prefix the block with `[Rendered transcription]`, `[Reviewer observation]`, `[Figure observation]`, `[Table observation]`, `[Computation]`, `[Reviewer comparison]`, or `[Checked absence]`. Reserve `[Rendered transcription]` for anchor-matching source text; use `[Reviewer observation]` when the record excerpts, condenses, or paraphrases the source. Never present reviewer prose or an omission as manuscript text.
+2. `Relevant text`: the shortest sufficient evidence. Render verbatim passages and normalized source transcriptions as block quotes. Render reviewer observations, figure/table observations, computations, comparisons, and checked absences as unquoted evidence notes. Do not expose internal bracket labels such as `[Reviewer observation]` in the report. Canonical `representation` metadata preserves provenance; never present reviewer prose or an omission as manuscript text.
 3. `Concern`: what the evidence establishes, where it stops, and the paper-specific consequence. Do not repeat the issue.
 4. `Suggestions`: the minimum repair first, stated directly. Add one decisive check only if the broader claim is retained; label optional strengthening as optional.
 5. `Status`: `[Pending]`, always last.

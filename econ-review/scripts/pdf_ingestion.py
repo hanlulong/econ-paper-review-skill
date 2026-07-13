@@ -12,8 +12,8 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
-import html
 import io
+import inspect
 import json
 import math
 import os
@@ -24,10 +24,11 @@ import subprocess
 import sys
 import tempfile
 import unicodedata
-import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
+
+from defusedxml import ElementTree as ET
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -37,24 +38,44 @@ if str(SCRIPT_DIR) not in sys.path:
 from pdf_backends import (  # noqa: E402
     BackendError,
     docling_executable,
+    docling_requirement_status,
     docling_runtime_version,
-    docling_version,
+    mathpix_http_requirement_status,
     run_docling,
     run_mathpix,
+)
+from dependency_versions import (  # noqa: E402
+    DependencyContractError,
+    RequirementStatus,
+    check_manifest,
+    check_manifest_requirement,
+    incompatibility_message,
+    installed_distribution_version,
+    require_compatible,
 )
 from pdf_reconciliation import (  # noqa: E402
     build_page_packets,
     load_proposal_page_index,
     packet_errors,
 )
+from safe_io import canonical_portable_path, strict_json_load  # noqa: E402
 
 SKILL_ROOT = SCRIPT_DIR.parent
 SCHEMA_PATH = SKILL_ROOT / "assets" / "pdf-ingestion.schema.json"
-PIPELINE_VERSION = "0.2"
+CORE_REQUIREMENTS = SKILL_ROOT / "requirements-core.txt"
+MARKITDOWN_REQUIREMENTS = SKILL_ROOT / "requirements-markitdown.txt"
+PIPELINE_VERSION = "0.3"
 DEFAULT_OUTPUT_ROOT = Path("evidence/pdf-ingestion")
 MIN_NATIVE_CHARACTERS = 24
-MAX_PAGES_DEFAULT = 2_000
-MAX_BYTES_DEFAULT = 1_000_000_000
+MAX_PAGES_DEFAULT = 500
+MAX_BYTES_DEFAULT = 250_000_000
+MAX_PAGES_HARD = 2_000
+MAX_BYTES_HARD = 1_000_000_000
+SOURCE_ANCHOR_KIND_BY_BLOCK = {
+    "equation_candidate": "equation",
+    "caption_table": "table_cell",
+    "caption_figure": "figure",
+}
 
 
 class IngestionError(RuntimeError):
@@ -111,10 +132,10 @@ def regular_file(path: Path, label: str) -> Path:
 
 
 def safe_relative(value: str | Path) -> str:
-    path = Path(value)
-    if path.is_absolute() or not path.parts or ".." in path.parts:
-        raise IngestionError(f"path must be safe and relative: {value}")
-    return path.as_posix()
+    try:
+        return canonical_portable_path(str(value))
+    except ValueError as exc:
+        raise IngestionError(f"path must be safe and relative: {value} ({exc})") from exc
 
 
 def command_path(name: str) -> str | None:
@@ -151,35 +172,81 @@ def command_version(name: str, arguments: list[str]) -> str:
 
 def python_package_version(name: str) -> str | None:
     try:
-        from importlib.metadata import version
-        return version(name)
-    except Exception:
+        return installed_distribution_version(name)
+    except DependencyContractError:
         return None
 
 
+def markitdown_requirement_status() -> RequirementStatus:
+    try:
+        return check_manifest_requirement(MARKITDOWN_REQUIREMENTS, "markitdown")
+    except DependencyContractError as exc:
+        raise IngestionError(f"could not evaluate the MarkItDown version contract: {exc}") from exc
+
+
+def ensure_core_python_runtime() -> list[RequirementStatus]:
+    try:
+        return require_compatible(CORE_REQUIREMENTS)
+    except DependencyContractError as exc:
+        raise IngestionError(
+            f"Python dependency contract is not satisfied: {exc}; install {CORE_REQUIREMENTS}"
+        ) from exc
+
+
+def _doctor_python_line(status: RequirementStatus, profile: str, *, label: str | None = None) -> str:
+    installed = status.installed_version or "unavailable"
+    return f"{label or status.name}: {installed} ({profile}; {status.state}; requires {status.requirement})"
+
+
 def doctor() -> int:
-    rows = [
+    command_rows = [
         ("pdftotext", command_version("pdftotext", ["-v"]), True),
         ("pdftoppm", command_version("pdftoppm", ["-v"]), True),
         ("pdfinfo", command_version("pdfinfo", ["-v"]), True),
         ("pdffonts", command_version("pdffonts", ["-v"]), False),
         ("tesseract", command_version("tesseract", ["--version"]), False),
-        ("pdfplumber", python_package_version("pdfplumber") or "unavailable", False),
-        ("pypdf", python_package_version("pypdf") or "unavailable", True),
-        ("Pillow", python_package_version("Pillow") or "unavailable", True),
-        ("jsonschema", python_package_version("jsonschema") or "unavailable", True),
-        ("markitdown", command_version("markitdown", ["--version"]), False),
-        ("docling", docling_version() or "unavailable", False),
-        ("requests", python_package_version("requests") or "unavailable", False),
     ]
-    missing_required = False
-    for name, version, required in rows:
+    required_failure = False
+    for name, version, required in command_rows:
         state = "required" if required else "optional"
         print(f"{name}: {version} ({state})")
         if required and version == "unavailable":
-            missing_required = True
+            required_failure = True
+
+    try:
+        core_checks = check_manifest(CORE_REQUIREMENTS)
+    except DependencyContractError as exc:
+        print(f"python requirements: unsupported contract ({exc}) (required)")
+        core_checks = []
+        required_failure = True
+    for status in core_checks:
+        print(_doctor_python_line(status, "required"))
+        if not status.compatible:
+            required_failure = True
+
+    optional_checks: list[tuple[str, RequirementStatus, bool]] = []
+    try:
+        optional_checks.append(("MarkItDown", markitdown_requirement_status(), bool(command_path("markitdown"))))
+    except IngestionError as exc:
+        print(f"MarkItDown: unsupported contract ({exc}) (optional; unsupported)")
+    try:
+        optional_checks.append(("Docling", docling_requirement_status(), bool(docling_executable())))
+    except BackendError as exc:
+        print(f"Docling: unsupported contract ({exc}) (optional; unsupported)")
+    try:
+        optional_checks.append(("Mathpix HTTP adapter", mathpix_http_requirement_status(), True))
+    except BackendError as exc:
+        print(f"Mathpix HTTP adapter: unsupported contract ({exc}) (optional; unsupported)")
+    for label, status, command_available in optional_checks:
+        if status.compatible and not command_available:
+            print(
+                f"{label}: {status.installed_version or 'unavailable'} "
+                f"(optional; unavailable command; requires {status.requirement})"
+            )
+        else:
+            print(_doctor_python_line(status, "optional", label=label))
     print("network: forbidden by default; Mathpix requires explicit upload and retention authorization")
-    return 1 if missing_required else 0
+    return 1 if required_failure else 0
 
 
 def dereference(value: Any) -> Any:
@@ -262,12 +329,24 @@ def inspect_pdf_safety(pdf: Path) -> list[str]:
 
 def toolchain_for(args: argparse.Namespace) -> dict[str, Any]:
     ocr_available = bool(command_path("tesseract"))
-    proposal_version = command_version("markitdown", ["--version"]) if args.markitdown_proposal else "unavailable"
-    if args.markitdown_proposal and proposal_version == "unavailable":
-        raise IngestionError("--markitdown-proposal requires the local markitdown command")
+    proposal_version = "unavailable"
+    if args.markitdown_proposal:
+        status = markitdown_requirement_status()
+        if not status.compatible:
+            raise IngestionError(incompatibility_message(status, optional=True))
+        proposal_version = command_version("markitdown", ["--version"])
+        if proposal_version == "unavailable":
+            raise IngestionError(
+                f"--markitdown-proposal requires the local markitdown command from {MARKITDOWN_REQUIREMENTS}"
+            )
     semantic_backends: list[dict[str, str]] = []
-    if args.semantic_backend in {"auto", "docling"} and docling_version() and docling_executable():
-        semantic_backends.append({"name": "docling", "version": docling_runtime_version() or "unavailable"})
+    if args.semantic_backend in {"auto", "docling"}:
+        try:
+            docling_status = docling_requirement_status()
+        except BackendError:
+            docling_status = None
+        if docling_status is not None and docling_status.compatible and docling_executable():
+            semantic_backends.append({"name": "docling", "version": docling_runtime_version() or "unavailable"})
     if args.mathpix:
         semantic_backends.append({"name": "mathpix", "version": "v3/pdf"})
     return {
@@ -455,6 +534,112 @@ def controls(text: str) -> list[str]:
     return sorted({f"U+{ord(char):04X}" for char in text if unicodedata.category(char) == "Cc" and char not in "\n\t\r"})
 
 
+def caption_candidate_kind(text: str) -> str | None:
+    """Return a candidate exhibit kind only for caption-like opening text.
+
+    This is intentionally a conservative candidate detector, not a semantic
+    assertion. It accepts ordinary and appendix/supplement caption prefixes,
+    consumes the complete exhibit identifier, and rejects the common prose
+    construction ``Table A.2 summarizes ...``. Captions without punctuation
+    remain supported because many journal styles use ``Table 1 Title``.
+    """
+    first = text.strip().splitlines()[0].strip() if text.strip() else ""
+    match = re.match(
+        r"""
+        ^
+        (?:(?:
+            (?:(?:online|web|internet)\s+)?
+            (?:appendix|supplement(?:al|ary)?(?:\s+(?:appendix|material|information))?)
+            |supporting\s+information
+        )\s+)?
+        (?P<kind>table|tab\.|figure|fig\.)\s+
+        (?P<label>
+            [A-Za-z]{1,4}[.-]?\d+(?:[.-]\d+)*
+            |\d+(?:[.-]\d+)*(?:[A-Za-z])?
+            |[IVXLCDMivxlcdm]{2,6}
+            |[A-Za-z]
+        )
+        (?P<tail>(?:\s|[:.\-\u2013\u2014]).*)?
+        $
+        """,
+        first,
+        re.IGNORECASE | re.VERBOSE,
+    )
+    if not match:
+        return None
+    tail = match.group("tail") or ""
+    if tail and tail[0].isspace():
+        payload = tail.strip()
+        if payload and payload[0] not in ":.-\u2013\u2014" and narrative_exhibit_reference(payload):
+            return None
+    return "caption_table" if match.group("kind").casefold().startswith("tab") else "caption_figure"
+
+
+def narrative_exhibit_reference(text: str) -> bool:
+    """Identify prose that starts immediately after an exhibit identifier."""
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if re.match(r"^(?:,|;|and\b|or\b|above\b|below\b)", normalized, re.IGNORECASE):
+        return True
+    narrative_verb = re.match(
+        r"""^(?:
+            summarize(?:s|d)?|provide(?:s|d)?|present(?:s|ed)?|report(?:s|ed)?|
+            show(?:s|ed)?|depict(?:s|ed)?|display(?:s|ed)?|list(?:s|ed)?|
+            describe(?:s|d)?|document(?:s|ed)?|illustrate(?:s|d)?|compare(?:s|d)?|
+            plot(?:s|ted)?|contain(?:s|ed)?|give(?:s|n)?|examine(?:s|d)?|
+            analy[sz]e(?:s|d)?|estimate(?:s|d)?|confirm(?:s|ed)?|indicate(?:s|d)?|
+            reveal(?:s|ed)?|demonstrate(?:s|d)?|reproduce(?:s|d)?|extend(?:s|ed)?|
+            use(?:s|d)?|cover(?:s|ed)?|include(?:s|d)?|is|are|was|were|has|have|
+            can|could|may|might|will|would|should
+        )\b""",
+        normalized,
+        re.IGNORECASE | re.VERBOSE,
+    )
+    return narrative_verb is not None
+
+
+def clear_prose_with_incidental_math(text: str, equation_signals: int, alpha_words: int) -> bool:
+    """Reject sentence-like prose whose inline equalities are not display math."""
+    normalized = re.sub(r"\s+", " ", text).strip()
+    without_note_marker = re.sub(r"^\d{1,3}\s+", "", normalized)
+    sentence_ending = bool(re.search(r"[.!?][\"')\]]?$", without_note_marker))
+    prose_opening = bool(re.match(
+        r"^(?:the|this|these|those|we|our|their|results?|estimates?|analysis|specification|model)\b",
+        without_note_marker,
+        re.IGNORECASE,
+    ))
+    prose_verb = bool(re.search(
+        r"\b(?:is|are|was|were|be|been|shows?|reports?|uses?|sets?|assumes?|"
+        r"remains?|contains?|provides?|indicates?|suggests?|finds?|becomes?)\b",
+        without_note_marker,
+        re.IGNORECASE,
+    ))
+    word_heavy = alpha_words >= max(7, equation_signals * 2 + 3)
+    return sentence_ending and (word_heavy or (prose_opening and prose_verb))
+
+
+def equation_candidate(text: str) -> bool:
+    """Detect display-math candidates while excluding clear prose footnotes."""
+    equation_signals = len(re.findall(
+        r"[=∑∏∫√≤≥≈≡∂∆∇∞±×÷]|(?:\b(?:argmax|argmin|max|min)\b)", text,
+    ))
+    equation_label = bool(re.search(r"\([A-Za-z]?\d+(?:\.\d+)*\)\s*$", text))
+    alpha_words = len(re.findall(r"\b[A-Za-z]{3,}\b", text))
+    if equation_signals == 0:
+        return False
+    if clear_prose_with_incidental_math(text, equation_signals, alpha_words):
+        math_line = any(
+            len(re.findall(r"[=∑∏∫√≤≥≈≡∂∆∇∞±×÷]", line)) >= 1
+            and len(re.findall(r"\b[A-Za-z]{3,}\b", line)) <= 3
+            and not re.search(r"[.!?]\s*$", line.strip())
+            for line in text.splitlines()
+        )
+        if not math_line:
+            return False
+    return (equation_label and equation_signals >= 1) or (
+        equation_signals >= 2 and alpha_words <= 8 and len(text) <= 500
+    )
+
+
 def classify_block(block: dict[str, Any], repeated: set[tuple[str, str]]) -> tuple[str, str]:
     text = block["raw_text"].strip()
     first = text.splitlines()[0]
@@ -462,16 +647,12 @@ def classify_block(block: dict[str, Any], repeated: set[tuple[str, str]]) -> tup
     page_height = block["page_height"]
     normalized = re.sub(r"\d+", "#", re.sub(r"\s+", " ", text.casefold())).strip()
     zone = "top" if y1 < page_height * 0.12 else "bottom" if y0 > page_height * 0.88 else "body"
+    caption_kind = caption_candidate_kind(text)
+    if caption_kind is not None:
+        return caption_kind, "high"
     if (zone, normalized) in repeated:
         return "header_footer", "high"
-    if re.match(r"^\s*(table|tab\.)\s+[A-Z0-9IVX]+(?:[.:]|\b)", first, re.I):
-        return "caption_table", "high"
-    if re.match(r"^\s*(figure|fig\.)\s+[A-Z0-9IVX]+(?:[.:]|\b)", first, re.I):
-        return "caption_figure", "high"
-    equation_signals = len(re.findall(r"[=∑∏∫√≤≥≈≡∂∆∇∞±×÷]|(?:\b(?:argmax|argmin|max|min)\b)", text))
-    equation_label = bool(re.search(r"\([A-Za-z]?\d+(?:\.\d+)*\)\s*$", text))
-    alpha_words = len(re.findall(r"\b[A-Za-z]{3,}\b", text))
-    if (equation_label and equation_signals) or (equation_signals >= 2 and alpha_words <= 8 and len(text) <= 500):
+    if equation_candidate(text):
         return "equation_candidate", "medium"
     if y0 > page_height * 0.82 and len(text) < 700:
         return "footnote", "medium"
@@ -479,9 +660,32 @@ def classify_block(block: dict[str, Any], repeated: set[tuple[str, str]]) -> tup
         r"^(?:\d+(?:\.\d+)*|[A-Z])\s+[A-Z][^.!?]{1,100}$",
         r"^(?:abstract|introduction|conclusion|references|bibliography|appendix)(?:\b|$)",
     )
-    if len(text.splitlines()) <= 2 and any(re.match(pattern, first, re.I) for pattern in heading_patterns):
+    appendix_sentence = first.casefold().startswith("appendix ") and bool(re.search(r"[.!?]\s*$", text))
+    if (
+        len(text.splitlines()) <= 2
+        and not appendix_sentence
+        and any(re.match(pattern, first, re.I) for pattern in heading_patterns)
+    ):
         return "heading", "high"
     return "paragraph", "high"
+
+
+def object_detector_contract() -> dict[str, str]:
+    """Describe the exact candidate-classification implementation in use.
+
+    The source digest makes same-request idempotence sensitive to detector
+    behavior changes without making older v0.1/v0.2 packages unverifiable.
+    Candidate records remain non-authoritative regardless of this provenance.
+    """
+    functions = (
+        caption_candidate_kind,
+        narrative_exhibit_reference,
+        clear_prose_with_incidental_math,
+        equation_candidate,
+        classify_block,
+    )
+    source = "\n\n".join(inspect.getsource(function) for function in functions)
+    return {"version": "1", "source_sha256": sha256_bytes(source.encode("utf-8"))}
 
 
 def repeated_margin_blocks(blocks: list[dict[str, Any]], page_count: int) -> set[tuple[str, str]]:
@@ -498,8 +702,8 @@ def repeated_margin_blocks(blocks: list[dict[str, Any]], page_count: int) -> set
     return {key for key, count in counts.items() if count >= threshold}
 
 
-def extract_ocr(render: Path) -> str:
-    result = run(["tesseract", str(render), "stdout", "-l", "eng", "--psm", "1"], timeout=300)
+def extract_ocr(render: Path, language: str = "eng") -> str:
+    result = run(["tesseract", str(render), "stdout", "-l", language, "--psm", "1"], timeout=300)
     return result.stdout.decode("utf-8", "replace").strip()
 
 
@@ -507,8 +711,10 @@ def page_blocks(blocks: list[dict[str, Any]]) -> dict[int, list[dict[str, Any]]]
     result: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for block in blocks:
         result[block["page"]].append(block)
-    for rows in result.values():
-        rows.sort(key=lambda row: (round(row["bbox"][1], 1), round(row["bbox"][0], 1)))
+    # Poppler's bbox-layout XML already groups blocks in logical content-stream
+    # order. A global y/x sort interleaves same-height lines from two-column
+    # papers, so preserve that order here. Geometry-sensitive object routines
+    # perform their own explicit directional sorts.
     return result
 
 
@@ -767,11 +973,19 @@ def region_from_caption(
     ]
 
 
-def table_candidates(pdf: Path) -> dict[int, list[dict[str, Any]]]:
+def detector_warning(detector: str, scope: str, exc: BaseException) -> str:
+    """Record parser degradation compactly instead of silently dropping it."""
+    detail = re.sub(r"\s+", " ", str(exc)).strip()[:240]
+    suffix = f": {detail}" if detail else ""
+    return f"{detector} failed for {scope} ({type(exc).__name__}){suffix}"
+
+
+def table_candidates(pdf: Path) -> tuple[dict[int, list[dict[str, Any]]], list[str]]:
+    warnings: list[str] = []
     try:
         import pdfplumber
-    except ImportError:
-        return {}
+    except ImportError as exc:
+        return {}, [detector_warning("table-grid detector", "the PDF", exc)]
     output: dict[int, list[dict[str, Any]]] = defaultdict(list)
     try:
         with pdfplumber.open(pdf) as document:
@@ -781,7 +995,10 @@ def table_candidates(pdf: Path) -> dict[int, list[dict[str, Any]]]:
                         "vertical_strategy": "lines", "horizontal_strategy": "lines",
                         "snap_tolerance": 3, "join_tolerance": 3, "intersection_tolerance": 4,
                     })
-                except Exception:
+                except Exception as exc:
+                    warnings.append(
+                        detector_warning("table-grid detector", f"PDF page {page_number}", exc)
+                    )
                     continue
                 for table in found:
                     grid = table.extract() or []
@@ -789,12 +1006,12 @@ def table_candidates(pdf: Path) -> dict[int, list[dict[str, Any]]]:
                         continue
                     bbox = [round(float(value), 3) for value in table.bbox]
                     output[page_number].append({"bbox": bbox, "grid": grid, "strategy": "pdfplumber_lines"})
-    except Exception:
-        return {}
-    return output
+    except Exception as exc:
+        warnings.append(detector_warning("table-grid detector", "the PDF", exc))
+    return output, warnings
 
 
-def page_graphic_candidates(pdf: Path) -> dict[int, list[dict[str, Any]]]:
+def page_graphic_candidates(pdf: Path) -> tuple[dict[int, list[dict[str, Any]]], list[str]]:
     """Recover non-authoritative graphic extents used only to bound crops.
 
     Raster images and large vector containers are especially useful when a
@@ -803,8 +1020,8 @@ def page_graphic_candidates(pdf: Path) -> dict[int, list[dict[str, Any]]]:
     """
     try:
         import pdfplumber
-    except ImportError:
-        return {}
+    except ImportError as exc:
+        return {}, [detector_warning("graphic-extent detector", "the PDF", exc)]
     output: dict[int, list[dict[str, Any]]] = defaultdict(list)
     try:
         with pdfplumber.open(pdf) as document:
@@ -826,9 +1043,9 @@ def page_graphic_candidates(pdf: Path) -> dict[int, list[dict[str, Any]]]:
                             "kind": kind,
                             "bbox": [round(value, 3) for value in bbox],
                         })
-    except Exception:
-        return {}
-    return output
+    except Exception as exc:
+        return output, [detector_warning("graphic-extent detector", "the PDF", exc)]
+    return output, []
 
 
 def rectangular(grid: list[list[Any]]) -> bool:
@@ -854,10 +1071,11 @@ def create_objects(
     pages: list[dict[str, Any]],
     raw_blocks: list[dict[str, Any]],
     rendered: list[Path],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[str]]:
     by_page = page_blocks(raw_blocks)
-    detected_tables = table_candidates(pdf)
-    detected_graphics = page_graphic_candidates(pdf)
+    detected_tables, table_detection_warnings = table_candidates(pdf)
+    detected_graphics, graphic_detection_warnings = page_graphic_candidates(pdf)
+    detection_warnings = table_detection_warnings + graphic_detection_warnings
     tables: list[dict[str, Any]] = []
     figures: list[dict[str, Any]] = []
     equations: list[dict[str, Any]] = []
@@ -940,7 +1158,7 @@ def create_objects(
                 "bounded",
                 ["Generic PDF extraction cannot verify mathematical semantics; the crop is authoritative until source TeX or manual render verification resolves it."],
             )
-    return tables, figures, equations
+    return tables, figures, equations, detection_warnings
 
 
 def symbol_inventory(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -992,16 +1210,24 @@ def build_source_manifest(
     source_path = f"{output_prefix}/source/original.pdf"
     markdown_path = f"{output_prefix}/manuscript.md"
     anchors: list[dict[str, Any]] = []
-    kind_map = {"equation_candidate": "equation", "caption_table": "table_cell", "caption_figure": "figure"}
     for index, block in enumerate(blocks, 1):
         start, end = block["markdown_start"], block["markdown_end"]
         content = markdown[start:end]
         anchors.append({
             "id": source_anchor_id(source_id, index), "source_id": source_id,
-            "kind": kind_map.get(block["kind"], "text_span"),
+            "kind": SOURCE_ANCHOR_KIND_BY_BLOCK.get(block["kind"], "text_span"),
             "start_char": start, "end_char": end, "content_sha256": sha256_bytes(content.encode("utf-8")),
             "locator": f"PDF p. {block['page']}, bbox {','.join(str(value) for value in block['bbox'])}, block {block['id']}",
         })
+    anchors.append({
+        "id": source_anchor_id(source_id, len(blocks) + 1),
+        "source_id": source_id,
+        "kind": "scope",
+        "start_char": 0,
+        "end_char": len(markdown),
+        "content_sha256": sha256_bytes(markdown.encode("utf-8")),
+        "locator": "Complete authenticated PDF extraction",
+    })
     return {
         "schema_version": "0.1", "review_id": review_id,
         "sources": [{
@@ -1019,15 +1245,19 @@ def build_source_manifest(
 
 def pipeline_fingerprint(
     configuration: dict[str, Any], toolchain: dict[str, Any], *, pipeline_version: str = PIPELINE_VERSION,
+    detector_contract: dict[str, str] | None = None,
 ) -> str:
-    return sha256_bytes(canonical_json({
+    payload = {
         "pipeline_version": pipeline_version, "configuration": configuration,
         "tools": toolchain,
         "normalization": (
             "raw UTF-8 blocks with LF line endings; no NFKC or dehyphenation; "
             "XML-forbidden controls removed only from Poppler XHTML parser input with hashes and counts recorded"
         ),
-    }))
+    }
+    if pipeline_version not in {"0.1", "0.2"}:
+        payload["detector_contract"] = detector_contract or object_detector_contract()
+    return sha256_bytes(canonical_json(payload))
 
 
 def validate_schema(value: dict[str, Any]) -> list[str]:
@@ -1035,7 +1265,7 @@ def validate_schema(value: dict[str, Any]) -> list[str]:
         import jsonschema
     except ImportError as exc:
         raise IngestionError(f"jsonschema is required; install {SKILL_ROOT / 'requirements-core.txt'}") from exc
-    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    schema = strict_json_load(SCHEMA_PATH)
     validator = jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker())
     return [f"{'/'.join(str(part) for part in error.absolute_path) or '<root>'}: {error.message}" for error in validator.iter_errors(value)]
 
@@ -1077,6 +1307,24 @@ def valid_bbox(bbox: Any, page: dict[str, Any]) -> bool:
     return 0 <= x0 < x1 <= page.get("width_points", 0) and 0 <= y0 < y1 <= page.get("height_points", 0)
 
 
+def verified_image_shape(path: Path, label: str) -> tuple[int, int, str]:
+    """Decode a declared raster enough to reject truncated or disguised assets."""
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise IngestionError(f"Pillow is required for image verification; install {SKILL_ROOT / 'requirements-core.txt'}") from exc
+    try:
+        with Image.open(path) as image:
+            width, height = image.size
+            image_format = str(image.format or "").upper()
+            image.verify()
+    except Exception as exc:
+        raise IngestionError(f"{label} is not a decodable image: {exc}") from exc
+    if width < 1 or height < 1:
+        raise IngestionError(f"{label} has invalid pixel dimensions")
+    return width, height, image_format
+
+
 def verify_package(package_dir: Path, *, quiet: bool = False) -> list[str]:
     errors: list[str] = []
     try:
@@ -1088,8 +1336,8 @@ def verify_package(package_dir: Path, *, quiet: bool = False) -> list[str]:
             print(f"- {exc}", file=sys.stderr)
         return errors
     try:
-        value = json.loads((package_dir / "ingestion.json").read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        value = strict_json_load(package_dir / "ingestion.json")
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         return [f"cannot read ingestion.json: {exc}"]
     try:
         schema_errors = validate_schema(value)
@@ -1194,7 +1442,41 @@ def verify_package(package_dir: Path, *, quiet: bool = False) -> list[str]:
     for path, expected, label in artifacts:
         verify_artifact(path, expected, label)
 
-    if value.get("schema_version") == "0.2":
+    page_pixel_shapes: dict[int, tuple[int, int]] = {}
+    dpi = value.get("configuration", {}).get("dpi")
+    for page in value.get("pages", []):
+        label = f"page {page.get('page')} render"
+        try:
+            render = regular_file(package_path(review_dir, page.get("render_path")), label)
+            width, height, image_format = verified_image_shape(render, label)
+        except (OSError, IngestionError, TypeError) as exc:
+            errors.append(str(exc))
+            continue
+        if image_format != "PNG":
+            errors.append(f"{label} must be a PNG image")
+        if isinstance(dpi, int):
+            expected_width = page.get("width_points", 0) * dpi / 72
+            expected_height = page.get("height_points", 0) * dpi / 72
+            if abs(width - expected_width) > 2 or abs(height - expected_height) > 2:
+                errors.append(f"{label} pixel dimensions do not match its PDF geometry and declared DPI")
+        page_pixel_shapes[page.get("page")] = (width, height)
+
+    for collection in ("tables", "figures", "equations"):
+        for row in value.get(collection, []):
+            label = f"{row.get('id')} crop"
+            try:
+                crop = regular_file(package_path(review_dir, row.get("crop_path")), label)
+                width, height, image_format = verified_image_shape(crop, label)
+            except (OSError, IngestionError, TypeError) as exc:
+                errors.append(str(exc))
+                continue
+            if image_format != "PNG":
+                errors.append(f"{label} must be a PNG image")
+            page_shape = page_pixel_shapes.get(row.get("page"))
+            if page_shape and (width > page_shape[0] or height > page_shape[1]):
+                errors.append(f"{label} is larger than its declared source-page render")
+
+    if value.get("schema_version") in {"0.2", "0.3"}:
         configuration = value.get("configuration", {})
         if configuration.get("mathpix") != ("mathpix" in proposal_engines):
             errors.append("Mathpix configuration and proposal inventory disagree")
@@ -1227,8 +1509,8 @@ def verify_package(package_dir: Path, *, quiet: bool = False) -> list[str]:
         packets_path = reconciliation.get("packets_path")
         if isinstance(packets_path, str):
             try:
-                packets = json.loads(package_path(review_dir, packets_path).read_text(encoding="utf-8"))
-            except (OSError, UnicodeError, json.JSONDecodeError, IngestionError) as exc:
+                packets = strict_json_load(package_path(review_dir, packets_path))
+            except (OSError, UnicodeError, json.JSONDecodeError, ValueError, IngestionError) as exc:
                 errors.append(f"cannot read reconciliation page packets: {exc}")
             else:
                 errors.extend(packet_errors(packets, value))
@@ -1284,6 +1566,7 @@ def verify_package(package_dir: Path, *, quiet: bool = False) -> list[str]:
         },
         value.get("toolchain", {}),
         pipeline_version=value.get("schema_version", PIPELINE_VERSION),
+        detector_contract=value.get("detector_contract"),
     )
     if value.get("pipeline_fingerprint") != expected_fingerprint:
         errors.append("pipeline fingerprint does not match the declared configuration and toolchain")
@@ -1340,8 +1623,8 @@ def verify_package(package_dir: Path, *, quiet: bool = False) -> list[str]:
 
     fragment_path = package_dir / "source-manifest.generated.json"
     try:
-        fragment = json.loads(regular_file(fragment_path, "generated source manifest").read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError, IngestionError) as exc:
+        fragment = strict_json_load(regular_file(fragment_path, "generated source manifest"))
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, IngestionError) as exc:
         errors.append(f"cannot verify generated source manifest: {exc}")
     else:
         sources = fragment.get("sources", []) if isinstance(fragment, dict) else []
@@ -1362,15 +1645,54 @@ def verify_package(package_dir: Path, *, quiet: bool = False) -> list[str]:
         if extraction.get("pipeline_fingerprint") != value.get("pipeline_fingerprint"):
             errors.append("generated source manifest pipeline fingerprint differs from ingestion.json")
         anchors = fragment.get("anchors", []) if isinstance(fragment, dict) else []
-        if len(anchors) != len(blocks) or len({row.get("id") for row in anchors if isinstance(row, dict)}) != len(anchors):
+        # v0.2 packages created before the coverage trust spine contain only
+        # block anchors. Current packages add one full-extraction scope anchor;
+        # both layouts remain verifiable, but only the latter can satisfy a new
+        # full-review coverage v0.2 receipt without manual manifest repair.
+        legacy_layout = len(anchors) == len(blocks)
+        current_layout = len(anchors) == len(blocks) + 1
+        if not (legacy_layout or current_layout) or len({row.get("id") for row in anchors if isinstance(row, dict)}) != len(anchors):
             errors.append("generated source manifest anchors are incomplete or not unique")
-        for index, (anchor, block) in enumerate(zip(anchors, blocks), 1):
+        expected_scope_count: int | None = None
+        if current_layout:
+            expected_scope_count = 1
+        elif legacy_layout:
+            expected_scope_count = 0
+        scope_count = sum(
+            1 for row in anchors
+            if isinstance(row, dict) and row.get("kind") == "scope"
+        )
+        if expected_scope_count is not None and scope_count != expected_scope_count:
+            errors.append(
+                "generated source manifest must contain exactly one scope anchor in the current layout "
+                "and none in the legacy block-only layout"
+            )
+        for index, (anchor, block) in enumerate(zip(anchors[:len(blocks)], blocks), 1):
+            if not isinstance(anchor, dict):
+                errors.append(f"generated source anchor {index} is not an object")
+                continue
             if anchor.get("id") != source_anchor_id(source_id, index) or anchor.get("source_id") != source_id:
                 errors.append(f"generated source anchor {index} is not source-qualified")
+            expected_kind = SOURCE_ANCHOR_KIND_BY_BLOCK.get(block.get("kind"), "text_span")
+            if anchor.get("kind") != expected_kind:
+                errors.append(
+                    f"generated source anchor {anchor.get('id')} kind differs from its canonical block"
+                )
             if (anchor.get("start_char"), anchor.get("end_char"), anchor.get("content_sha256")) != (
                 block.get("markdown_start"), block.get("markdown_end"), block.get("sha256"),
             ):
                 errors.append(f"generated source anchor {anchor.get('id')} differs from its canonical block")
+        if current_layout:
+            scope = anchors[-1]
+            if not isinstance(scope, dict) or (
+                scope.get("id") != source_anchor_id(source_id, len(blocks) + 1)
+                or scope.get("source_id") != source_id
+                or scope.get("kind") != "scope"
+                or scope.get("start_char") != 0
+                or scope.get("end_char") != len(markdown)
+                or scope.get("content_sha256") != value.get("markdown", {}).get("sha256")
+            ):
+                errors.append("generated source scope anchor differs from the authenticated Markdown extraction")
 
     quality = value.get("quality", {})
     parser_repairs = value.get("parser_repairs", {})
@@ -1417,31 +1739,41 @@ def verify_package(package_dir: Path, *, quiet: bool = False) -> list[str]:
 
 
 def ingest(args: argparse.Namespace) -> Path:
-    if not 1 <= args.max_pages <= MAX_PAGES_DEFAULT:
-        raise IngestionError(f"--max-pages must be between 1 and {MAX_PAGES_DEFAULT}")
-    if not 1 <= args.max_bytes <= MAX_BYTES_DEFAULT:
-        raise IngestionError(f"--max-bytes must be between 1 and {MAX_BYTES_DEFAULT}")
+    if not 1 <= args.max_pages <= MAX_PAGES_HARD:
+        raise IngestionError(f"--max-pages must be between 1 and {MAX_PAGES_HARD}")
+    if not 1 <= args.max_bytes <= MAX_BYTES_HARD:
+        raise IngestionError(f"--max-bytes must be between 1 and {MAX_BYTES_HARD}")
     if not 60 <= args.docling_timeout <= 86_400:
         raise IngestionError("--docling-timeout must be between 60 and 86400 seconds")
+    if not re.fullmatch(r"[A-Za-z0-9_+-]{1,64}", args.ocr_language):
+        raise IngestionError("--ocr-language must be a Tesseract language code or plus-separated language list")
     if not 60 <= args.mathpix_timeout <= 86_400:
         raise IngestionError("--mathpix-timeout must be between 60 and 86400 seconds")
     if not 0.1 <= args.mathpix_poll_interval <= 60:
         raise IngestionError("--mathpix-poll-interval must be between 0.1 and 60 seconds")
+    ensure_core_python_runtime()
+    if args.semantic_backend == "docling":
+        try:
+            docling_status = docling_requirement_status()
+        except BackendError as exc:
+            raise IngestionError(str(exc)) from exc
+        if not docling_status.compatible:
+            raise IngestionError(incompatibility_message(docling_status, optional=True))
+        if not docling_executable():
+            raise IngestionError(
+                f"optional backend Docling command is unavailable; install {SKILL_ROOT / 'requirements-docling.txt'}"
+            )
     for required in ("pdfinfo", "pdftotext", "pdftoppm"):
         if not command_path(required):
             raise IngestionError(f"{required} is required; install Poppler and run the doctor command")
-    for package in ("pypdf", "Pillow", "jsonschema"):
-        if not python_package_version(package):
-            raise IngestionError(
-                f"Python package {package} is required; install {SKILL_ROOT / 'requirements-core.txt'}"
-            )
     source_id = validate_source_id(args.source_id)
     source = regular_file(args.pdf, "input PDF")
     if source.suffix.casefold() != ".pdf":
         raise IngestionError("input must use a .pdf extension")
-    review_dir = args.review_dir.resolve()
+    review_dir = args.review_dir.expanduser().absolute()
     if review_dir.is_symlink():
         raise IngestionError("review directory must not be a symbolic link")
+    review_dir = review_dir.resolve()
     private_mkdir(review_dir)
     output = args.output if args.output is not None else DEFAULT_OUTPUT_ROOT / source_id
     output_rel = safe_relative(output)
@@ -1451,8 +1783,16 @@ def ingest(args: argparse.Namespace) -> Path:
         raise IngestionError("Mathpix requires --authorize-external-upload mathpix")
     if args.mathpix and not args.accept_mathpix_retention:
         raise IngestionError("Mathpix requires --accept-mathpix-retention")
+    if args.mathpix:
+        try:
+            requests_status = mathpix_http_requirement_status()
+        except BackendError as exc:
+            raise IngestionError(str(exc)) from exc
+        if not requests_status.compatible:
+            raise IngestionError(incompatibility_message(requests_status, optional=True))
     configuration = {
-        "dpi": args.dpi, "ocr": args.ocr, "max_pages": args.max_pages, "max_bytes": args.max_bytes,
+        "dpi": args.dpi, "ocr": args.ocr, "ocr_language": args.ocr_language,
+        "max_pages": args.max_pages, "max_bytes": args.max_bytes,
         "markitdown_proposal": args.markitdown_proposal,
         "semantic_backend": args.semantic_backend,
         "allow_model_downloads": args.allow_model_downloads,
@@ -1467,13 +1807,15 @@ def ingest(args: argparse.Namespace) -> Path:
         "network_services": "mathpix_authorized" if args.mathpix else "forbidden",
     }
     toolchain = toolchain_for(args)
+    detector_contract = object_detector_contract()
     fingerprint = pipeline_fingerprint(
         {**configuration, "source_id": source_id, "source_role": args.role}, toolchain,
+        detector_contract=detector_contract,
     )
     existing_manifest = destination / "ingestion.json"
     if existing_manifest.exists() and not args.force:
         try:
-            existing = json.loads(existing_manifest.read_text(encoding="utf-8"))
+            existing = strict_json_load(existing_manifest)
         except Exception:
             existing = {}
         same_request = (
@@ -1495,7 +1837,6 @@ def ingest(args: argparse.Namespace) -> Path:
     stage.chmod(0o700)
     backup: Path | None = None
     try:
-        assert stage is not None
         source_copy = stage / "source/original.pdf"
         private_mkdir(source_copy.parent)
         shutil.copyfile(source, source_copy)
@@ -1534,10 +1875,15 @@ def ingest(args: argparse.Namespace) -> Path:
             native_controls = controls(native)
             if native_controls:
                 warnings.append("native text contains control glyphs: " + ", ".join(native_controls))
-            poor_native = len(re.sub(r"\s+", "", native)) < MIN_NATIVE_CHARACTERS or bool(native_controls)
+            suspicious_native_glyphs = "�" in native or any(unicodedata.category(char) == "Co" for char in native)
+            poor_native = (
+                len(re.sub(r"\s+", "", native)) < MIN_NATIVE_CHARACTERS
+                or bool(native_controls)
+                or suspicious_native_glyphs
+            )
             should_ocr = args.ocr == "always" or (args.ocr == "auto" and poor_native)
             if should_ocr and ocr_available:
-                ocr_text = extract_ocr(rendered[number - 1])
+                ocr_text = extract_ocr(rendered[number - 1], args.ocr_language)
                 if ocr_text:
                     text = ocr_text
                     method = "ocr"
@@ -1581,9 +1927,10 @@ def ingest(args: argparse.Namespace) -> Path:
 
         markdown, blocks = build_markdown(pages, raw_blocks, page_text, source_id)
         private_write(stage / "manuscript.md", markdown.encode("utf-8"))
-        tables, figures, equations = create_objects(
+        tables, figures, equations, detection_warnings = create_objects(
             stage, output_rel, source_id, source_copy, pages, raw_blocks, rendered,
         )
+        overall_warnings.extend(detection_warnings)
         symbols = symbol_inventory(blocks)
         proposal: dict[str, Any] | None = None
         proposals: list[dict[str, Any]] = []
@@ -1658,6 +2005,7 @@ def ingest(args: argparse.Namespace) -> Path:
         manifest = {
             "schema_version": PIPELINE_VERSION, "review_id": args.review_id, "source_id": source_id,
             "source_role": args.role, "pipeline_fingerprint": fingerprint,
+            "detector_contract": detector_contract,
             "parser_repairs": parser_repairs,
             "source": {"original_name": source.name, "package_path": f"{output_rel}/source/original.pdf",
                        "sha256": source_sha, "page_count": page_count, "encrypted": encrypted},
@@ -1687,7 +2035,7 @@ def ingest(args: argparse.Namespace) -> Path:
                 ],
             },
             "quality": {
-                "status": "bounded" if bounded_pages else "ready_for_review",
+                "status": "bounded" if bounded_pages or detection_warnings else "ready_for_review",
                 "page_count_match": len(page_records) == page_count,
                 "all_pages_rendered": len(rendered) == page_count,
                 "all_pages_have_text_or_boundary": len(page_records) == page_count,
@@ -1757,8 +2105,18 @@ def parser() -> argparse.ArgumentParser:
     )
     ingest_parser.add_argument("--dpi", type=int, default=250, choices=range(150, 401), metavar="150..400")
     ingest_parser.add_argument("--ocr", choices=("auto", "never", "always"), default="auto")
-    ingest_parser.add_argument("--max-pages", type=int, default=MAX_PAGES_DEFAULT)
-    ingest_parser.add_argument("--max-bytes", type=int, default=MAX_BYTES_DEFAULT)
+    ingest_parser.add_argument(
+        "--ocr-language", default="eng",
+        help="Tesseract language code or plus-separated list used for local prose OCR (default: eng)",
+    )
+    ingest_parser.add_argument(
+        "--max-pages", type=int, default=MAX_PAGES_DEFAULT,
+        help=f"maximum source pages (default {MAX_PAGES_DEFAULT}; hard limit {MAX_PAGES_HARD})",
+    )
+    ingest_parser.add_argument(
+        "--max-bytes", type=int, default=MAX_BYTES_DEFAULT,
+        help=f"maximum PDF bytes (default {MAX_BYTES_DEFAULT}; hard limit {MAX_BYTES_HARD})",
+    )
     ingest_parser.add_argument(
         "--markitdown-proposal", action="store_true",
         help="Write a non-authoritative local MarkItDown proposal when the command is installed",
@@ -1803,6 +2161,7 @@ def main() -> int:
         if args.command == "doctor":
             return doctor()
         if args.command == "check":
+            ensure_core_python_runtime()
             return 1 if verify_package(args.package_dir) else 0
         ingest(args)
         return 0

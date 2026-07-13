@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "review_id", "audit_scope", "claim_families", "reader_map", "terms", "central_argument_assessment", "writing_audit"],
   "properties": {
-    "schema_version": {"const": "0.1"},
+    "schema_version": {"enum": ["0.1", "0.2"]},
     "review_id": {"type": "string", "minLength": 1},
     "audit_scope": {
       "type": "object", "additionalProperties": false,
@@ -14,6 +14,10 @@
       "properties": {
         "inventory_complete_within_assessment_boundary": {"const": true},
         "coverage_unit_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "scope_anchor_ids": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"}
+        },
         "headline_claim_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^CLM-[0-9]{2,}$"}},
         "terminology_scope_checked": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
         "boundary_notes": {"type": "string", "minLength": 1}
@@ -26,6 +30,10 @@
         "required": ["id", "is_headline", "canonical_supported_claim", "load_bearing_qualifiers", "occurrences", "finding_ids"],
         "properties": {
           "id": {"type": "string", "pattern": "^CLM-[0-9]{2,}$"},
+          "anchor_ids": {
+            "type": "array", "minItems": 1, "uniqueItems": true,
+            "items": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"}
+          },
           "is_headline": {"type": "boolean"},
           "canonical_supported_claim": {"type": "string", "minLength": 1},
           "load_bearing_qualifiers": {"type": "array", "items": {"type": "string"}},
@@ -38,6 +46,8 @@
               "properties": {
                 "id": {"type": "string", "minLength": 1},
                 "coverage_unit_id": {"type": "string", "minLength": 1},
+                "anchor_id": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"},
+                "representation": {"enum": ["verbatim", "normalized_transcription"]},
                 "locator": {"type": "string", "minLength": 1},
                 "text": {"type": "string", "minLength": 1},
                 "claim_vector": {
@@ -73,6 +83,11 @@
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "coverage_unit_id": {"type": "string", "minLength": 1},
+          "claim_ids": {
+            "type": "array", "minItems": 1, "uniqueItems": true,
+            "items": {"type": "string", "pattern": "^CLM-[0-9]{2,}$"}
+          },
+          "evidence_refs": {"$ref": "#/$defs/sourceEvidenceRefs"},
           "label": {"type": "string", "minLength": 1},
           "takeaway": {"type": "string", "minLength": 1},
           "status": {"enum": ["clear_and_convincing", "clear_but_provisional", "unclear", "inconsistent", "bounded"]},
@@ -92,12 +107,79 @@
           "label": {"type": "string", "minLength": 1},
           "kind": {"enum": ["economic_term", "constructed_measure", "acronym", "symbol", "parameter", "shock", "group_label", "transformation", "normalization", "other"]},
           "coverage_unit_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "first_use_anchor_id": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"},
+          "evidence_refs": {"$ref": "#/$defs/sourceEvidenceRefs"},
           "first_use": {"type": "string", "minLength": 1},
           "definition": {"type": ["string", "null"]},
           "unit_or_domain": {"type": ["string", "null"]},
           "variants": {"type": "array", "items": {"type": "string"}},
           "status": {"enum": ["defined_clear", "defined_remote", "undefined", "inconsistent", "overloaded", "bounded"]},
           "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+        }
+      }
+    },
+    "terminology_inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sources", "candidates"],
+      "properties": {
+        "sources": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["source_id", "method", "scope_anchor_id", "candidate_ids", "boundary_reason"],
+            "properties": {
+              "source_id": {"type": "string", "pattern": "^SRC-[0-9]{2,}$"},
+              "method": {"enum": ["pdf_ingestion", "declared_candidates", "bounded_manual_scope"]},
+              "scope_anchor_id": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"},
+              "candidate_ids": {
+                "type": "array", "uniqueItems": true,
+                "items": {"type": "string", "pattern": "^TRM-CAND-[0-9]{2,}$"}
+              },
+              "boundary_reason": {"type": ["string", "null"], "minLength": 1}
+            }
+          }
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": [
+              "id", "source_id", "candidate", "codepoints", "occurrence_anchor_ids",
+              "disposition", "term_id", "first_use_anchor_id", "definition_anchor_ids",
+              "definition_absence_anchor_ids", "reason"
+            ],
+            "properties": {
+              "id": {"type": "string", "pattern": "^TRM-CAND-[0-9]{2,}$"},
+              "source_id": {"type": "string", "pattern": "^SRC-[0-9]{2,}$"},
+              "candidate": {"type": "string", "minLength": 1},
+              "codepoints": {
+                "type": "array", "uniqueItems": true,
+                "items": {"type": "string", "pattern": "^U\\+[0-9A-F]{4,6}$"}
+              },
+              "occurrence_anchor_ids": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "items": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"}
+              },
+              "disposition": {
+                "enum": [
+                  "mapped_term", "standard_unambiguous_notation", "prose_noise",
+                  "extraction_artifact", "non_load_bearing"
+                ]
+              },
+              "term_id": {"type": ["string", "null"], "minLength": 1},
+              "first_use_anchor_id": {"type": ["string", "null"], "pattern": "^ANC-[0-9]{2,}$"},
+              "definition_anchor_ids": {
+                "type": "array", "uniqueItems": true,
+                "items": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"}
+              },
+              "definition_absence_anchor_ids": {
+                "type": "array", "uniqueItems": true,
+                "items": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"}
+              },
+              "reason": {"type": "string", "minLength": 1}
+            }
+          }
         }
       }
     },
@@ -110,6 +192,128 @@
         "provisional_or_unsupported_links": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "smallest_changes": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+      }
+    },
+    "argument_audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "strongest_supported_contribution", "optional_validation_opportunities",
+        "economic_links", "comparison_protocols", "result_relationships",
+        "evidence_objects", "magnitude_assessments", "transport_assessments"
+      ],
+      "properties": {
+        "strongest_supported_contribution": {"type": "string", "minLength": 1},
+        "optional_validation_opportunities": {
+          "type": "array", "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "economic_links": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": [
+              "id", "headline_claim_ids", "coverage_unit_ids", "economic_question",
+              "starting_object", "actor_or_constraint_map", "intermediate_objects",
+              "endpoint", "warrant", "benchmark", "scale_or_domain",
+              "object_roles", "alternative_channels", "alternative_orderings",
+              "alternative_assessment", "discriminating_evidence", "status", "contribution_after_narrowing",
+              "boundary", "evidence_refs", "finding_ids"
+            ],
+            "properties": {
+              "id": {"type": "string", "pattern": "^ARG-[0-9]{2,}$"},
+              "headline_claim_ids": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "items": {"type": "string", "pattern": "^CLM-[0-9]{2,}$"}
+              },
+              "coverage_unit_ids": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              },
+              "economic_question": {"type": "string", "minLength": 1},
+              "starting_object": {"type": "string", "minLength": 1},
+              "actor_or_constraint_map": {
+                "type": "array", "items": {"type": "string", "minLength": 1}
+              },
+              "intermediate_objects": {
+                "type": "array", "items": {"type": "string", "minLength": 1}
+              },
+              "endpoint": {"type": "string", "minLength": 1},
+              "warrant": {"type": "string", "minLength": 1},
+              "benchmark": {"type": "string", "minLength": 1},
+              "scale_or_domain": {"type": "string", "minLength": 1},
+              "object_roles": {
+                "type": "array", "minItems": 1,
+                "items": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["object", "role", "reason"],
+                  "properties": {
+                    "object": {"type": "string", "minLength": 1},
+                    "role": {"enum": ["target", "input_or_treatment", "mechanism", "prerequisite", "proxy", "outcome", "consequence", "validation", "background", "other"]},
+                    "reason": {"type": "string", "minLength": 1}
+                  }
+                }
+              },
+              "alternative_channels": {
+                "type": "array", "items": {"type": "string", "minLength": 1}
+              },
+              "alternative_orderings": {
+                "type": "array", "items": {"type": "string", "minLength": 1}
+              },
+              "alternative_assessment": {"type": "string", "minLength": 1},
+              "discriminating_evidence": {"type": "string", "minLength": 1},
+              "status": {"enum": ["convincing", "partially_supported", "unsupported", "bounded"]},
+              "contribution_after_narrowing": {"type": "string", "minLength": 1},
+              "boundary": {"oneOf": [{"$ref": "#/$defs/argumentBoundary"}, {"type": "null"}]},
+              "evidence_refs": {"$ref": "#/$defs/evidenceRefs"},
+              "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+            },
+            "allOf": [
+              {"if": {"properties": {"status": {"const": "bounded"}}}, "then": {"properties": {"boundary": {"$ref": "#/$defs/argumentBoundary"}}}, "else": {"properties": {"boundary": {"type": "null"}}}}
+            ]
+          }
+        },
+        "comparison_protocols": {"$ref": "#/$defs/comparisonProtocols"},
+        "result_relationships": {"$ref": "#/$defs/resultRelationships"},
+        "evidence_objects": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": [
+              "id", "label", "claim_ids", "coverage_unit_ids", "role", "provenance",
+              "relevance_to_argument", "status", "accounting", "evidence_refs",
+              "boundary", "finding_ids"
+            ],
+            "properties": {
+              "id": {"type": "string", "pattern": "^OBJ-[0-9]{2,}$"},
+              "label": {"type": "string", "minLength": 1},
+              "claim_ids": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "items": {"type": "string", "pattern": "^CLM-[0-9]{2,}$"}
+              },
+              "coverage_unit_ids": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              },
+              "role": {"enum": ["headline", "secondary", "mechanism", "heterogeneity", "diagnostic", "validation", "welfare", "robustness", "input", "other"]},
+              "provenance": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "items": {"enum": ["motivated", "promised", "preregistered", "collected", "elicited", "derived", "calibrated", "simulated", "modeled", "cited", "other"]}
+              },
+              "relevance_to_argument": {"type": "string", "minLength": 1},
+              "status": {"enum": ["accounted_for", "partially_accounted", "unexplained_omission", "bounded"]},
+              "accounting": {"type": "string", "minLength": 1},
+              "evidence_refs": {"$ref": "#/$defs/evidenceRefs"},
+              "boundary": {"oneOf": [{"$ref": "#/$defs/argumentBoundary"}, {"type": "null"}]},
+              "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+            },
+            "allOf": [
+              {"if": {"properties": {"status": {"const": "bounded"}}}, "then": {"properties": {"boundary": {"$ref": "#/$defs/argumentBoundary"}}}, "else": {"properties": {"boundary": {"type": "null"}}}}
+            ]
+          }
+        },
+        "magnitude_assessments": {"$ref": "#/$defs/magnitudeAssessments"},
+        "transport_assessments": {"$ref": "#/$defs/transportAssessments"}
       }
     },
     "writing_audit": {
@@ -126,5 +330,310 @@
         "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
       }
     }
-  }
+  },
+  "$defs": {
+    "sourceEvidenceRefs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "id", "purpose"],
+        "properties": {
+          "kind": {"enum": ["anchor", "finding_evidence", "computation", "external_support"]},
+          "id": {"type": "string", "minLength": 1},
+          "purpose": {"enum": ["direct_support", "checked_absence"]}
+        },
+        "allOf": [
+          {"if": {"properties": {"kind": {"const": "anchor"}}, "required": ["kind"]}, "then": {"properties": {"id": {"pattern": "^ANC-[0-9]{2,}$"}}}},
+          {"if": {"properties": {"kind": {"const": "finding_evidence"}}, "required": ["kind"]}, "then": {"properties": {"id": {"pattern": "^EVD-[A-Z0-9_-]+$"}}}},
+          {"if": {"properties": {"kind": {"const": "computation"}}, "required": ["kind"]}, "then": {"properties": {"id": {"pattern": "^CMP-[0-9]{2,}$"}}}},
+          {"if": {"properties": {"kind": {"const": "external_support"}}, "required": ["kind"]}, "then": {"properties": {"id": {"pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"}}}}
+        ]
+      }
+    },
+    "evidenceRefs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "id"],
+        "properties": {
+          "kind": {"enum": ["anchor", "finding_evidence", "computation", "external_support", "external_source"]},
+          "id": {"type": "string", "minLength": 1}
+        },
+        "allOf": [
+          {"if": {"properties": {"kind": {"const": "anchor"}}, "required": ["kind"]}, "then": {"properties": {"id": {"pattern": "^ANC-[0-9]{2,}$"}}}},
+          {"if": {"properties": {"kind": {"const": "finding_evidence"}}, "required": ["kind"]}, "then": {"properties": {"id": {"pattern": "^EVD-[A-Z0-9_-]+$"}}}},
+          {"if": {"properties": {"kind": {"const": "computation"}}, "required": ["kind"]}, "then": {"properties": {"id": {"pattern": "^CMP-[0-9]{2,}$"}}}},
+          {"if": {"properties": {"kind": {"const": "external_support"}}, "required": ["kind"]}, "then": {"properties": {"id": {"pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"}}}},
+          {"if": {"properties": {"kind": {"const": "external_source"}}, "required": ["kind"]}, "then": {"properties": {"id": {"pattern": "^EXT-[0-9]{2,}$"}}}}
+        ]
+      }
+    },
+    "argumentBoundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checked_scope", "status_basis", "reason", "missing_input",
+        "decisive_evidence_needed", "evidence_refs"
+      ],
+      "properties": {
+        "checked_scope": {"type": "string", "minLength": 1},
+        "status_basis": {
+          "enum": [
+            "absent_object_or_trigger", "outside_claim_scope", "inaccessible_source",
+            "unavailable_input", "unresolved_extraction_or_method", "other"
+          ]
+        },
+        "reason": {"type": "string", "minLength": 1},
+        "missing_input": {"type": ["string", "null"], "minLength": 1},
+        "decisive_evidence_needed": {"type": ["string", "null"], "minLength": 1},
+        "evidence_refs": {"$ref": "#/$defs/evidenceRefs"}
+      }
+    },
+    "comparisonProtocols": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "entries", "boundary", "notes"],
+      "properties": {
+        "status": {"enum": ["complete", "bounded", "not_applicable"]},
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": [
+              "id", "coverage_unit_ids", "label", "focal_condition",
+              "benchmark_condition", "intended_difference", "differential_elements",
+              "claim_ids", "supported_interpretation", "status", "evidence_refs",
+              "boundary", "finding_ids"
+            ],
+            "properties": {
+              "id": {"type": "string", "pattern": "^CPR-[0-9]{2,}$"},
+              "claim_ids": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "items": {"type": "string", "pattern": "^CLM-[0-9]{2,}$"}
+              },
+              "coverage_unit_ids": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              },
+              "label": {"type": "string", "minLength": 1},
+              "focal_condition": {"type": "string", "minLength": 1},
+              "benchmark_condition": {"type": "string", "minLength": 1},
+              "intended_difference": {"type": "string", "minLength": 1},
+              "differential_elements": {
+                "type": "array", "minItems": 1,
+                "items": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["element", "role", "occurs_before_target", "affected_objects", "relevance"],
+                  "properties": {
+                    "element": {"type": "string", "minLength": 1},
+                    "role": {"enum": ["intended_component", "cointervention", "measurement_or_prompt", "timing_or_information", "implementation", "sample_or_support", "other"]},
+                    "occurs_before_target": {"type": ["boolean", "null"]},
+                    "affected_objects": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                    "relevance": {"type": "string", "minLength": 1}
+                  }
+                }
+              },
+              "supported_interpretation": {"type": "string", "minLength": 1},
+              "status": {"enum": ["clean", "compound_but_bounded", "attribution_not_isolated", "reactive_or_primed", "bounded"]},
+              "evidence_refs": {"$ref": "#/$defs/evidenceRefs"},
+              "boundary": {"oneOf": [{"$ref": "#/$defs/argumentBoundary"}, {"type": "null"}]},
+              "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+            },
+            "allOf": [
+              {"if": {"properties": {"status": {"const": "bounded"}}}, "then": {"properties": {"boundary": {"$ref": "#/$defs/argumentBoundary"}}}, "else": {"properties": {"boundary": {"type": "null"}}}}
+            ]
+          }
+        },
+        "boundary": {"oneOf": [{"$ref": "#/$defs/argumentBoundary"}, {"type": "null"}]},
+        "notes": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "complete"}}}, "then": {"properties": {"entries": {"minItems": 1}, "boundary": {"type": "null"}}}},
+        {"if": {"properties": {"status": {"const": "not_applicable"}}}, "then": {"properties": {"entries": {"maxItems": 0}, "boundary": {"$ref": "#/$defs/argumentBoundary"}}}},
+        {"if": {"properties": {"status": {"const": "bounded"}}}, "then": {"properties": {"boundary": {"$ref": "#/$defs/argumentBoundary"}}}}
+      ]
+    },
+    "resultRelationships": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "entries", "boundary", "notes"],
+      "properties": {
+        "status": {"enum": ["complete", "bounded", "not_applicable"]},
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": [
+              "id", "claim_ids", "coverage_unit_ids", "objects", "asserted_relationship",
+              "comparability", "observed_relationship", "status", "evidence_refs",
+              "boundary", "finding_ids"
+            ],
+            "properties": {
+              "id": {"type": "string", "pattern": "^REL-[0-9]{2,}$"},
+              "claim_ids": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "items": {"type": "string", "pattern": "^CLM-[0-9]{2,}$"}
+              },
+              "coverage_unit_ids": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              },
+              "objects": {
+                "type": "array", "minItems": 2,
+                "items": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["label", "role", "comparison", "population_or_domain", "horizon", "estimand_or_object"],
+                  "properties": {
+                    "label": {"type": "string", "minLength": 1},
+                    "role": {"type": "string", "minLength": 1},
+                    "comparison": {"type": "string", "minLength": 1},
+                    "population_or_domain": {"type": "string", "minLength": 1},
+                    "horizon": {"type": "string", "minLength": 1},
+                    "estimand_or_object": {"type": "string", "minLength": 1}
+                  }
+                }
+              },
+              "asserted_relationship": {"type": "string", "minLength": 1},
+              "comparability": {"enum": ["same_object", "partially_comparable", "different_objects", "bounded"]},
+              "observed_relationship": {"type": "string", "minLength": 1},
+              "status": {"enum": ["coherent", "explained_difference", "unexplained_tension", "contradiction", "bounded"]},
+              "evidence_refs": {"$ref": "#/$defs/evidenceRefs"},
+              "boundary": {"oneOf": [{"$ref": "#/$defs/argumentBoundary"}, {"type": "null"}]},
+              "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+            },
+            "allOf": [
+              {"if": {"properties": {"status": {"const": "bounded"}}}, "then": {"properties": {"boundary": {"$ref": "#/$defs/argumentBoundary"}}}, "else": {"properties": {"boundary": {"type": "null"}}}}
+            ]
+          }
+        },
+        "boundary": {"oneOf": [{"$ref": "#/$defs/argumentBoundary"}, {"type": "null"}]},
+        "notes": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "complete"}}}, "then": {"properties": {"entries": {"minItems": 1}, "boundary": {"type": "null"}}}},
+        {"if": {"properties": {"status": {"const": "not_applicable"}}}, "then": {"properties": {"entries": {"maxItems": 0}, "boundary": {"$ref": "#/$defs/argumentBoundary"}}}},
+        {"if": {"properties": {"status": {"const": "bounded"}}}, "then": {"properties": {"boundary": {"$ref": "#/$defs/argumentBoundary"}}}}
+      ]
+    },
+    "magnitudeAssessments": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "entries", "boundary", "notes"],
+      "properties": {
+        "status": {"enum": ["complete", "bounded", "not_applicable"]},
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": [
+              "id", "claim_ids", "coverage_unit_ids", "estimate_or_value", "unit",
+              "comparison_or_denominator", "benchmark_or_baseline", "support_or_feasible_range",
+              "cell_or_case_support", "uncertainty", "interpretation", "status",
+              "computation_id", "evidence_refs", "boundary", "finding_ids"
+            ],
+            "properties": {
+              "id": {"type": "string", "pattern": "^MAG-[0-9]{2,}$"},
+              "claim_ids": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "items": {"type": "string", "pattern": "^CLM-[0-9]{2,}$"}
+              },
+              "coverage_unit_ids": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              },
+              "estimate_or_value": {"type": "string", "minLength": 1},
+              "unit": {"type": "string", "minLength": 1},
+              "comparison_or_denominator": {"type": "string", "minLength": 1},
+              "benchmark_or_baseline": {"type": "string", "minLength": 1},
+              "support_or_feasible_range": {"type": "string", "minLength": 1},
+              "cell_or_case_support": {"type": "string", "minLength": 1},
+              "uncertainty": {"type": "string", "minLength": 1},
+              "interpretation": {"type": "string", "minLength": 1},
+              "status": {"enum": ["interpretable", "missing_context", "internally_infeasible", "bounded"]},
+              "computation_id": {"type": ["string", "null"], "pattern": "^CMP-[0-9]{2,}$"},
+              "evidence_refs": {"$ref": "#/$defs/evidenceRefs"},
+              "boundary": {"oneOf": [{"$ref": "#/$defs/argumentBoundary"}, {"type": "null"}]},
+              "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+            },
+            "allOf": [
+              {"if": {"properties": {"status": {"const": "bounded"}}}, "then": {"properties": {"boundary": {"$ref": "#/$defs/argumentBoundary"}}}, "else": {"properties": {"boundary": {"type": "null"}}}}
+            ]
+          }
+        },
+        "boundary": {"oneOf": [{"$ref": "#/$defs/argumentBoundary"}, {"type": "null"}]},
+        "notes": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "complete"}}}, "then": {"properties": {"entries": {"minItems": 1}, "boundary": {"type": "null"}}}},
+        {"if": {"properties": {"status": {"const": "not_applicable"}}}, "then": {"properties": {"entries": {"maxItems": 0}, "boundary": {"$ref": "#/$defs/argumentBoundary"}}}},
+        {"if": {"properties": {"status": {"const": "bounded"}}}, "then": {"properties": {"boundary": {"$ref": "#/$defs/argumentBoundary"}}}}
+      ]
+    },
+    "transportAssessments": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "entries", "boundary", "notes"],
+      "properties": {
+        "status": {"enum": ["complete", "bounded", "not_applicable"]},
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": [
+              "id", "claim_ids", "coverage_unit_ids", "source_population_or_domain",
+              "target_population_or_domain", "transport_basis", "overlap_or_support",
+              "adjustment_or_validation", "supported_scope", "status", "evidence_refs",
+              "boundary", "finding_ids"
+            ],
+            "properties": {
+              "id": {"type": "string", "pattern": "^TRN-[0-9]{2,}$"},
+              "claim_ids": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "items": {"type": "string", "pattern": "^CLM-[0-9]{2,}$"}
+              },
+              "coverage_unit_ids": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              },
+              "source_population_or_domain": {"type": "string", "minLength": 1},
+              "target_population_or_domain": {"type": "string", "minLength": 1},
+              "transport_basis": {"type": "string", "minLength": 1},
+              "overlap_or_support": {"type": "string", "minLength": 1},
+              "adjustment_or_validation": {"type": "string", "minLength": 1},
+              "supported_scope": {"type": "string", "minLength": 1},
+              "status": {"enum": ["supported", "claim_narrowed", "unsupported", "bounded"]},
+              "evidence_refs": {"$ref": "#/$defs/evidenceRefs"},
+              "boundary": {"oneOf": [{"$ref": "#/$defs/argumentBoundary"}, {"type": "null"}]},
+              "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+            },
+            "allOf": [
+              {"if": {"properties": {"status": {"const": "bounded"}}}, "then": {"properties": {"boundary": {"$ref": "#/$defs/argumentBoundary"}}}, "else": {"properties": {"boundary": {"type": "null"}}}}
+            ]
+          }
+        },
+        "boundary": {"oneOf": [{"$ref": "#/$defs/argumentBoundary"}, {"type": "null"}]},
+        "notes": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "complete"}}}, "then": {"properties": {"entries": {"minItems": 1}, "boundary": {"type": "null"}}}},
+        {"if": {"properties": {"status": {"const": "not_applicable"}}}, "then": {"properties": {"entries": {"maxItems": 0}, "boundary": {"$ref": "#/$defs/argumentBoundary"}}}},
+        {"if": {"properties": {"status": {"const": "bounded"}}}, "then": {"properties": {"boundary": {"$ref": "#/$defs/argumentBoundary"}}}}
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"schema_version": {"const": "0.2"}}, "required": ["schema_version"]},
+      "then": {
+        "required": ["argument_audit"],
+        "properties": {
+          "claim_families": {
+            "items": {"required": ["anchor_ids"]}
+          }
+        }
+      }
+    }
+  ]
 }

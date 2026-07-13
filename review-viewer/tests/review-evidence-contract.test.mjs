@@ -25,6 +25,7 @@ test("viewer evidence kinds stay synchronized with the canonical findings schema
   assert.equal(isReviewEvidenceType("computation"), true);
   assert.equal(isReviewEvidenceType("unknown_future_type"), false);
   assert.equal(isReviewEvidenceType(null), false);
+  assert.ok(schema.$defs.evidence.properties.support_record_id, "viewer provenance must track the canonical support-record field");
 });
 
 test("accepts a canonical v0.4 computation evidence record", () => {
@@ -35,6 +36,7 @@ test("accepts a canonical v0.4 computation evidence record", () => {
     anchor_id: null,
     computation_id: "CMP-01",
     source_record_id: null,
+    support_record_id: null,
     source: "reviewer recomputation",
     locator: {
       section: "Calibration",
@@ -52,6 +54,13 @@ test("accepts a canonical v0.4 computation evidence record", () => {
   assert.equal(isValidReviewEvidence(computationEvidence, "0.4"), true);
   assert.equal(isValidReviewEvidence({ ...computationEvidence, type: "unsupported" }, "0.4"), false);
   assert.equal(isValidReviewEvidence({ ...computationEvidence, representation: undefined }, "0.4"), false);
+  assert.equal(isValidReviewEvidence({ ...computationEvidence, id: "bad-id" }, "0.4"), false);
+  assert.equal(isValidReviewEvidence({ ...computationEvidence, anchor_id: "missing-prefix" }, "0.4"), false);
+  assert.equal(isValidReviewEvidence({ ...computationEvidence, support_record_id: "EXT-01-SUP-01" }, "0.4"), true);
+  assert.equal(isValidReviewEvidence({ ...computationEvidence, support_record_id: "EXT-01" }, "0.4"), false);
+  assert.equal(isValidReviewEvidence({ ...computationEvidence, locator: { page: 0 } }, "0.4"), false);
+  assert.equal(isValidReviewEvidence({ ...computationEvidence, locator: { unexpected: "field" } }, "0.4"), false);
+  assert.equal(isValidReviewEvidence({ ...computationEvidence, unexpected: true }, "0.4"), false);
 });
 
 test("loads and renders computation evidence through the viewer ledger contract", async () => {

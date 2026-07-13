@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.1",
+  "schema_version": "0.2",
   "review_id": "synthetic-valid-001",
   "scope": {
     "inventory_complete_within_assessment_boundary": true,
@@ -30,11 +30,18 @@
           "coverage_unit_ids": [
             "paper"
           ],
+          "evidence_refs": [
+            {"kind": "finding_evidence", "id": "EVD-LOGIC-01-A"}
+          ],
           "evidence_locators": [
             {
-              "source": "manuscript coverage inventory",
-              "locator": "paper",
-              "content": "The equality case permits two optimal actions."
+              "source": "synthetic-paper.md",
+              "locator": "Section 3, paragraph 1",
+              "content": "The equilibrium action is unique for every parameter value.",
+              "coverage_unit_id": "paper",
+              "anchor_id": "ANC-01",
+              "representation": "verbatim",
+              "record_ref": {"kind": "finding_evidence", "id": "EVD-LOGIC-01-A"}
             }
           ],
           "evidence": "The equality case permits two optimal actions.",
@@ -68,11 +75,18 @@
           "coverage_unit_ids": [
             "paper"
           ],
+          "evidence_refs": [
+            {"kind": "finding_evidence", "id": "EVD-LOGIC-01-A"}
+          ],
           "evidence_locators": [
             {
-              "source": "manuscript coverage inventory",
-              "locator": "paper",
-              "content": "The stated domain includes equality, but the proposition asserts strict uniqueness."
+              "source": "synthetic-paper.md",
+              "locator": "Section 3, paragraph 1",
+              "content": "The equilibrium action is unique for every parameter value.",
+              "coverage_unit_id": "paper",
+              "anchor_id": "ANC-01",
+              "representation": "verbatim",
+              "record_ref": {"kind": "finding_evidence", "id": "EVD-LOGIC-01-A"}
             }
           ],
           "evidence": "The stated domain includes equality, but the proposition asserts strict uniqueness.",
@@ -120,11 +134,18 @@
           "coverage_unit_ids": [
             "paper"
           ],
+          "evidence_refs": [
+            {"kind": "anchor", "id": "ANC-01"}
+          ],
           "evidence_locators": [
             {
-              "source": "manuscript coverage inventory",
-              "locator": "paper",
-              "content": "The static timing is explicit; the unresolved issue is the equality boundary rather than timing."
+              "source": "synthetic-paper.md",
+              "locator": "Section 3, paragraph 1",
+              "content": "The equilibrium action is unique for every parameter value.",
+              "coverage_unit_id": "paper",
+              "anchor_id": "ANC-01",
+              "representation": "verbatim",
+              "record_ref": {"kind": "anchor", "id": "ANC-01"}
             }
           ],
           "evidence": "The static timing is explicit; the unresolved issue is the equality boundary rather than timing.",

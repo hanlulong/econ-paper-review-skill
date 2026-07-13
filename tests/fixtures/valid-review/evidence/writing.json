@@ -1,6 +1,9 @@
 {
-  "schema_version": "0.3",
+  "schema_version": "0.4",
   "review_id": "synthetic-valid-001",
+  "assessment_summary": "The synthetic manuscript is concise and readable. One objective subject-verb agreement error requires correction; no broader prose problem is present.",
+  "terminology_summary": "The fixture uses its equilibrium and boundary terminology consistently. No notation variant requires harmonization.",
+  "exhibit_summary": "The synthetic fixture contains no tables or figures, so no exhibit-writing issue is applicable.",
   "paper_type_lens": "Concise formal-theory paper with a proposition and boundary case.",
   "strengths": [
     "The synthetic manuscript states its model and proposition compactly."
@@ -12,6 +15,10 @@
       "what_works": "The economic object and boundary case are easy to locate.",
       "reader_friction": "One subject-verb agreement error interrupts the proposition summary.",
       "revision_direction": "Correct the verb while preserving the concise structure.",
+      "coverage_unit_ids": ["paper"],
+      "evidence_refs": [
+        {"kind": "finding_evidence", "id": "EVD-WRT-01-A", "purpose": "direct_support"}
+      ],
       "finding_ids": ["WRT-01"]
     }
   ],
@@ -23,6 +30,9 @@
   "scope": {
     "inventory_complete_within_assessment_boundary": true,
     "sources_checked": ["Complete synthetic manuscript and rendered fixture"],
+    "source_ids": ["SRC-01"],
+    "scope_anchor_ids": ["ANC-03"],
+    "coverage_unit_ids": ["paper"],
     "render_checked": true,
     "boundary_notes": "The fixture is one paragraph with no citations, bibliography, or submission context."
   },
@@ -31,14 +41,16 @@
       "id": "WRT-01",
       "kind": "grammar",
       "status": "issue",
-      "locator": "Section 3.1, proposition summary",
+      "locator": "Section 3, paragraph 2",
       "quote": "The proposition characterize the model's comparative static.",
       "correction": "The proposition characterizes the model's comparative static.",
       "occurrences": [
         {
-          "locator": "Section 3.1, proposition summary",
+          "locator": "Section 3, paragraph 2",
           "quote": "The proposition characterize the model's comparative static.",
           "correction": "The proposition characterizes the model's comparative static.",
+          "anchor_id": "ANC-02",
+          "representation": "verbatim",
           "render_verification": "verified_render",
           "source_provenance": "main_manuscript"
         }
@@ -47,6 +59,10 @@
       "priority": "required_copyedit",
       "render_verification": "verified_render",
       "notes": "The singular grammatical subject is visible in the source and rendered fixture.",
+      "coverage_unit_ids": ["paper"],
+      "evidence_refs": [
+        {"kind": "finding_evidence", "id": "EVD-WRT-01-A", "purpose": "direct_support"}
+      ],
       "finding_ids": ["WRT-01"]
     }
   ],
@@ -58,6 +74,11 @@
       "preferred": "equilibrium action",
       "status": "consistent",
       "locations_checked": "Complete synthetic manuscript",
+      "coverage_unit_ids": ["paper"],
+      "evidence_refs": [
+        {"kind": "anchor", "id": "ANC-01", "purpose": "direct_support"},
+        {"kind": "anchor", "id": "ANC-03", "purpose": "checked_absence"}
+      ],
       "finding_ids": []
     }
   ],

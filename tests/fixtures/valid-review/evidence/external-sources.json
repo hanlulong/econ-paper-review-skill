@@ -1,6 +1,37 @@
 {
-  "schema_version": "0.1",
+  "schema_version": "0.3",
   "review_id": "synthetic-valid-001",
   "search_confidentiality": "forbidden",
-  "sources": []
+  "sources": [],
+  "frontier_audit": {
+    "status": "bounded",
+    "scope_summary": "Closest prior work on the synthetic note's equilibrium-uniqueness contribution.",
+    "contribution_dimensions": [
+      "theoretical result"
+    ],
+    "assessed_at": "2026-07-13",
+    "query_families": [
+      {
+        "id": "QRYF-01",
+        "family": "economic question and closest mechanism",
+        "rationale": "This family would identify the nearest result against which the uniqueness claim should be compared.",
+        "status": "blocked_by_policy",
+        "query_logs": [],
+        "boundary": {
+          "reason": "outbound_search_forbidden",
+          "affected_scope": "Closest-paper and priority assessment",
+          "impact": "No external novelty conclusion is made from memory.",
+          "completion_condition": "Permit a confidentiality-safe outbound literature search."
+        }
+      }
+    ],
+    "closest_papers": [],
+    "boundary": {
+      "reason": "outbound_search_forbidden",
+      "affected_scope": "Closest-paper and priority assessment",
+      "impact": "The literature frontier remains bounded and no named novelty comparison is asserted.",
+      "completion_condition": "Permit a confidentiality-safe outbound literature search."
+    },
+    "notes": "The boundary records lack of search permission rather than evidence of novelty."
+  }
 }

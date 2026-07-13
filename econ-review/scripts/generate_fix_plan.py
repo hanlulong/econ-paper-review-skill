@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from safe_io import atomic_write_text  # noqa: E402
+from safe_io import atomic_write_text, strict_json_load  # noqa: E402
 
 
 NAVIGATION_START = "<!-- review-navigation:start -->"
@@ -20,7 +20,7 @@ NAVIGATION_END = "<!-- review-navigation:end -->"
 
 
 def load(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = strict_json_load(path)
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain a JSON object")
     return value
@@ -34,7 +34,7 @@ def active_findings(ledger: dict[str, Any]) -> list[dict[str, Any]]:
         row for row in rows
         if isinstance(row, dict)
         and row.get("status") not in {"dismissed", "resolved"}
-        and row.get("severity") != "info"
+        and row.get("severity") in {"critical", "major", "minor", "info"}
     ]
 
 
@@ -217,7 +217,7 @@ def render(review_dir: Path) -> str:
         "",
         review_navigation(review_dir),
         "",
-        f"Objective: make the paper more publishable for {venue} by resolving the verified concerns below.",
+        f"Objective: improve the paper for {venue} by resolving the verified concerns below.",
         "",
         "## How to use this plan",
         "",

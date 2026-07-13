@@ -6,7 +6,7 @@ Review Desk is the local interaction layer for `econ-review`. It reads the canon
 
 ```bash
 nvm use
-npm install
+npm ci
 npm run dev
 ```
 
@@ -23,9 +23,13 @@ Add `review-manifest.json` to expose every intended Markdown document—includin
 
 Add `synthesis.json` to show the editorial posture, overall assessment, severity tally, and principal concerns above the working queue. Older packages without synthesis still load. Relative links among manifest-declared Markdown documents switch the in-app document reader instead of navigating away. For a PDF-only review, include the checked, source-specific generated Markdown path named by `evidence/source-manifest.json` (normally under `evidence/pdf-ingestion/<source-id>/`); the viewer uses that generated reading surface while the table and figure manifests control which render crops are exposed.
 
-Folder mode reads the generated package's canonical `evidence/tables.json`, `evidence/figures.json`, and `evidence/computations.json` manifests. It resolves only manifest-referenced PNG/JPEG/WebP renders; computation artifacts are never executed or opened, while their recorded tool, method, anchors, result, tolerance, relative path, and hash remain inspectable. Legacy root-level manifests remain supported as fallbacks. The only repository fixture that may be bundled is a short synthetic theory review; real manuscripts must be opened through the local picker unless separately cleared for publication.
+Add `finalization.json` to let the viewer verify package finality rather than merely repeat `run.json`. The viewer checks the receipt's review ID, declared contract, version-appropriate gates, complete local artifact inventory, and every declared SHA-256 hash. A missing, malformed, stale, incomplete, or hash-mismatched receipt leaves the package readable but explicitly unverified. Here, **verified** means that the selected package bytes match this unsigned integrity receipt; it does not authenticate the reviewer, author, or origin, and it does not replace the Python validator's full semantic checks. `run.json.status = "complete"` and an empty findings ledger are never presented as proof of finality on their own.
 
-The loader rejects mismatched review IDs, duplicate finding IDs, oversized files, and malformed minimum structures. Loading a review without a manuscript clears the previous manuscript instead of retaining stale context. Files stay in the browser; this local app does not upload them or fetch external review content.
+Current full packages may include source-bound claims, writing audit v0.4, and the granular source inventory inside `evidence/coverage.json`. The viewer integrity-checks these artifacts through the receipt and presents their manifest-declared readable Markdown documents. It deliberately does not duplicate the Python validator's evolving domain semantics in browser code, so new paper types and general framework additions remain displayable without paper-specific viewer logic.
+
+Folder mode reads the generated package's canonical `evidence/tables.json`, `evidence/figures.json`, and `evidence/computations.json` manifests. It supports legacy table/figure path lists and current `rendered_assets`, preserves declared crop/full-page roles, and resolves only manifest-referenced PNG/JPEG/WebP renders. Local images must match their file signature and extension before an inert image blob is created; current table and figure assets must also match their declared SHA-256 hash. Computation artifacts are never executed or opened, while their recorded tool, method, anchors, result, tolerance, relative path, and hash remain inspectable. Legacy root-level manifests remain supported as fallbacks. The only repository fixture that may be bundled is a short synthetic theory review; real manuscripts must be opened through the local picker unless separately cleared for publication.
+
+The loader rejects mismatched review IDs—including exhibit manifests—duplicate finding or exhibit labels, unsafe or ambiguous package paths, oversized files, hash-mismatched current figure renders, disguised image files, and malformed minimum structures. Loading a review without a manuscript clears the previous manuscript instead of retaining stale context. Files stay in the browser; this local app does not upload them or fetch external review content. Report links open only when they resolve to a declared local review document or an explicit HTTP(S) destination; other schemes and undeclared local paths remain inert.
 
 ## Interaction model
 
@@ -38,13 +42,13 @@ The loader rejects mismatched review IDs, duplicate finding IDs, oversized files
 - Use `J` and `K` to move, `A` to mark ready for recheck, `C` to challenge, `P` to defer, `N` to focus the response, and `/` to search. Shortcuts work from noninteractive workspace surfaces; visible controls provide the same workflow.
 - On narrow screens, use the Queue / Comment / Evidence switcher rather than scrolling through three stacked panes. The Comment pane includes the selected evidence excerpt in the requested issue → evidence → concern sequence; Evidence opens the full source context.
 - Mark a finding for recheck, challenge, or deferral in one click; add an optional note when useful.
-- Status changes offer a short undo action. Undo appends a reversal event rather than erasing the original action. Note revisions and imports are also recorded in the v0.3 event chain.
+- Status changes offer a short undo action. Undo appends a reversal event rather than erasing the original action. Note revisions and imports are also recorded in the v0.3 event chain, which is visible in each comment's collapsed Action history.
 - Export or import a schema-validated `review-actions.json` handoff. Browser persistence is namespaced by both review ID and a SHA-256 ledger fingerprint: a changed ledger reconciles exact stable finding IDs with warnings while retaining the complete prior-fingerprint payload, including unmatched history, under its original local key. A different review ID is never applied. Imports merge only compatible append-only event chains, keep newer local work, and report stale, conflicting, and unmatched entries. v0.1/v0.2 handoffs remain importable.
 - Exported handoffs use portable manuscript labels and optional content hashes; they do not copy absolute local paths, usernames, or confidential folder names from the review package.
 - Bundled-review URLs preserve the overview, exact comment or document, evidence item, queue order, and filters; browser Back and Forward restore those views. Free-text search is intentionally excluded from URLs to avoid leaking sensitive terms.
 - The menu can keep actions only in the current tab or clear every saved snapshot for the active review. Switching to tab-only mode also removes its saved queue preference.
 
-Canonical review files remain read-only. Local actions use the external states `open`, `ready_for_recheck`, `challenged`, and `deferred`, with timestamps and append-only events. Notes are optional and committed as revisions on blur rather than on every keystroke. Only a later review can verify resolution or dismiss a challenge. Notes are capped at 10,000 characters per finding, and the viewer keeps in-memory work available with a visible warning if browser persistence is unavailable. Draft, blocked, verification-failed, and otherwise unverified packages carry a persistent non-final warning.
+Canonical review files remain read-only. Local actions use the external states `open`, `ready_for_recheck`, `challenged`, and `deferred`, with timestamps and append-only events. Notes are optional and committed as revisions on blur rather than on every keystroke. Only a later review can verify resolution or dismiss a challenge. Notes are capped at 10,000 characters per finding, and the viewer keeps in-memory work available with a visible warning if browser persistence is unavailable. Draft, blocked, verification-failed, and receipt-unverified packages carry a persistent package-status warning.
 
 ## Publication boundary
 
@@ -60,8 +64,9 @@ ALLOW_PUBLISH=1 npm run build
 
 ```bash
 npm run lint
+npx tsc --noEmit
 npm test
 npm audit
 ```
 
-The test command performs an explicitly authorized fixture build, runs the viewer and publication-guard tests, and removes the generated public bundles on exit. Bundle synchronization validates and stages the complete package—including every manifest-referenced exhibit render—before atomically replacing any existing generated bundle. The local viewer and generic build support Node.js 22.14 or later; `.nvmrc` pins the preferred local version (22.22.2). Runtime scripts explicitly enable Node's erasable-TypeScript support so the same commands also work before it became enabled by default in Node 22.18. On runtimes that expose `module.registerHooks`, the same build automatically includes the Cloudflare worker adapter. Older supported runtimes use a security-header-preserving local SSR adapter for previews and tests; that fallback does not replace the Cloudflare deployment adapter.
+The test command performs an explicitly authorized fixture build, runs the viewer and publication-guard tests, and removes the generated public bundles on exit. Bundle synchronization verifies the source finalization receipt, copies its complete canonical artifact inventory without path flattening, then verifies and stages the result before atomically replacing any existing generated bundle. The local viewer and generic build support Node.js 22.14 or later; `.nvmrc` pins the preferred local version (22.22.2). Runtime scripts explicitly enable Node's erasable-TypeScript support so the same commands also work before it became enabled by default in Node 22.18. On runtimes that expose `module.registerHooks`, the same build automatically includes the Cloudflare worker adapter. Older supported runtimes use a security-header-preserving local SSR adapter for previews and tests; that fallback does not replace the Cloudflare deployment adapter.

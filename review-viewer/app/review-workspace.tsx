@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, KeyboardEvent, lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, Component, KeyboardEvent, lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { MarkdownComponents } from "./markdown-content";
 import {
   generateReviewActionsPayload,
@@ -12,6 +12,7 @@ import {
   updateReviewAction,
   type ReviewActionDisposition,
   type ReviewActionEntry,
+  type ReviewActionEvent,
 } from "../lib/review-actions";
 import {
   clearBrowserReviewActions,
@@ -22,17 +23,23 @@ import {
   discoverReviewDocuments,
   REVIEW_DOCUMENT_GROUP_LABELS,
   resolveReviewDocumentLink,
+  safeExternalReviewDocumentHref,
   validateReviewDocumentManifest,
   type ReviewDocument,
 } from "../lib/review-documents";
+import { parseStrictJson } from "../lib/strict-json";
 import {
   inferReviewPackageRoot,
   matchReferencedImagePaths,
   normalizePackagePath,
+  referencedExhibitHashes,
   referencedExhibitPaths,
   relativeToReviewRoot,
+  reviewImageMediaType,
   selectReviewPackageFilePath,
   selectManuscriptPath,
+  sha256ReviewBytes,
+  validateExhibitManifest,
 } from "../lib/local-review-package";
 import {
   indexReviewComputations,
@@ -45,7 +52,11 @@ import { equationEvidencePresentation } from "../lib/review-equation-presentatio
 import { orderExhibitRenders, type ExhibitRender } from "../lib/review-exhibit-presentation";
 import { formatUserFacingLocator } from "../lib/review-locator";
 import { conciseSourceAnchorLabel, exactAnchorExcerpt, sourceAnchorPageLabel } from "../lib/review-manuscript-context";
-import { EvidenceSemanticFrame } from "../lib/review-text-evidence-presentation";
+import {
+  authorReportDisplayMarkdown,
+  evidenceDisplayText,
+  EvidenceSemanticFrame,
+} from "../lib/review-text-evidence-presentation";
 import {
   reviewEvidenceText as evidenceText,
   validateReviewLedger as validateLedger,
@@ -63,12 +74,21 @@ import {
   writeReviewUrlState,
 } from "../lib/review-view-state";
 import { validateActivatedBurdens, type ActivatedBurden } from "../lib/review-runtime-contracts";
+import {
+  NO_FINALIZATION_RECEIPT,
+  isFinalizationArtifactPath,
+  validateFinalizationReceipt,
+  verifyReviewFinalization,
+  type FinalizationTrust,
+} from "../lib/review-finalization";
+import { validateReviewRegistry, type ReviewRegistry } from "../lib/review-registry";
 
 type LocalStatus = ReviewActionDisposition;
 type Run = {
   schema_version?: string;
   review_id: string;
   paper_family: string;
+  mode?: "full" | "quick";
   target: string | { venue?: string | null; tier?: string } | null;
   counts: Record<string, number>;
   verification_passed: boolean;
@@ -113,24 +133,58 @@ type DetailMode = "overview" | "comment";
 type QueueOrder = "importance" | "paper";
 type ExhibitAsset = { key: string; label: string; kind: "figure" | "table"; pages: number[]; renders: ExhibitRender[]; missingPaths: string[] };
 type ExhibitManifest = { figures?: unknown[]; tables?: unknown[] };
-type ReviewRegistryEntry = { slug: string; title: string; base_path: string };
-type ReviewRegistry = { schema_version: number; default_review: string; reviews: ReviewRegistryEntry[] };
 type LoadedReviewDocument = ReviewDocument & { content: string };
 type SourceAnchor = { id: string; source_id: string; kind: string; start_char: number | null; end_char: number | null; content_sha256: string; locator: string };
 type SourceManifest = {
   schema_version: "0.1";
   review_id: string;
   anchors: SourceAnchor[];
-  sources?: Array<{ path?: string; extraction?: { path?: string } | null }>;
+  sources?: Array<{
+    id?: string;
+    role?: string;
+    path: string;
+    media_type?: string;
+    extraction?: { path: string } | null;
+  }>;
 };
 
 const MarkdownContent = lazy(() => import("./markdown-content"));
 
+class MarkdownRenderBoundary extends Component<
+  { source: string; children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidUpdate(previous: Readonly<{ source: string; children: ReactNode }>) {
+    if (this.state.failed && previous.source !== this.props.source) this.setState({ failed: false });
+  }
+
+  render() {
+    if (this.state.failed) {
+      return (
+        <div className="markdown-render-error" role="alert">
+          <strong>Formatted view unavailable</strong>
+          <span>The original review text remains available below.</span>
+          <pre>{this.props.source}</pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function RenderedMarkdown({ children, components }: { children: string; components?: MarkdownComponents }) {
   return (
-    <Suspense fallback={<span className="markdown-loading" role="status">Formatting review text…</span>}>
-      <MarkdownContent components={components}>{children}</MarkdownContent>
-    </Suspense>
+    <MarkdownRenderBoundary source={children}>
+      <Suspense fallback={<span className="markdown-loading" role="status">Formatting review text…</span>}>
+        <MarkdownContent components={components}>{children}</MarkdownContent>
+      </Suspense>
+    </MarkdownRenderBoundary>
   );
 }
 
@@ -155,7 +209,7 @@ function normalizedFilePath(file: File) {
 
 function parseJsonFile(fileName: string, text: string): unknown {
   try {
-    return JSON.parse(text);
+    return parseStrictJson(text);
   } catch (error) {
     const detail = error instanceof Error ? error.message : "invalid JSON syntax";
     throw new Error(`${fileName} contains invalid JSON: ${detail}`);
@@ -174,7 +228,8 @@ function EquationEvidence({
   embedded?: boolean;
 }) {
   const raw = content || "No equation evidence is available.";
-  const presentation = equationEvidencePresentation(raw, representation);
+  const display = evidenceDisplayText(raw, representation);
+  const presentation = equationEvidencePresentation(display, representation);
   const isProse = presentation.kind === "prose";
   const proseLabel = representation === "reviewer_observation" ? "Reviewer observation"
     : representation === "composite_comparison" ? "Reviewer comparison"
@@ -208,13 +263,14 @@ function EvidenceContent({
   const fallback = evidence?.type === "quote" ? "No quoted evidence is available."
     : ["code", "table_cell"].includes(evidence?.type || "") ? "No structured evidence is available."
       : "No narrative evidence is available.";
+  const display = evidenceDisplayText(content, evidence?.representation);
   const rendered = evidence?.type === "equation"
-    ? <EquationEvidence content={content} representation={evidence.representation} compact={compact} embedded />
+    ? <EquationEvidence content={display} representation={evidence.representation} compact={compact} embedded />
     : ["code", "table_cell"].includes(evidence?.type || "")
-      ? <pre className="structured-evidence">{content || fallback}</pre>
+      ? <pre className="structured-evidence">{display || fallback}</pre>
       : evidence?.type === "quote"
-        ? <RenderedMarkdown>{content || fallback}</RenderedMarkdown>
-        : <p className="prose-evidence">{content || fallback}</p>;
+        ? <RenderedMarkdown>{display || fallback}</RenderedMarkdown>
+        : <p className="prose-evidence">{display || fallback}</p>;
   return (
     <EvidenceSemanticFrame representation={evidence?.representation} compact={compact} collapsed={collapsed}>
       {rendered}
@@ -286,32 +342,61 @@ function manifestAssets(
   resolvePath: (path: string) => string | null,
 ) {
   const assets: Record<string, ExhibitAsset> = {};
+  const aliases = new Map<string, ExhibitAsset[]>();
   const add = (rows: unknown, kind: "figure" | "table", pathField: "render_paths" | "extraction_paths") => {
     if (!Array.isArray(rows)) return;
     for (const row of rows) {
       if (!isRecord(row) || typeof row.label !== "string") continue;
-      const rawPaths = Array.isArray(row[pathField]) ? row[pathField].filter((value): value is string => typeof value === "string") : [];
-      const resolved = rawPaths.map((path) => ({ path, resolved: resolvePath(path) }));
+      type RawExhibitAsset = { path: string; declaredRole?: "exhibit_crop" | "full_source_page"; pdfPage?: number | null };
+      const legacyPaths: RawExhibitAsset[] = Array.isArray(row[pathField])
+        ? row[pathField].filter((value): value is string => typeof value === "string").map((path) => ({ path }))
+        : [];
+      const currentAssets: RawExhibitAsset[] = Array.isArray(row.rendered_assets)
+        ? row.rendered_assets.flatMap((asset) => isRecord(asset) && typeof asset.path === "string"
+          ? [{
+              path: asset.path,
+              declaredRole: asset.render_type === "crop" ? "exhibit_crop" as const
+                : asset.render_type === "full_page" ? "full_source_page" as const
+                  : undefined,
+              pdfPage: Number.isInteger(asset.pdf_page) ? Number(asset.pdf_page) : null,
+            }]
+          : [])
+        : [];
+      const rawAssets = currentAssets.length ? currentAssets : legacyPaths;
+      const resolved = rawAssets.map((asset) => ({ ...asset, resolved: resolvePath(asset.path) }));
       const renders = orderExhibitRenders(resolved.flatMap((item) => item.resolved
-        ? [{ sourcePath: item.path, resolvedPath: item.resolved }]
+        ? [{ sourcePath: item.path, resolvedPath: item.resolved, declaredRole: item.declaredRole }]
         : []));
       const key = exhibitKey(kind, row.label);
+      const declaredPages = Array.isArray(row.pdf_pages)
+        ? row.pdf_pages.filter((value): value is number => Number.isInteger(value))
+        : [];
       const asset = {
         key,
         label: row.label,
         kind,
-        pages: Array.isArray(row.pdf_pages) ? row.pdf_pages.filter((value): value is number => Number.isInteger(value)) : [],
+        pages: Array.from(new Set([
+          ...declaredPages,
+          ...resolved.flatMap((item) => item.pdfPage ? [item.pdfPage] : []),
+        ])).sort((left, right) => left - right),
         renders,
         missingPaths: resolved.filter((item) => !item.resolved).map((item) => item.path),
       };
+      if (assets[key]) throw new Error(`Duplicate exhibit label in ${kind} manifest: ${row.label}`);
       assets[key] = asset;
       const labelPart = key.slice(kind.length + 1);
       const shortLabel = labelPart.split(":", 1)[0];
-      if (shortLabel !== labelPart) assets[`${kind}:${shortLabel}`] = asset;
+      if (shortLabel !== labelPart) {
+        const alias = `${kind}:${shortLabel}`;
+        aliases.set(alias, [...(aliases.get(alias) || []), asset]);
+      }
     }
   };
   add(isRecord(tables) ? tables.tables : undefined, "table", "render_paths");
   add(isRecord(figures) ? figures.figures : undefined, "figure", "extraction_paths");
+  for (const [alias, candidates] of aliases) {
+    if (candidates.length === 1 && !assets[alias]) assets[alias] = candidates[0];
+  }
   return assets;
 }
 
@@ -336,6 +421,7 @@ function validateRun(value: unknown): Run {
   if (value.status !== undefined && !["draft", "awaiting_checkpoint", "blocked", "verification_failed", "complete"].includes(String(value.status))) {
     throw new Error("run.json has an unsupported status");
   }
+  if (value.mode !== "full" && value.mode !== "quick") throw new Error("run.json has an unsupported review mode");
   if (value.schema_version === "0.4") validateActivatedBurdens(value.activated_burdens);
   if (
     !(value.target === null || typeof value.target === "string" || (
@@ -379,25 +465,27 @@ function validateSynthesis(value: unknown): Synthesis | null {
 
 function validateSourceManifest(value: unknown): SourceManifest | null {
   if (value === null || value === undefined || (isRecord(value) && !Object.keys(value).length)) return null;
-  if (!isRecord(value) || value.schema_version !== "0.1" || typeof value.review_id !== "string" || !Array.isArray(value.anchors)) {
+  if (!isRecord(value) || value.schema_version !== "0.1" || typeof value.review_id !== "string" || !Array.isArray(value.sources) || !Array.isArray(value.anchors)) {
     throw new Error("source-manifest.json does not have the required source-anchor structure");
   }
   const ids = new Set<string>();
-  if (value.sources !== undefined) {
-    if (!Array.isArray(value.sources)) throw new Error("source-manifest.json sources must be an array");
-    for (const [index, source] of value.sources.entries()) {
-      if (!isRecord(source) || typeof source.path !== "string" || !source.path.trim()) {
-        throw new Error(`source-manifest.json has an invalid source at position ${index + 1}`);
-      }
-      if (source.extraction !== undefined && source.extraction !== null && (
-        !isRecord(source.extraction) || typeof source.extraction.path !== "string" || !source.extraction.path.trim()
-      )) throw new Error(`source-manifest.json has an invalid extraction at source position ${index + 1}`);
-    }
+  const sourceIds = new Set<string>();
+  for (const [index, source] of value.sources.entries()) {
+    if (
+      !isRecord(source) || typeof source.id !== "string" || sourceIds.has(source.id)
+      || typeof source.role !== "string" || typeof source.media_type !== "string" || !source.media_type.trim()
+      || typeof source.path !== "string" || normalizePackagePath(source.path) !== source.path
+    ) throw new Error(`source-manifest.json has an invalid source at position ${index + 1}`);
+    if (source.extraction !== undefined && source.extraction !== null && (
+      !isRecord(source.extraction) || typeof source.extraction.path !== "string"
+      || normalizePackagePath(source.extraction.path) !== source.extraction.path
+    )) throw new Error(`source-manifest.json has an invalid extraction at source position ${index + 1}`);
+    sourceIds.add(source.id);
   }
   for (const [index, anchor] of value.anchors.entries()) {
     if (
       !isRecord(anchor) || typeof anchor.id !== "string" || ids.has(anchor.id)
-      || typeof anchor.source_id !== "string" || typeof anchor.kind !== "string"
+      || typeof anchor.source_id !== "string" || !sourceIds.has(anchor.source_id) || typeof anchor.kind !== "string"
       || !(anchor.start_char === null || Number.isInteger(anchor.start_char) && Number(anchor.start_char) >= 0)
       || !(anchor.end_char === null || Number.isInteger(anchor.end_char) && Number(anchor.end_char) >= 0)
       || typeof anchor.content_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(anchor.content_sha256)
@@ -464,6 +552,19 @@ function channelLabel(finding: Finding) {
 
 function readableState(value: string | undefined) {
   return (value || "not available").replaceAll("_", " ");
+}
+
+function safeDownloadStem(value: string) {
+  return value.normalize("NFC").replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/^[.-]+|[.-]+$/g, "").slice(0, 100) || "review";
+}
+
+function actionEventLabel(event: ReviewActionEvent) {
+  if (event.type === "disposition_changed") return `Marked ${readableState(event.disposition)}`;
+  if (event.type === "reversed") return event.disposition
+    ? `Reversed to ${readableState(event.disposition)}`
+    : "Reversed an author-note change";
+  if (event.type === "note_revised") return event.note ? "Updated author note" : "Cleared author note";
+  return "Imported from an action handoff";
 }
 
 function mergeDistinctText(first: string | undefined, second: string | undefined) {
@@ -571,6 +672,7 @@ export function ReviewWorkspace() {
   const [isLocalLoading, setIsLocalLoading] = useState(false);
   const [persistenceWarning, setPersistenceWarning] = useState("");
   const [handoffWarning, setHandoffWarning] = useState("");
+  const [finalizationTrust, setFinalizationTrust] = useState<FinalizationTrust>({ ...NO_FINALIZATION_RECEIPT });
   const [persistenceMode, setPersistenceMode] = useState<"local" | "session">("local");
   const [registryUnavailable, setRegistryUnavailable] = useState(false);
   const [mobilePane, setMobilePane] = useState<"queue" | "comment" | "evidence">("queue");
@@ -613,15 +715,22 @@ export function ReviewWorkspace() {
 
   useEffect(() => {
     fetch("/reviews/index.json")
-      .then((response) => {
+      .then(async (response) => {
         if (!response.ok) throw new Error("Review registry is unavailable");
-        return response.json();
+        const declaredSize = Number(response.headers.get("content-length"));
+        if (Number.isFinite(declaredSize) && declaredSize > MAX_JSON_BYTES) throw new Error("Review registry is oversized");
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (bytes.byteLength > MAX_JSON_BYTES) throw new Error("Review registry is oversized");
+        let text: string;
+        try {
+          text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        } catch {
+          throw new Error("Review registry is not valid UTF-8");
+        }
+        return parseJsonFile("/reviews/index.json", text);
       })
       .then((value: unknown) => {
-        if (!isRecord(value) || !Array.isArray(value.reviews) || typeof value.default_review !== "string") {
-          throw new Error("Review registry is malformed");
-        }
-        const checked = value as unknown as ReviewRegistry;
+        const checked = validateReviewRegistry(value);
         const requested = new URLSearchParams(window.location.search).get("review");
         const initial = checked.reviews.some((entry) => entry.slug === requested) ? requested! : checked.default_review;
         setRegistry(checked);
@@ -638,51 +747,77 @@ export function ReviewWorkspace() {
       return;
     }
     let cancelled = false;
-    localLoadSequence.current += 1;
+    const sequence = ++localLoadSequence.current;
     setIsLocalLoading(false);
     setIsBundleLoading(true);
-    const requiredJson = async (path: string) => {
+    const decodeText = async (response: Response, path: string, limit: number) => {
+      const declaredSize = Number(response.headers.get("content-length"));
+      if (Number.isFinite(declaredSize) && declaredSize > limit) {
+        throw new Error(`Review text exceeds the browser processing limit: ${path}`);
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.byteLength > limit) throw new Error(`Review text exceeds the browser processing limit: ${path}`);
+      try {
+        return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      } catch {
+        throw new Error(`Review text is not valid UTF-8: ${path}`);
+      }
+    };
+    const requiredText = async (path: string, limit = MAX_MANUSCRIPT_BYTES) => {
       const response = await fetch(path);
       if (!response.ok) throw new Error(`Required review file is unavailable: ${path}`);
-      return response.json();
+      return decodeText(response, path, limit);
     };
-    const requiredText = async (path: string) => {
+    const requiredBytes = async (path: string) => {
       const response = await fetch(path);
-      if (!response.ok) throw new Error(`Required review file is unavailable: ${path}`);
-      return response.text();
+      if (!response.ok) throw new Error(`Finalized review artifact is unavailable: ${path}`);
+      const declaredSize = Number(response.headers.get("content-length"));
+      if (Number.isFinite(declaredSize) && declaredSize > MAX_LOCAL_PACKAGE_BYTES) {
+        throw new Error(`Finalized review artifact exceeds the browser verification limit: ${path}`);
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.byteLength > MAX_LOCAL_PACKAGE_BYTES) throw new Error(`Finalized review artifact exceeds the browser verification limit: ${path}`);
+      return bytes;
     };
+    const requiredJson = async (path: string) => parseJsonFile(path, await requiredText(path, MAX_JSON_BYTES));
     const optionalJson = async (path: string) => {
       const response = await fetch(path);
-      return response.ok ? response.json() : {};
+      if (response.status === 404) return {};
+      if (!response.ok) throw new Error(`Optional review file could not be read: ${path}`);
+      return parseJsonFile(path, await decodeText(response, path, MAX_JSON_BYTES));
     };
     const optionalManifest = async (path: string) => {
       const response = await fetch(path);
       if (response.status === 404) return null;
       if (!response.ok) throw new Error(`Optional review manifest could not be read: ${path}`);
-      return response.json();
+      return parseJsonFile(path, await decodeText(response, path, MAX_JSON_BYTES));
     };
-    const optionalText = async (path: string) => {
+    const optionalText = async (path: string, limit = MAX_MANUSCRIPT_BYTES) => {
       const response = await fetch(path);
-      return response.ok ? response.text() : "";
+      if (response.status === 404) return "";
+      if (!response.ok) throw new Error(`Optional review file could not be read: ${path}`);
+      return decodeText(response, path, limit);
     };
     Promise.all([
       requiredJson(`${entry.base_path}/findings.json`),
       requiredJson(`${entry.base_path}/run.json`),
       optionalJson(`${entry.base_path}/synthesis.json`),
-      optionalText(`${entry.base_path}/manuscript.md`),
-      optionalJson(`${entry.base_path}/tables.json`),
-      optionalJson(`${entry.base_path}/figures.json`),
+      optionalJson(`${entry.base_path}/evidence/tables.json`),
+      optionalJson(`${entry.base_path}/evidence/figures.json`),
       optionalManifest(`${entry.base_path}/review-manifest.json`),
-      optionalJson(`${entry.base_path}/source-manifest.json`),
-      optionalJson(`${entry.base_path}/computations.json`),
+      optionalJson(`${entry.base_path}/evidence/source-manifest.json`),
+      optionalJson(`${entry.base_path}/evidence/computations.json`),
+      optionalText(`${entry.base_path}/finalization.json`, MAX_JSON_BYTES),
     ])
-      .then(async ([nextLedger, nextRun, nextSynthesis, nextManuscript, nextTables, nextFigures, manifestValue, sourceManifestValue, computationsValue]) => {
-        if (cancelled) return;
+      .then(async ([nextLedger, nextRun, nextSynthesis, nextTables, nextFigures, manifestValue, sourceManifestValue, computationsValue, finalizationText]) => {
+        if (cancelled || sequence !== localLoadSequence.current) return;
         const checkedLedger = validateLedger(nextLedger);
         const checkedRun = validateRun(nextRun);
         const checkedSynthesis = validateSynthesis(nextSynthesis);
         const checkedSourceManifest = validateSourceManifest(sourceManifestValue);
         const checkedComputations = validateReviewComputations(computationsValue);
+        const checkedTables = validateExhibitManifest(nextTables, "tables", checkedLedger.review_id) as ExhibitManifest | null;
+        const checkedFigures = validateExhibitManifest(nextFigures, "figures", checkedLedger.review_id) as ExhibitManifest | null;
         validateLedgerAnchors(checkedLedger, checkedSourceManifest);
         validateReviewComputationLinks(checkedLedger, checkedComputations, checkedSourceManifest);
         if (checkedLedger.review_id !== checkedRun.review_id) throw new Error("Bundled review IDs do not match");
@@ -698,6 +833,13 @@ export function ReviewWorkspace() {
         if (checkedManifest && checkedManifest.review_id !== checkedLedger.review_id) {
           throw new Error("Bundled review manifest ID does not match findings.json");
         }
+        const manuscriptSources = checkedSourceManifest?.sources?.filter((source) => source.role === "manuscript") || [];
+        if (manuscriptSources.length > 1) throw new Error("Bundled source manifest declares multiple manuscript reading surfaces");
+        const manuscriptSource = manuscriptSources[0];
+        const manuscriptPath = manuscriptSource?.extraction?.path || manuscriptSource?.path;
+        const nextManuscript = manuscriptPath
+          ? await requiredText(`${entry.base_path}/${normalizePackagePath(manuscriptPath)}`)
+          : "";
         const contents = await Promise.all(definitions.map((document) => (
           checkedManifest
             ? requiredText(`${entry.base_path}/${document.path}`)
@@ -706,7 +848,41 @@ export function ReviewWorkspace() {
         const nextDocuments = definitions
           .map((document, index) => ({ ...document, content: contents[index] }))
           .filter((document) => document.content.trim());
-        if (cancelled) return;
+        let nextFinalizationTrust: FinalizationTrust = { ...NO_FINALIZATION_RECEIPT };
+        if (finalizationText.trim()) {
+          try {
+            const receiptValue = parseJsonFile("finalization.json", finalizationText);
+            const receipt = validateFinalizationReceipt(receiptValue);
+            const artifactPaths = Object.keys(receipt.artifacts);
+            if (artifactPaths.length > MAX_LOCAL_PACKAGE_FILES) throw new Error("The finalized artifact inventory exceeds the browser verification limit.");
+            const artifactBytes = new Map<string, Uint8Array>();
+            let totalArtifactBytes = 0;
+            for (const path of artifactPaths) {
+              if (cancelled || sequence !== localLoadSequence.current) return;
+              const bytes = await requiredBytes(`${entry.base_path}/${path}`);
+              totalArtifactBytes += bytes.byteLength;
+              if (totalArtifactBytes > MAX_LOCAL_PACKAGE_BYTES) throw new Error("The finalized artifact inventory exceeds the browser verification limit.");
+              artifactBytes.set(path, bytes);
+            }
+            nextFinalizationTrust = await verifyReviewFinalization({
+              receipt: receiptValue,
+              reviewId: checkedLedger.review_id,
+              reviewContractVersion: checkedRun.schema_version,
+              reviewMode: checkedRun.mode,
+              hasPdfSource: Boolean(checkedSourceManifest?.sources?.some((source) => source.media_type === "application/pdf")),
+              artifactBytes,
+              requireExactInventory: false,
+            });
+          } catch (error) {
+            nextFinalizationTrust = {
+              status: "unverified",
+              receipt_present: true,
+              receipt_version: null,
+              detail: error instanceof Error ? error.message : "The bundled finalization receipt could not be verified.",
+            };
+          }
+        }
+        if (cancelled || sequence !== localLoadSequence.current) return;
         setLedger(checkedLedger);
         setRun(checkedRun);
         setSynthesis(checkedSynthesis);
@@ -744,9 +920,10 @@ export function ReviewWorkspace() {
         setUndoStatusChange(null);
         setPendingDocumentAnchor(null);
         setMobilePane(urlState.view === "comment" || urlState.view === "document" ? "comment" : "queue");
-        setExhibitAssets(manifestAssets(nextTables, nextFigures, (path) => `${entry.base_path}/${path}`));
+        setExhibitAssets(manifestAssets(checkedTables, checkedFigures, (path) => `${entry.base_path}/${path}`));
         setSourceAnchors(Object.fromEntries((checkedSourceManifest?.anchors || []).map((anchor) => [anchor.id, anchor])));
         setComputationsById(indexReviewComputations(checkedComputations));
+        setFinalizationTrust(nextFinalizationTrust);
         loadedReviewSlug.current = entry.slug;
         setIsBundleLoading(false);
         setLoadError("");
@@ -756,7 +933,7 @@ export function ReviewWorkspace() {
         setAnnouncement(`Loaded ${entry.title} with ${checkedLedger.findings.length} comments.`);
       })
       .catch((error: unknown) => {
-        if (cancelled) return;
+        if (cancelled || sequence !== localLoadSequence.current) return;
         setIsBundleLoading(false);
         const detail = error instanceof Error ? ` ${error.message}` : "";
         const previous = loadedReviewSlug.current;
@@ -858,6 +1035,14 @@ export function ReviewWorkspace() {
 
   const selected = filtered.find((finding) => finding.id === selectedId) || filtered[0] || findings[0];
   const selectedEntry = selected ? localState[selected.id] || defaultEntry(selected.id) : defaultEntry("EMPTY-00");
+  const selectedActionEvents = selectedEntry.events
+    .filter((event, index, events) => (
+      event.event_id !== "00000000-0000-4000-8000-000000000000"
+      && !(index === 0 && events.length > 1 && event.type === "disposition_changed"
+        && event.disposition === "open" && event.origin === "local" && event.at === events[1].at)
+    ))
+    .slice()
+    .reverse();
   const majorFindings = findings.filter((finding) => ["critical", "major"].includes(finding.severity));
   const minorFindings = findings.filter((finding) => finding.severity === "minor");
   const majorReady = majorFindings.filter((finding) => localState[finding.id]?.disposition === "ready_for_recheck").length;
@@ -929,9 +1114,12 @@ export function ReviewWorkspace() {
 
   const updateLocal = useCallback((id: string, patch: Partial<Pick<LocalEntry, "disposition" | "response_note" | "changed_locations">>) => {
     const current = localStateRef.current;
-    const base = current[id] || defaultEntry(id);
-    const nextDisposition = patch.disposition ?? base.disposition;
-    const nextEntry = updateReviewAction(base, id, { ...patch, disposition: nextDisposition });
+    const existing = current[id];
+    const nextDisposition = patch.disposition ?? existing?.disposition ?? "open";
+    // Let the action contract create a fresh, finding-specific initial event.
+    // Reusing the display-only fallback entry would give multiple findings the
+    // same placeholder UUID and make a multi-finding export invalid.
+    const nextEntry = updateReviewAction(existing, id, { ...patch, disposition: nextDisposition });
     const nextState = { ...current, [id]: nextEntry };
     localStateRef.current = nextState;
     setLocalState(nextState);
@@ -1120,9 +1308,20 @@ export function ReviewWorkspace() {
       if (event.isComposing || event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target instanceof HTMLElement ? event.target : null;
       const interactive = target?.closest("input, textarea, select, button, a, summary, [contenteditable='true'], [role='dialog']");
+      if (event.key === "Escape" && topMenu.current?.open) {
+        event.preventDefault();
+        topMenu.current.open = false;
+        (topMenu.current.querySelector(":scope > summary") as HTMLElement | null)?.focus();
+        return;
+      }
       if (event.key === "Escape" && mobilePane === "evidence") {
         event.preventDefault();
         openMobilePane("comment");
+        return;
+      }
+      if (event.key === "Escape" && reportView !== "none") {
+        event.preventDefault();
+        openOverview();
         return;
       }
       if (interactive) return;
@@ -1201,6 +1400,7 @@ export function ReviewWorkspace() {
   async function loadSelectedFiles(files: File[]) {
     if (!files.length) return;
     const sequence = ++localLoadSequence.current;
+    const stagedObjectUrls: string[] = [];
     setIsLocalLoading(true);
     setLoadError("");
     try {
@@ -1233,15 +1433,17 @@ export function ReviewWorkspace() {
       const findingsFile = canonicalFile("findings.json", true)!;
       const runFile = canonicalFile("run.json", true)!;
       const synthesisFile = canonicalFile("synthesis.json");
+      const finalizationFile = canonicalFile("finalization.json");
       const manifestFile = canonicalFile("review-manifest.json");
       const sourceManifestFile = canonicalFile("evidence/source-manifest.json", false, ["source-manifest.json"]);
       const computationsFile = canonicalFile("evidence/computations.json", false, ["computations.json"]);
       const tablesFile = canonicalFile("evidence/tables.json", false, ["tables.json"]);
       const figuresFile = canonicalFile("evidence/figures.json", false, ["figures.json"]);
-      const [findingsText, runText, synthesisText, manifestText, sourceManifestText, computationsText, tablesText, figuresText] = await Promise.all([
+      const [findingsText, runText, synthesisText, finalizationText, manifestText, sourceManifestText, computationsText, tablesText, figuresText] = await Promise.all([
         readText(findingsFile, MAX_JSON_BYTES),
         readText(runFile, MAX_JSON_BYTES),
         synthesisFile ? readText(synthesisFile, MAX_JSON_BYTES) : Promise.resolve(null),
+        finalizationFile ? readText(finalizationFile, MAX_JSON_BYTES) : Promise.resolve(null),
         manifestFile ? readText(manifestFile, MAX_JSON_BYTES) : Promise.resolve(null),
         sourceManifestFile ? readText(sourceManifestFile, MAX_JSON_BYTES) : Promise.resolve(null),
         computationsFile ? readText(computationsFile, MAX_JSON_BYTES) : Promise.resolve(null),
@@ -1253,13 +1455,38 @@ export function ReviewWorkspace() {
       const nextLedger = validateLedger(parseJsonFile("findings.json", findingsText));
       const nextRun = validateRun(parseJsonFile("run.json", runText));
       const nextSynthesis = synthesisText === null ? null : validateSynthesis(parseJsonFile("synthesis.json", synthesisText));
+      let finalizationValue: unknown | null = null;
+      let parsedFinalization = false;
+      let nextFinalizationTrust: FinalizationTrust = { ...NO_FINALIZATION_RECEIPT };
+      if (finalizationText !== null) {
+        try {
+          finalizationValue = parseJsonFile("finalization.json", finalizationText);
+          validateFinalizationReceipt(finalizationValue);
+          parsedFinalization = true;
+        } catch (error) {
+          nextFinalizationTrust = {
+            status: "unverified",
+            receipt_present: true,
+            receipt_version: null,
+            detail: error instanceof Error ? error.message : "The selected finalization receipt could not be verified.",
+          };
+        }
+      }
       const nextManifest = manifestText === null ? undefined : validateReviewDocumentManifest(manifestText);
       const nextSourceManifest = sourceManifestText === null ? null : validateSourceManifest(parseJsonFile("source-manifest.json", sourceManifestText));
       const nextComputations = computationsText === null ? null : validateReviewComputations(parseJsonFile("computations.json", computationsText));
       validateLedgerAnchors(nextLedger, nextSourceManifest);
       validateReviewComputationLinks(nextLedger, nextComputations, nextSourceManifest);
-      const nextTables = tablesText === null ? null : parseJsonFile("tables.json", tablesText) as ExhibitManifest;
-      const nextFigures = figuresText === null ? null : parseJsonFile("figures.json", figuresText) as ExhibitManifest;
+      const nextTables = validateExhibitManifest(
+        tablesText === null ? null : parseJsonFile("tables.json", tablesText),
+        "tables",
+        nextLedger.review_id,
+      ) as ExhibitManifest | null;
+      const nextFigures = validateExhibitManifest(
+        figuresText === null ? null : parseJsonFile("figures.json", figuresText),
+        "figures",
+        nextLedger.review_id,
+      ) as ExhibitManifest | null;
       if (nextLedger.review_id !== nextRun.review_id) throw new Error("findings.json and run.json have different review IDs");
       if (nextLedger.schema_version !== nextRun.schema_version) throw new Error("findings.json and run.json have different schema versions");
       if (nextSynthesis && nextSynthesis.review_id !== nextLedger.review_id) throw new Error("synthesis.json has a different review ID");
@@ -1290,6 +1517,7 @@ export function ReviewWorkspace() {
       });
 
       const references = referencedExhibitPaths(nextTables, nextFigures);
+      const expectedImageHashes = referencedExhibitHashes(nextTables, nextFigures);
       if (references.length > MAX_REFERENCED_IMAGES) {
         throw new Error(`The exhibit manifests reference more than ${MAX_REFERENCED_IMAGES.toLocaleString()} images.`);
       }
@@ -1300,9 +1528,15 @@ export function ReviewWorkspace() {
       for (const file of resolvedImageFiles) {
         if (file.size > MAX_LOCAL_IMAGE_BYTES) throw new Error(`${file.name} exceeds the local image size limit`);
       }
+      const packageArtifactFiles = parsedFinalization
+        ? files.filter((file) => {
+          const path = relativePath(file);
+          return path !== null && isFinalizationArtifactPath(path);
+        })
+        : [];
       const relevantFiles = Array.from(new Set([
-        findingsFile, runFile, synthesisFile, manifestFile, sourceManifestFile, computationsFile, tablesFile, figuresFile, manuscriptFile,
-        ...documentFiles.map(({ file }) => file), ...resolvedImageFiles,
+        findingsFile, runFile, synthesisFile, finalizationFile, manifestFile, sourceManifestFile, computationsFile, tablesFile, figuresFile, manuscriptFile,
+        ...documentFiles.map(({ file }) => file), ...resolvedImageFiles, ...packageArtifactFiles,
       ].filter((file): file is File => Boolean(file))));
       const relevantBytes = relevantFiles.reduce((sum, file) => sum + file.size, 0);
       if (relevantFiles.length > MAX_LOCAL_PACKAGE_FILES || relevantBytes > MAX_LOCAL_PACKAGE_BYTES) {
@@ -1316,19 +1550,49 @@ export function ReviewWorkspace() {
       if (sequence !== localLoadSequence.current) return;
       const nextDocuments = documentFiles.map(({ definition }, index) => ({ ...definition, content: documentContents[index] }));
 
+      if (parsedFinalization) {
+        const artifactBytes = new Map<string, Uint8Array>();
+        for (const file of packageArtifactFiles) {
+          const path = relativePath(file);
+          if (path) artifactBytes.set(path, new Uint8Array(await file.arrayBuffer()));
+        }
+        nextFinalizationTrust = await verifyReviewFinalization({
+          receipt: finalizationValue,
+          reviewId: nextLedger.review_id,
+          reviewContractVersion: nextRun.schema_version,
+          reviewMode: nextRun.mode,
+          hasPdfSource: Boolean(nextSourceManifest?.sources?.some((source) => source.media_type === "application/pdf")),
+          artifactBytes,
+        });
+      }
+
       const urlByFilePath = new Map<string, string>();
-      const nextObjectUrls = resolvedImageFiles.map((file) => {
-        const url = URL.createObjectURL(file);
-        urlByFilePath.set(normalizedFilePath(file), url);
-        return url;
-      });
+      for (const file of resolvedImageFiles) {
+        const filePath = normalizedFilePath(file);
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const mediaType = reviewImageMediaType(filePath, bytes);
+        const relativePath = relativeToReviewRoot(filePath, reviewRoot);
+        const expectedHash = relativePath ? expectedImageHashes.get(relativePath) : undefined;
+        if (expectedHash && await sha256ReviewBytes(bytes) !== expectedHash) {
+          throw new Error(`Referenced exhibit ${relativePath} does not match its declared SHA-256 hash`);
+        }
+        const url = URL.createObjectURL(new Blob([bytes], { type: mediaType }));
+        urlByFilePath.set(filePath, url);
+        stagedObjectUrls.push(url);
+      }
       const urlByReference = new Map<string, string>();
       for (const [reference, matchedPath] of imageMatches) {
         if (matchedPath && urlByFilePath.has(matchedPath)) urlByReference.set(reference, urlByFilePath.get(matchedPath)!);
       }
 
+      if (sequence !== localLoadSequence.current) {
+        for (const url of stagedObjectUrls) URL.revokeObjectURL(url);
+        stagedObjectUrls.length = 0;
+        return;
+      }
       for (const url of localObjectUrls.current) URL.revokeObjectURL(url);
-      localObjectUrls.current = nextObjectUrls;
+      localObjectUrls.current = [...stagedObjectUrls];
+      stagedObjectUrls.length = 0;
       setLedger(nextLedger);
       setRun(nextRun);
       setSynthesis(nextSynthesis);
@@ -1370,8 +1634,10 @@ export function ReviewWorkspace() {
       setExhibitAssets(manifestAssets(nextTables, nextFigures, (path) => urlByReference.get(normalizePackagePath(path)) || null));
       setSourceAnchors(Object.fromEntries((nextSourceManifest?.anchors || []).map((anchor) => [anchor.id, anchor])));
       setComputationsById(indexReviewComputations(nextComputations));
+      setFinalizationTrust(nextFinalizationTrust);
       setAnnouncement(`Loaded review ${nextLedger.review_id} with ${nextLedger.findings.length} findings${nextManuscript ? " and manuscript context" : "; no manuscript was loaded"}.`);
     } catch (error) {
+      for (const url of stagedObjectUrls) URL.revokeObjectURL(url);
       if (sequence === localLoadSequence.current) {
         setLoadError(error instanceof Error ? error.message : "Select findings.json and run.json from the same review. Manuscript Markdown is optional.");
       }
@@ -1382,19 +1648,26 @@ export function ReviewWorkspace() {
 
   function exportSession() {
     if (!ledger) return;
-    const payload = JSON.stringify(generateReviewActionsPayload({
-      source_review_id: ledger.review_id,
-      source_review_fingerprint: reviewFingerprint(ledger),
-      source_manuscripts: privacySafeSourceManuscripts(run?.assessment_boundary?.sources || []),
-      entries: localStateRef.current,
-    }), null, 2);
-    const url = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${ledger.review_id}-review-actions.json`;
-    anchor.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showActionNotice("Review actions exported. Import this file with the next review round to reconcile exact finding IDs.");
+    let url = "";
+    try {
+      const payload = JSON.stringify(generateReviewActionsPayload({
+        source_review_id: ledger.review_id,
+        source_review_fingerprint: reviewFingerprint(ledger),
+        source_manuscripts: privacySafeSourceManuscripts(run?.assessment_boundary?.sources || []),
+        entries: localStateRef.current,
+      }), null, 2);
+      url = URL.createObjectURL(new Blob([payload], { type: "application/json" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${safeDownloadStem(ledger.review_id)}-review-actions.json`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setLoadError("");
+      showActionNotice("Review actions exported. Import this file with the next review round to reconcile exact finding IDs.");
+    } catch {
+      if (url) URL.revokeObjectURL(url);
+      setLoadError("The browser could not export the action handoff. Your current actions remain available in this tab.");
+    }
   }
 
   async function importActions(event: ChangeEvent<HTMLInputElement>) {
@@ -1452,9 +1725,12 @@ export function ReviewWorkspace() {
   }
 
   function onListKey(event: KeyboardEvent<HTMLButtonElement>, index: number) {
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
       event.preventDefault();
-      const next = filtered[index + (event.key === "ArrowDown" ? 1 : -1)];
+      const nextIndex = event.key === "Home" ? 0
+        : event.key === "End" ? filtered.length - 1
+          : index + (event.key === "ArrowDown" ? 1 : -1);
+      const next = filtered[nextIndex];
       const wrapped = next || filtered[event.key === "ArrowDown" ? 0 : filtered.length - 1];
       if (wrapped) {
         selectAndFocus(wrapped.id);
@@ -1481,11 +1757,28 @@ export function ReviewWorkspace() {
   const activeExhibitPath = activeExhibitRender?.resolvedPath;
   const loadingReviewTitle = isLocalLoading ? "local review package" : registry?.reviews.find((entry) => entry.slug === reviewSlug)?.title || "review";
   const bannerMessage = loadError || persistenceWarning || handoffWarning;
-  const packageWarning = run?.status && run.status !== "complete"
-    ? `This package is ${readableState(run.status)}. Comments and reports may still change; do not treat this view as final.`
-    : run && !run.verification_passed
-      ? "This package has not passed its declared verification gate. Treat every finding as provisional."
-      : "";
+  const packageFinalized = Boolean(
+    run?.status === "complete"
+    && run.verification_passed
+    && finalizationTrust.status === "verified",
+  );
+  const packageWarnings = [] as string[];
+  if (run?.status && run.status !== "complete") {
+    packageWarnings.push(`run.json declares this package ${readableState(run.status)}; comments and reports may still change.`);
+  }
+  if (run && !run.verification_passed) {
+    packageWarnings.push("The package has not passed its declared structured-verification gate.");
+  }
+  if (finalizationTrust.status !== "verified") {
+    packageWarnings.push(run?.status === "complete"
+      ? `run.json declares completion, but the finalization receipt is not verified: ${finalizationTrust.detail}`
+      : finalizationTrust.detail);
+  }
+  const packageWarning = packageWarnings.join(" ");
+  const packageTrustLabel = packageFinalized
+    ? "Finalized · integrity verified"
+    : finalizationTrust.status === "verified" ? "Integrity verified · package not final"
+      : finalizationTrust.receipt_present ? "Receipt not verified" : "No finalization receipt";
   const activeDocument = documents.find((document) => document.id === reportView) || documents[0];
   const activeReport = activeDocument?.content || "";
   const reportComponents: MarkdownComponents = {
@@ -1506,9 +1799,10 @@ export function ReviewWorkspace() {
           }
         }}>{children}</button>;
       }
-      return href?.startsWith("http")
-        ? <a href={href} target="_blank" rel="noopener noreferrer">{children}<span className="visually-hidden"> (opens in a new tab)</span></a>
-        : <a href={href}>{children}</a>;
+      const external = safeExternalReviewDocumentHref(href);
+      return external
+        ? <a href={external} target="_blank" rel="noopener noreferrer">{children}<span className="visually-hidden"> (opens in a new tab)</span></a>
+        : <span className="blocked-report-link" title="This link is not a declared review document or an HTTP(S) destination">{children}</span>;
     },
     code: ({ children }) => {
       const token = String(children).trim();
@@ -1595,7 +1889,7 @@ export function ReviewWorkspace() {
             <p>Choose the paper folder to load its nested review files together. They stay in this browser and are never sent to a server.</p>
             <div className="file-requirements">
               <div><strong>Required</strong><span>findings.json · run.json</span></div>
-              <div><strong>Optional context</strong><span>synthesis.json · review-manifest.json · all report/audit Markdown · manuscript · exhibit manifests and renders</span></div>
+              <div><strong>Optional context</strong><span>finalization.json · synthesis.json · review-manifest.json · all report/audit Markdown · manuscript · exhibit manifests and renders</span></div>
             </div>
             {loadError && <div className="welcome-error" role="alert">{loadError}</div>}
             <div
@@ -1640,10 +1934,12 @@ export function ReviewWorkspace() {
     return (
       <main className="complete-review-shell">
         <section className="complete-review-card">
-          <span className="eyebrow">{run.status === "complete" && run.verification_passed ? "Review complete" : "Review package"}</span>
-          <h1>No active comments remain.</h1>
-          <p>The package loaded successfully. Canonical reports and audit documents remain available below.</p>
-          {packageWarning && <div className="package-warning" role="alert"><strong>Non-final review package</strong><span>{packageWarning}</span></div>}
+          <span className="eyebrow">{packageFinalized ? "Finalized package" : run.status === "complete" ? "Declared complete · unverified" : "Review package"}</span>
+          <h1>No comments are recorded in this package.</h1>
+          <p>{packageFinalized
+            ? "The finalization receipt and its declared artifact hashes were verified for integrity in this viewer."
+            : "An empty findings ledger does not by itself establish that the review is complete."} Reports and audit documents remain available below.</p>
+          {packageWarning && <div className="package-warning" role="alert"><strong>Package not verified as final</strong><span>{packageWarning}</span></div>}
           {synthesis && (
             <section className="complete-synthesis" aria-label="Overall review assessment">
               <span className={`posture-chip posture-${synthesis.review_posture}`}>{POSTURE_LABELS[synthesis.review_posture]}</span>
@@ -1666,7 +1962,7 @@ export function ReviewWorkspace() {
               </select>
             </label>
             <article ref={reportReader} className="report-document">
-              <RenderedMarkdown components={reportComponents}>{activeReport}</RenderedMarkdown>
+              <RenderedMarkdown components={reportComponents}>{authorReportDisplayMarkdown(activeReport)}</RenderedMarkdown>
             </article>
           </> : <p>No narrative document was included in this package.</p>}
         </section>
@@ -1698,6 +1994,7 @@ export function ReviewWorkspace() {
           </label>
         ) : <span className="local-review-title">Local review</span>}
         <div className="compact-review-summary" aria-label="Review status summary">
+          <span className={`package-trust ${finalizationTrust.status === "verified" ? "trust-verified" : "trust-unverified"}`} title={finalizationTrust.detail}>{packageTrustLabel}</span>
           {synthesis && <span className={`posture-chip posture-${synthesis.review_posture}`}>{POSTURE_LABELS[synthesis.review_posture]}</span>}
           <span className="compact-severity-counts">
             {severityCounts.critical > 0 && <span>{severityCounts.critical} critical</span>}
@@ -1735,7 +2032,7 @@ export function ReviewWorkspace() {
                 showActionNotice(`Cleared ${removed} saved action snapshot${removed === 1 ? "" : "s"}. Current actions remain in this tab.`);
               }}>Clear saved snapshots</button>
             </div>
-            <details className="shortcut-menu"><summary>Keyboard shortcuts</summary><p><kbd>J</kbd>/<kbd>K</kbd> move · <kbd>A</kbd> recheck · <kbd>C</kbd> challenge · <kbd>P</kbd> defer · <kbd>N</kbd> note</p></details>
+            <details className="shortcut-menu"><summary>Keyboard shortcuts</summary><p><kbd>J</kbd>/<kbd>K</kbd> move · <kbd>A</kbd> recheck · <kbd>C</kbd> challenge · <kbd>P</kbd> defer · <kbd>N</kbd> note · <kbd>O</kbd> overview · <kbd>Esc</kbd> close context</p></details>
           </div>
         </details>
         <input id="review-files" name="review-files" accept=".json,.md,.markdown,.txt,.png,.jpg,.jpeg,.webp" aria-label="Choose local review files" ref={fileInput} className="visually-hidden" type="file" multiple disabled={isReviewLoading} onChange={loadFiles} />
@@ -1745,7 +2042,7 @@ export function ReviewWorkspace() {
 
       {!isReviewLoading && (bannerMessage || packageWarning) && <div className="notice-stack">
         {bannerMessage && <div className="error-banner" role={loadError ? "alert" : "status"}>{bannerMessage}</div>}
-        {packageWarning && <div className="package-warning" role="alert"><strong>Non-final review package</strong><span>{packageWarning}</span></div>}
+        {packageWarning && <div className="package-warning" role="alert"><strong>Package not verified as final</strong><span>{packageWarning}</span></div>}
       </div>}
       {actionNotice && <div className="action-toast" role="status"><span>{actionNotice}</span>{undoStatusChange && <button onClick={undoLastStatusChange}>Undo status</button>}</div>}
 
@@ -1868,7 +2165,7 @@ export function ReviewWorkspace() {
             </label>
           </div>
           <article className="report-document">
-            <RenderedMarkdown components={reportComponents}>{activeReport || "This report file was not included in the selected review bundle."}</RenderedMarkdown>
+            <RenderedMarkdown components={reportComponents}>{authorReportDisplayMarkdown(activeReport || "This report file was not included in the selected review bundle.")}</RenderedMarkdown>
           </article>
         </section>
         ) : detailMode === "overview" ? (
@@ -1950,6 +2247,8 @@ export function ReviewWorkspace() {
                 {evidence?.representation && <div><dt>Representation</dt><dd>{readableState(evidence.representation)}</dd></div>}
                 {activeSourceAnchorId && <div><dt>{evidenceAnchorIds.length > 1 ? `Source ${activeSourceAnchorIndex + 1} anchor` : "Source anchor"}</dt><dd>{activeSourceAnchorId}</dd></div>}
                 {evidence?.computation_id && <div><dt>Computation</dt><dd>{evidence.computation_id}</dd></div>}
+                {evidence?.source_record_id && <div><dt>External source record</dt><dd>{evidence.source_record_id}</dd></div>}
+                {evidence?.support_record_id && <div><dt>Support record</dt><dd>{evidence.support_record_id}</dd></div>}
               </dl>
               {selected.evidence_boundary && <p className="evidence-boundary"><strong>Evidence boundary</strong>{selected.evidence_boundary}</p>}
             </div>
@@ -2016,6 +2315,15 @@ export function ReviewWorkspace() {
               <button className="copy-button" onClick={copyRevisionBrief}>Copy revision brief</button>
               <button className="next-open-button" onClick={moveToNextOpen}>Next open comment</button>
             </div>
+            <details className="action-history">
+              <summary>Action history <span>{selectedActionEvents.length}</span></summary>
+              {selectedActionEvents.length ? <ol>{selectedActionEvents.map((event) => (
+                <li key={event.event_id}>
+                  <span>{actionEventLabel(event)}</span>
+                  <time dateTime={event.at}>{event.at}</time>
+                </li>
+              ))}</ol> : <p>No author actions have been recorded for this comment.</p>}
+            </details>
           </section>
           </div>
           <section className="author-action-bar" data-testid="author-action-dock" aria-label="Author action for selected comment">
@@ -2030,8 +2338,8 @@ export function ReviewWorkspace() {
         </article>
         </> : (
           <section id="review-detail" ref={noResultsRef} className="no-filter-results" tabIndex={-1} aria-live="polite">
-            <span className="eyebrow">{findings.length ? "No matching comments" : "Review complete"}</span>
-            <h2>{findings.length ? "The active filters exclude every finding." : "No active comments remain in this review."}</h2>
+            <span className="eyebrow">{findings.length ? "No matching comments" : packageFinalized ? "Finalized package" : "Review package"}</span>
+            <h2>{findings.length ? "The active filters exclude every finding." : "No comments are recorded in this package."}</h2>
             <p>{findings.length ? "The detail and manuscript panes are intentionally blank so they cannot show an item outside the filtered queue." : "You can still read every available report, plan, and audit document from the Documents button."}</p>
             {findings.length ? <button onClick={clearFilters}>Clear filters</button> : documents.length ? <button onClick={() => { setReportView(documents[0].id); pushViewState({ view: "document", document: documents[0].id, finding: null, evidence: 0 }); }}>Open documents</button> : null}
           </section>

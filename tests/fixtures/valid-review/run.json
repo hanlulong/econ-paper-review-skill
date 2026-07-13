@@ -11,14 +11,16 @@
   "designs": [
     "static signaling model"
   ],
+  "requested_addons": [],
   "identity_handling": "identity_minimized",
   "assessment_boundary": {
     "sources": [
       {
+        "source_id": "SRC-01",
         "path": "synthetic-paper.md",
         "status": "fully_read",
         "notes": "Synthetic fixture",
-        "sha256": null
+        "sha256": "393cc4d5f9701fab039c77807fe6b47aaef9618fec9ee942652ad218fe5e53e5"
       }
     ],
     "figures": "not_present",
@@ -32,7 +34,7 @@
   },
   "comment_policy": {
     "minimum_target": 1,
-    "maximum": 100,
+    "maximum": null,
     "exhaustive": true
   },
   "stage_status": {
@@ -57,6 +59,7 @@
   "activated_burdens": [
     {
       "id": "claim_consistency",
+      "parent_id": "logical_validity",
       "object_type": "claim",
       "status": "active",
       "activation_basis": "observed",
@@ -71,6 +74,7 @@
     },
     {
       "id": "logical_validity",
+      "parent_id": "logical_validity",
       "object_type": "claim",
       "status": "active",
       "activation_basis": "observed",
@@ -85,6 +89,7 @@
     },
     {
       "id": "technical_validity",
+      "parent_id": "technical_validity",
       "object_type": "theory",
       "status": "active",
       "activation_basis": "observed",
@@ -99,14 +104,22 @@
     },
     {
       "id": "methodological_validity",
+      "parent_id": "methodological_validity",
       "object_type": "design",
-      "status": "not_applicable",
-      "activation_basis": "not_applicable",
-      "triggers": [],
-      "nonactivation_reason": "The synthetic note contains no empirical estimator, calibration method, or numerical procedure."
+      "status": "active",
+      "activation_basis": "observed",
+      "triggers": [
+        {
+          "kind": "anchor",
+          "ref": "ANC-03",
+          "rationale": "The complete theoretical note is audited for whether its model domain can answer the stated uniqueness question."
+        }
+      ],
+      "nonactivation_reason": null
     },
     {
       "id": "writing_mechanics",
+      "parent_id": "communication_integrity",
       "object_type": "writing",
       "status": "active",
       "activation_basis": "observed",
@@ -120,12 +133,28 @@
       "nonactivation_reason": null
     },
     {
-      "id": "sampling_or_randomization_uncertainty",
-      "object_type": "inference",
+      "id": "source_support",
+      "parent_id": "source_support",
+      "object_type": "literature",
+      "status": "active",
+      "activation_basis": "observed",
+      "triggers": [
+        {
+          "kind": "anchor",
+          "ref": "ANC-03",
+          "rationale": "The bounded literature frontier was assessed against the complete manuscript scope."
+        }
+      ],
+      "nonactivation_reason": null
+    },
+    {
+      "id": "figure_integrity",
+      "parent_id": "exhibit_integrity",
+      "object_type": "exhibit",
       "status": "not_applicable",
       "activation_basis": "not_applicable",
       "triggers": [],
-      "nonactivation_reason": "The manuscript is a deterministic static model with no sampling or randomization object."
+      "nonactivation_reason": "The complete rendered source contains no figure or graphical object."
     }
   ],
   "telemetry": {

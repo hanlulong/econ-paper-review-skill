@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from safe_io import atomic_write_json  # noqa: E402
+from safe_io import atomic_write_bytes, atomic_write_json, safe_read_bytes, strict_json_load  # noqa: E402
 
 
 ROLE_ORDER = {
@@ -28,7 +28,7 @@ ROLE_ORDER = {
 
 
 def load(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = strict_json_load(path)
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain a JSON object")
     return value
@@ -102,6 +102,24 @@ def rerank(rows: list[Any]) -> None:
         row["importance_rank"] = rank
 
 
+def write_migration(review_dir: Path, run: dict[str, Any], ledger: dict[str, Any]) -> None:
+    """Commit the two-file version transition with best-effort rollback."""
+    previous = {
+        "run.json": safe_read_bytes(review_dir, "run.json"),
+        "findings.json": safe_read_bytes(review_dir, "findings.json"),
+    }
+    try:
+        atomic_write_json(review_dir, "run.json", run)
+        atomic_write_json(review_dir, "findings.json", ledger)
+    except Exception as exc:
+        try:
+            for relative, content in previous.items():
+                atomic_write_bytes(review_dir, relative, content)
+        except Exception as rollback_exc:
+            raise ValueError(f"migration failed: {exc}; rollback failed: {rollback_exc}") from rollback_exc
+        raise
+
+
 def migrate(review_dir: Path, rerank_only: bool = False) -> None:
     run_path = review_dir / "run.json"
     ledger_path = review_dir / "findings.json"
@@ -139,8 +157,7 @@ def migrate(review_dir: Path, rerank_only: bool = False) -> None:
 
     run["schema_version"] = "0.3"
     ledger["schema_version"] = "0.3"
-    atomic_write_json(review_dir, "run.json", run)
-    atomic_write_json(review_dir, "findings.json", ledger)
+    write_migration(review_dir, run, ledger)
 
 
 def main() -> int:

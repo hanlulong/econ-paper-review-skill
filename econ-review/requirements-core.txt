@@ -1,5 +1,7 @@
 jsonschema>=4.26.0,<5
+defusedxml>=0.7.1,<1
 pdfplumber>=0.11.10,<1
 pypdf>=6.14.2,<7
 Pillow>=12.3,<13
 PyYAML>=6.0.3,<7
+packaging>=24,<27

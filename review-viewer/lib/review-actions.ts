@@ -1,3 +1,6 @@
+import { parseStrictJson } from "./strict-json.ts";
+import { normalizePackagePath } from "./local-review-package.ts";
+
 export const REVIEW_ACTIONS_SCHEMA_VERSION = "0.3" as const;
 const SUPPORTED_REVIEW_ACTIONS_SCHEMA_VERSIONS = new Set(["0.1", "0.2", REVIEW_ACTIONS_SCHEMA_VERSION]);
 export const REVIEW_ACTIONS_KIND = "econ-review-actions" as const;
@@ -168,8 +171,17 @@ export function privacySafeSourceManuscripts(
 ): ReviewActionSourceManuscript[] {
   const basenames = sources.map((source, index) => {
     const pathWithoutQuery = String(source.path || "").replaceAll("\\", "/").split(/[?#]/, 1)[0];
-    const basename = pathWithoutQuery.split("/").filter(Boolean).at(-1)?.trim();
-    return basename || `manuscript-${index + 1}`;
+    const basename = pathWithoutQuery.split("/").filter(Boolean).at(-1)?.trim()
+      .normalize("NFC")
+      .replace(/[:\u0000-\u001f\u007f]/g, "-")
+      .replace(/[.\s]+$/g, "");
+    const fallback = `manuscript-${index + 1}`;
+    if (!basename || basename === "." || basename === "..") return fallback;
+    try {
+      return normalizePackagePath(basename);
+    } catch {
+      return fallback;
+    }
   });
   const totals = new Map<string, number>();
   for (const basename of basenames) {
@@ -377,7 +389,7 @@ export function parseReviewActions(value: unknown): ReviewActionsPayload {
   let raw = value;
   if (typeof raw === "string") {
     try {
-      raw = JSON.parse(raw) as unknown;
+      raw = parseStrictJson(raw);
     } catch (error) {
       const detail = error instanceof Error ? error.message : "invalid JSON";
       throw new Error(`review actions contain invalid JSON: ${detail}`);
@@ -404,11 +416,17 @@ export function parseReviewActions(value: unknown): ReviewActionsPayload {
     if (!(source.sha256 === null || (typeof source.sha256 === "string" && SHA256.test(source.sha256)))) {
       throw new Error(`source_manuscripts[${index}].sha256 must be null or a lowercase SHA-256 digest`);
     }
-    return { path: source.path, sha256: source.sha256 };
+    let path: string;
+    try {
+      path = normalizePackagePath(source.path);
+    } catch {
+      throw new Error(`source_manuscripts[${index}].path must be a canonical portable relative path`);
+    }
+    return { path, sha256: source.sha256 };
   });
-  const sourcePaths = sourceManuscripts.map((source) => source.path);
+  const sourcePaths = sourceManuscripts.map((source) => source.path.toLocaleLowerCase("en-US"));
   if (new Set(sourcePaths).size !== sourcePaths.length) {
-    throw new Error("source_manuscripts must have unique paths");
+    throw new Error("source_manuscripts must have unique paths and be case-unambiguous");
   }
   if (!Array.isArray(raw.entries)) throw new Error("entries must be an array");
   const sourceVersion = raw.schema_version as "0.1" | "0.2" | "0.3";

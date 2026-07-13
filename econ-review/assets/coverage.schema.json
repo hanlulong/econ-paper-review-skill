@@ -6,11 +6,15 @@
   "additionalProperties": false,
   "required": ["schema_version", "review_id", "branches_applied", "units", "dimensions", "second_sweep"],
   "properties": {
-    "schema_version": {"const": "0.1"},
+    "schema_version": {"enum": ["0.1", "0.2"]},
     "review_id": {"type": "string", "minLength": 1},
     "branches_applied": {
       "type": "array", "minItems": 1, "uniqueItems": true,
-      "items": {"enum": ["universal", "empirical", "descriptive", "structural", "macro", "theory", "mixed"]}
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]{1,79}$",
+        "description": "Routing label. The standard labels are universal, empirical, descriptive, structural, macro, theory, and mixed; source-derived extensions such as prediction or historical-qualitative are allowed."
+      }
     },
     "units": {
       "type": "array", "minItems": 1,
@@ -19,6 +23,11 @@
         "required": ["id", "type", "label", "status", "finding_ids", "notes"],
         "properties": {
           "id": {"type": "string", "minLength": 1},
+          "source_id": {"type": "string", "pattern": "^SRC-[0-9]{2,}$"},
+          "anchor_ids": {
+            "type": "array", "minItems": 1, "uniqueItems": true,
+            "items": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"}
+          },
           "type": {"enum": ["title", "abstract", "section", "subsection", "table", "figure", "equation", "assumption", "definition", "lemma", "proposition", "theorem", "corollary", "proof", "example", "algorithm", "calibration", "moment", "counterfactual", "welfare", "footnote_cluster", "reference_list", "availability_statement", "appendix", "code", "other"]},
           "label": {"type": "string", "minLength": 1},
           "status": {"enum": ["checked_no_issue", "findings", "bounded", "not_applicable"]},
@@ -35,12 +44,55 @@
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "label": {"type": "string", "minLength": 1},
-          "branch": {"enum": ["universal", "empirical", "descriptive", "structural", "macro", "theory", "mixed"]},
+          "branch": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,79}$",
+            "description": "Routing label; may use a source-derived extension rather than forcing a legacy paper family."
+          },
           "status": {"enum": ["checked_no_issue", "findings", "bounded", "not_applicable"]},
           "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
           "notes": {"type": "string"}
         }
       }
+    },
+    "burden_audits": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["burden_id", "parent_id", "status", "coverage_unit_ids", "finding_ids", "notes"],
+        "properties": {
+          "burden_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]{2,79}$"},
+          "parent_id": {"type": "string", "minLength": 1},
+          "status": {"enum": ["checked_no_issue", "findings", "bounded", "not_applicable"]},
+          "coverage_unit_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "finding_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "notes": {"type": "string", "minLength": 1}
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"status": {"const": "findings"}}, "required": ["status"]},
+            "then": {"properties": {"finding_ids": {"minItems": 1}}}
+          },
+          {
+            "if": {"properties": {"status": {"enum": ["checked_no_issue", "not_applicable"]}}, "required": ["status"]},
+            "then": {"properties": {"finding_ids": {"maxItems": 0}}}
+          }
+        ]
+      }
+    },
+    "source_inventory": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/sourceInventoryRecord"}
     },
     "second_sweep": {
       "type": "object", "additionalProperties": false,
@@ -53,5 +105,104 @@
         "shortfall_explanation": {"type": ["string", "null"]}
       }
     }
-  }
+  },
+  "$defs": {
+    "sourceInventoryRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "source_id", "object_type", "object_id", "locator", "state",
+        "anchor_ids", "coverage_unit_ids", "audit_record_id", "duplicate_of", "reason"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^INV-[0-9]{3,}$"},
+        "source_id": {"type": "string", "pattern": "^SRC-[0-9]{2,}$"},
+        "object_type": {
+          "enum": [
+            "outline_heading", "outline_environment", "pdf_page", "pdf_block",
+            "pdf_table", "pdf_figure", "pdf_equation"
+          ]
+        },
+        "object_id": {"type": "string", "minLength": 1},
+        "locator": {"type": "string", "minLength": 1},
+        "state": {"enum": ["covered", "duplicate", "false_positive", "bounded", "excluded"]},
+        "anchor_ids": {
+          "type": "array", "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"}
+        },
+        "coverage_unit_ids": {
+          "type": "array", "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "audit_record_id": {
+          "type": ["string", "null"],
+          "pattern": "^(?:FIG|TBL)-[0-9]{2,}$"
+        },
+        "duplicate_of": {"type": ["string", "null"], "minLength": 1},
+        "reason": {"type": ["string", "null"], "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"state": {"const": "covered"}}, "required": ["state"]},
+          "then": {
+            "properties": {
+              "coverage_unit_ids": {"minItems": 1},
+              "duplicate_of": {"type": "null"},
+              "reason": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"state": {"const": "duplicate"}}, "required": ["state"]},
+          "then": {
+            "properties": {
+              "anchor_ids": {"maxItems": 0},
+              "coverage_unit_ids": {"maxItems": 0},
+              "audit_record_id": {"type": "null"},
+              "duplicate_of": {"type": "string", "minLength": 1},
+              "reason": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"state": {"enum": ["false_positive", "excluded"]}},
+            "required": ["state"]
+          },
+          "then": {
+            "properties": {
+              "anchor_ids": {"maxItems": 0},
+              "coverage_unit_ids": {"maxItems": 0},
+              "audit_record_id": {"type": "null"},
+              "duplicate_of": {"type": "null"},
+              "reason": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"state": {"const": "bounded"}}, "required": ["state"]},
+          "then": {
+            "properties": {
+              "audit_record_id": {"type": "null"},
+              "duplicate_of": {"type": "null"},
+              "reason": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"schema_version": {"const": "0.2"}}, "required": ["schema_version"]},
+      "then": {
+        "required": ["burden_audits"],
+        "properties": {
+          "units": {
+            "items": {"required": ["source_id", "anchor_ids"]}
+          }
+        }
+      }
+    }
+  ]
 }

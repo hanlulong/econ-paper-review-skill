@@ -23,12 +23,18 @@ function run(command, args, extraEnv = {}) {
 }
 
 await withPreservedReviewBundle(reviewsRoot, async () => {
-  await run("npm", ["run", "build"], { ALLOW_PUBLISH: "1" });
-  const tests = (await readdir(resolve(viewerRoot, "tests")))
-    .filter((name) => name.endsWith(".test.mjs"))
-    .sort()
-    .map((name) => resolve(viewerRoot, "tests", name));
-  // Node 22.18+ strips erasable TypeScript syntax by default. Keep the test
-  // harness runnable on the project's supported 22.14 baseline as well.
-  await run(process.execPath, ["--experimental-strip-types", "--test", ...tests]);
+  try {
+    await run("npm", ["run", "build"], { ALLOW_PUBLISH: "1" });
+    const tests = (await readdir(resolve(viewerRoot, "tests")))
+      .filter((name) => name.endsWith(".test.mjs"))
+      .sort()
+      .map((name) => resolve(viewerRoot, "tests", name));
+    // Node 22.18+ strips erasable TypeScript syntax by default. Keep the test
+    // harness runnable on the project's supported 22.14 baseline as well.
+    await run(process.execPath, ["--experimental-strip-types", "--test", ...tests]);
+  } finally {
+    // Remove the synthetic build copy before the outer helper restores any
+    // pre-test public bundle. This holds even when build or tests fail.
+    await run(process.execPath, ["scripts/clear-review-bundles.mjs"]);
+  }
 });

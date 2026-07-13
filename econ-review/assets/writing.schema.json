@@ -7,10 +7,13 @@
   "required": ["schema_version", "review_id", "scope", "mechanics", "consistency_groups", "style_suggestions"],
   "properties": {
     "schema_version": {
-      "enum": ["0.1", "0.2", "0.3"],
-      "description": "Writing-audit version, independent of the review-contract version. Version 0.3 is current and excludes routine bibliography and citation-accuracy auditing."
+      "enum": ["0.1", "0.2", "0.3", "0.4"],
+      "description": "Writing-audit version, independent of the review-contract version. Version 0.4 is current, supplies every author-facing preamble section from canonical JSON, and excludes routine bibliography and citation-accuracy auditing."
     },
     "review_id": {"type": "string", "minLength": 1},
+    "assessment_summary": {"type": "string", "minLength": 1},
+    "terminology_summary": {"type": "string", "minLength": 1},
+    "exhibit_summary": {"type": "string", "minLength": 1},
     "paper_type_lens": {"type": "string", "minLength": 1},
     "strengths": {
       "type": "array", "uniqueItems": true,
@@ -27,6 +30,8 @@
           "what_works": {"type": "string", "minLength": 1},
           "reader_friction": {"type": "string", "minLength": 1},
           "revision_direction": {"type": "string", "minLength": 1},
+          "coverage_unit_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "evidence_refs": {"$ref": "#/$defs/sourceEvidenceRefs"},
           "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
         }
       }
@@ -40,6 +45,8 @@
           "idea": {"type": "string", "minLength": 1},
           "locations": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
           "recommended_home": {"type": "string", "minLength": 1},
+          "coverage_unit_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "evidence_refs": {"$ref": "#/$defs/sourceEvidenceRefs"},
           "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
         }
       }
@@ -68,6 +75,9 @@
       "properties": {
         "inventory_complete_within_assessment_boundary": {"const": true},
         "sources_checked": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "source_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^SRC-[0-9]{2,}$"}},
+        "scope_anchor_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"}},
+        "coverage_unit_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
         "render_checked": {"type": "boolean"},
         "boundary_notes": {"type": "string", "minLength": 1}
       }
@@ -93,6 +103,8 @@
                 "locator": {"type": "string", "minLength": 1},
                 "quote": {"type": "string", "minLength": 1},
                 "correction": {"type": "string", "minLength": 1},
+                "anchor_id": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"},
+                "representation": {"enum": ["verbatim", "normalized_transcription"]},
                 "render_verification": {"enum": ["verified_render", "not_needed", "bounded", "extraction_artifact_rejected"]},
                 "source_provenance": {"enum": ["main_manuscript", "author_appendix", "fielded_instrument", "transcription", "unresolved"]}
               }
@@ -102,6 +114,8 @@
           "priority": {"enum": ["required_copyedit", "recommended_copyedit", "optional_style", "not_applicable"]},
           "render_verification": {"enum": ["verified_render", "not_needed", "bounded"]},
           "notes": {"type": "string", "minLength": 1},
+          "coverage_unit_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "evidence_refs": {"$ref": "#/$defs/sourceEvidenceRefs"},
           "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
         },
         "allOf": [
@@ -124,6 +138,8 @@
           "preferred": {"type": "string", "minLength": 1},
           "status": {"enum": ["consistent", "issue", "bounded"]},
           "locations_checked": {"type": "string", "minLength": 1},
+          "coverage_unit_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "evidence_refs": {"$ref": "#/$defs/sourceEvidenceRefs"},
           "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
         }
       }
@@ -139,6 +155,8 @@
           "current_problem": {"type": "string", "minLength": 1},
           "suggested_revision": {"type": "string", "minLength": 1},
           "priority": {"enum": ["substantive", "recommended", "optional"]},
+          "coverage_unit_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "evidence_refs": {"$ref": "#/$defs/sourceEvidenceRefs"},
           "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
         }
       }
@@ -206,6 +224,29 @@
       }
     }
   },
+  "$defs": {
+    "sourceEvidenceRefs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "id", "purpose"],
+        "properties": {
+          "kind": {"enum": ["anchor", "finding_evidence", "computation", "external_support"]},
+          "id": {"type": "string", "minLength": 1},
+          "purpose": {"enum": ["direct_support", "checked_absence"]}
+        },
+        "allOf": [
+          {"if": {"properties": {"kind": {"const": "anchor"}}, "required": ["kind"]}, "then": {"properties": {"id": {"pattern": "^ANC-[0-9]{2,}$"}}}},
+          {"if": {"properties": {"kind": {"const": "finding_evidence"}}, "required": ["kind"]}, "then": {"properties": {"id": {"pattern": "^EVD-[A-Z0-9_-]+$"}}}},
+          {"if": {"properties": {"kind": {"const": "computation"}}, "required": ["kind"]}, "then": {"properties": {"id": {"pattern": "^CMP-[0-9]{2,}$"}}}},
+          {"if": {"properties": {"kind": {"const": "external_support"}}, "required": ["kind"]}, "then": {"properties": {"id": {"pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"}}}}
+        ]
+      }
+    }
+  },
   "allOf": [
     {
       "if": {
@@ -235,6 +276,59 @@
         "properties": {
           "strengths": {"minItems": 1},
           "section_audit": {"minItems": 1},
+          "finding_links": {
+            "items": {
+              "properties": {
+                "sources": {
+                  "items": {"enum": ["mechanics", "consistency", "style", "section", "redundancy", "venue"]}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"schema_version": {"const": "0.4"}}, "required": ["schema_version"]},
+      "then": {
+        "required": [
+          "assessment_summary", "terminology_summary", "exhibit_summary",
+          "paper_type_lens", "strengths", "section_audit", "redundancy_map",
+          "highest_return_finding_ids", "finding_links", "venue_fit"
+        ],
+        "not": {"required": ["reference_audit"]},
+        "properties": {
+          "strengths": {"minItems": 1},
+          "section_audit": {"minItems": 1},
+          "venue_fit": {
+            "properties": {
+              "candidates": {
+                "items": {
+                  "properties": {
+                    "official_scope_url": {"pattern": "^https://"},
+                    "recent_comparator_urls": {
+                      "items": {"pattern": "^https://"}
+                    }
+                  }
+                }
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {"status": {"const": "not_requested"}},
+                  "required": ["status"]
+                },
+                "then": {
+                  "properties": {
+                    "as_of_date": {"const": null},
+                    "candidates": {"maxItems": 0},
+                    "finding_ids": {"maxItems": 0}
+                  }
+                }
+              }
+            ]
+          },
           "finding_links": {
             "items": {
               "properties": {

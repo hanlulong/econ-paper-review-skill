@@ -54,6 +54,22 @@ test("deduplicates identical resolved images while retaining all distinct views"
   assert.equal(renders[1].resolvedPath, "/page.png");
 });
 
+test("current manifests override filename heuristics with a declared render role", () => {
+  const renders = orderExhibitRenders([
+    {
+      sourcePath: "vendor/opaque/asset-a.png",
+      resolvedPath: "blob:crop",
+      declaredRole: "exhibit_crop",
+    },
+    {
+      sourcePath: "vendor/opaque/asset-b.png",
+      resolvedPath: "blob:page",
+      declaredRole: "full_source_page",
+    },
+  ]);
+  assert.deepEqual(renders.map((render) => render.role), ["exhibit_crop", "full_source_page"]);
+});
+
 test("the viewer uses the ordered render for both evidence views and exposes descriptive controls", async () => {
   const workspace = await readFile(new URL("../app/review-workspace.tsx", import.meta.url), "utf8");
   assert.match(workspace, /orderExhibitRenders/);

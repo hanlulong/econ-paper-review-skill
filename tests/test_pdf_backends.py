@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import types
@@ -27,7 +28,7 @@ class FakeResponse:
     ) -> None:
         self.status_code = status_code
         self._value = value
-        self.content = content
+        self.content = content or (json.dumps(value).encode("utf-8") if value is not None else b"")
         self.headers = headers or {}
 
     def json(self) -> object:
@@ -55,6 +56,17 @@ class FakeSession:
 
 
 class PdfBackendTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.requests_version = mock.patch.object(
+            MODULE,
+            "mathpix_http_requirement_status",
+            return_value=MODULE.RequirementStatus(
+                "requests", "requests>=2.32,<3", "2.32.0", "compatible",
+            ),
+        )
+        self.requests_version.start()
+        self.addCleanup(self.requests_version.stop)
+
     @staticmethod
     def requests_module(session: FakeSession) -> object:
         return types.SimpleNamespace(Session=lambda: session)
@@ -153,6 +165,96 @@ class PdfBackendTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.BackendError, "response limit"):
             MODULE._bounded_content(response, "mmd")
 
+    def test_mathpix_control_response_is_bounded_before_json_parsing(self) -> None:
+        response = FakeResponse(
+            200, value={"pdf_id": "pdf_safe_123"},
+            headers={"Content-Length": str(MODULE.MAX_VENDOR_CONTROL_BYTES + 1)},
+        )
+        with self.assertRaisesRegex(MODULE.BackendError, "response limit"):
+            MODULE._bounded_json(response, "submission")
+
+    def test_mathpix_control_response_rejects_ambiguous_json(self) -> None:
+        for content in (
+            b'{"pdf_id":"first","pdf_id":"second"}',
+            b'{"percent_done":NaN}',
+        ):
+            with self.subTest(content=content):
+                response = FakeResponse(200, content=content)
+                with self.assertRaisesRegex(MODULE.BackendError, "not valid JSON"):
+                    MODULE._bounded_json(response, "status")
+
+    def test_backend_artifacts_require_portable_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "CON.json").write_text("{}", encoding="utf-8")
+            with self.assertRaisesRegex(MODULE.BackendError, "output path is not portable"):
+                MODULE._safe_artifacts(root, "evidence/pdf-ingestion/SRC-01")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "result.json").write_text("{}", encoding="utf-8")
+            with self.assertRaisesRegex(MODULE.BackendError, "review root is not portable"):
+                MODULE._safe_artifacts(root, "evidence/../outside")
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFO creation unavailable")
+    def test_backend_artifacts_reject_non_regular_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "result.json").write_text("{}", encoding="utf-8")
+            os.mkfifo(root / "control.json")
+            with self.assertRaisesRegex(MODULE.BackendError, "only regular files"):
+                MODULE._safe_artifacts(root, "evidence/pdf-ingestion/SRC-01")
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
+    def test_private_write_refuses_symlink_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            outside = root / "outside.md"
+            outside.write_text("preserve me\n", encoding="utf-8")
+            linked = root / "linked.md"
+            linked.symlink_to(outside)
+            with self.assertRaisesRegex(MODULE.BackendError, "destination is unsafe"):
+                MODULE._private_write(linked, b"overwritten\n")
+            self.assertEqual(outside.read_text(encoding="utf-8"), "preserve me\n")
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
+    def test_docling_rejects_symlink_output_before_rewriting(self) -> None:
+        outside: Path | None = None
+
+        def fake_run(command: list[str], **_: object) -> object:
+            nonlocal outside
+            output = Path(command[command.index("--output") + 1])
+            output.mkdir(parents=True, exist_ok=True)
+            outside = output.parent / "outside.md"
+            outside.write_text("preserve me\n", encoding="utf-8")
+            (output / "original.md").symlink_to(outside)
+            (output / "original.json").write_text(
+                json.dumps({"schema_name": "DoclingDocument", "pages": {}}),
+                encoding="utf-8",
+            )
+            return type("Result", (), {"stdout": b"", "stderr": b""})()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pdf = root / "source.pdf"
+            pdf.write_bytes(b"%PDF synthetic")
+            with mock.patch.object(MODULE.shutil, "which", return_value="/fake/docling"), \
+                    mock.patch.object(
+                        MODULE, "docling_requirement_status",
+                        return_value=MODULE.RequirementStatus(
+                            "docling", "docling==2.102.1", "2.102.1", "compatible",
+                        ),
+                    ), \
+                    mock.patch.object(MODULE.subprocess, "run", side_effect=fake_run):
+                with self.assertRaisesRegex(MODULE.BackendError, "symbolic links"):
+                    MODULE.run_docling(
+                        pdf, root / "stage", "evidence/pdf-ingestion/SRC-01",
+                        allow_model_downloads=False, enrich_formulas=False,
+                        timeout=120, device="cpu",
+                    )
+            assert outside is not None
+            self.assertEqual(outside.read_text(encoding="utf-8"), "preserve me\n")
+
     def test_docling_proposal_rewrites_staging_paths_and_records_artifacts(self) -> None:
         def fake_run(command: list[str], **_: object) -> object:
             output = Path(command[command.index("--output") + 1])
@@ -185,6 +287,12 @@ class PdfBackendTests(unittest.TestCase):
             pdf.write_bytes(b"%PDF synthetic")
             with mock.patch.object(MODULE.shutil, "which", return_value="/fake/docling"), \
                     mock.patch.object(MODULE, "docling_version", return_value="2.102.1"), \
+                    mock.patch.object(
+                        MODULE, "docling_requirement_status",
+                        return_value=MODULE.RequirementStatus(
+                            "docling", "docling==2.102.1", "2.102.1", "compatible",
+                        ),
+                    ), \
                     mock.patch.object(MODULE.subprocess, "run", side_effect=fake_run):
                 proposal = MODULE.run_docling(
                     pdf, root / "stage", "evidence/pdf-ingestion/SRC-01",

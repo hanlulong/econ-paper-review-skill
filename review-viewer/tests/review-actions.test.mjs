@@ -1,23 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import ts from "typescript";
 
-async function loadModule() {
-  const source = await readFile(new URL("../lib/review-actions.ts", import.meta.url), "utf8");
-  const compiled = ts.transpileModule(source, {
-    compilerOptions: {
-      module: ts.ModuleKind.ES2022,
-      target: ts.ScriptTarget.ES2022,
-    },
-    fileName: "review-actions.ts",
-    reportDiagnostics: true,
-  });
-  assert.deepEqual(compiled.diagnostics ?? [], []);
-  return import(`data:text/javascript;base64,${Buffer.from(compiled.outputText).toString("base64")}`);
-}
-
-const actions = await loadModule();
+// The repository test command enables Node's TypeScript stripping. Import the
+// real module graph so relative dependencies (for example strict-json.ts) are
+// exercised exactly as they are in the application.
+const actions = await import("../lib/review-actions.ts");
 const actionSchema = JSON.parse(await readFile(new URL("../../econ-review/assets/review-actions.schema.json", import.meta.url), "utf8"));
 const T0 = "2026-07-12T12:00:00.000Z";
 const T1 = "2026-07-12T12:05:00.000Z";
@@ -86,6 +74,18 @@ test("portable source provenance omits local directories and disambiguates dupli
   ]);
   const rendered = JSON.stringify(sources);
   assert.doesNotMatch(rendered, /Users|Secret Project|Clients|Confidential|private/);
+});
+
+test("portable source provenance normalizes unsafe local filename details", () => {
+  assert.deepEqual(actions.privacySafeSourceManuscripts([
+    { path: "/private/draft:e\u0301conomie.md.", sha256: SHA },
+    { path: "/private/..", sha256: null },
+    { path: "/private/NUL.txt", sha256: null },
+  ]), [
+    { path: "draft-économie.md", sha256: SHA },
+    { path: "manuscript-2", sha256: null },
+    { path: "manuscript-3", sha256: null },
+  ]);
 });
 
 test("legacy addressed and parked statuses migrate to external dispositions", () => {
@@ -169,6 +169,18 @@ test("strict parsing rejects unsupported fields and internally inconsistent entr
     () => actions.parseReviewActions(payload({ source_manuscripts: [{ path: "paper.md ", sha256: SHA }] })),
     /source_manuscripts\[0\]\.path must be trimmed/,
   );
+  for (const path of ["../paper.md", "C:/paper.md", "paper.md.", "e\u0301conomie.md", "bad\u0000name.md", "NUL.txt", "evidence/COM1.json"]) {
+    assert.throws(
+      () => actions.parseReviewActions(payload({ source_manuscripts: [{ path, sha256: SHA }] })),
+      /canonical portable relative path/,
+    );
+  }
+  assert.throws(
+    () => actions.parseReviewActions(payload({ source_manuscripts: [
+      { path: "Paper.md", sha256: SHA }, { path: "paper.md", sha256: SHA },
+    ] })),
+    /case-unambiguous/,
+  );
   const untrimmedLocation = entry();
   untrimmedLocation.changed_locations = [" Section 4"];
   assert.throws(
@@ -229,6 +241,18 @@ test("status history is append-only and note-only changes preserve it", () => {
     () => actions.updateReviewAction(noted, "IDENT-01", { disposition: "open" }, T0),
     /cannot move backwards/,
   );
+});
+
+test("independently initialized findings receive globally unique action events", () => {
+  const first = actions.updateReviewAction(undefined, "IDENT-01", { disposition: "ready_for_recheck" }, T1);
+  const second = actions.updateReviewAction(undefined, "WRITING-02", { disposition: "challenged" }, T1);
+  const generated = actions.generateReviewActionsPayload({
+    source_review_id: "review-1",
+    source_review_fingerprint: "ledger-v1",
+    exported_at: T2,
+    entries: [first, second],
+  });
+  assert.equal(new Set(generated.entries.flatMap((item) => item.events.map((event) => event.event_id))).size, 4);
 });
 
 test("undoing a status appends a reversal instead of rewriting action history", () => {

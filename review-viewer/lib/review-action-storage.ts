@@ -6,6 +6,7 @@ import {
   type ReviewActionEntry,
   type ReviewActionsPayload,
 } from "./review-actions.ts";
+import { parseStrictJson } from "./strict-json.ts";
 
 export const REVIEW_ACTION_STORAGE_VERSION = 3;
 const REVIEW_ID_ONLY_STORAGE_VERSION = 2;
@@ -15,7 +16,8 @@ export type ReviewActionStorage = Pick<Storage, "length" | "key" | "getItem" | "
 export type StoredActionRestore = { entries: Record<string, ReviewActionEntry>; warning: string };
 
 export function reviewActionStoragePrefix(reviewId: string) {
-  return `review-desk:v${REVIEW_ACTION_STORAGE_VERSION}:${reviewId}:`;
+  // Encode the component so clearing review "a" cannot match review "a:b".
+  return `review-desk:v${REVIEW_ACTION_STORAGE_VERSION}:${encodeURIComponent(reviewId)}:`;
 }
 
 export function reviewActionStorageKey(reviewId: string, fingerprint: string) {
@@ -36,7 +38,7 @@ function parseStoredPayload(
   reviewId: string,
   fingerprint: string,
 ): ReviewActionsPayload {
-  const parsed: unknown = JSON.parse(value);
+  const parsed = parseStrictJson(value);
   if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && "kind" in parsed) {
     return parseReviewActions(parsed);
   }
@@ -138,10 +140,12 @@ export function restoreBrowserReviewActions(
     }
 
     const legacyPrefix = `review-desk:v${LEGACY_WORKSPACE_STORAGE_VERSION}:${current.review_id}:`;
-    const legacyKeys = keys.filter((key) => key.startsWith(legacyPrefix));
+    const legacyKeys = keys.filter((key) => (
+      key.startsWith(legacyPrefix) && /^[a-f0-9]{64}$/.test(key.slice(legacyPrefix.length))
+    ));
     const exactLegacy = storage.getItem(`${legacyPrefix}${current.review_fingerprint}`);
     if (exactLegacy) {
-      const entries = migrateLegacyWorkspace(JSON.parse(exactLegacy));
+      const entries = migrateLegacyWorkspace(parseStrictJson(exactLegacy));
       const allowed = new Set(current.finding_ids);
       return {
         entries: Object.fromEntries(Object.entries(entries).filter(([findingId]) => allowed.has(findingId))),
@@ -190,12 +194,16 @@ export function persistBrowserReviewActions(
 
 /** Delete every browser-side action snapshot for one review, including legacy formats. */
 export function clearBrowserReviewActions(storage: ReviewActionStorage, reviewId: string): number {
-  const prefixes = [
-    `review-desk:v${REVIEW_ACTION_STORAGE_VERSION}:${reviewId}:`,
-    `review-desk:v${LEGACY_WORKSPACE_STORAGE_VERSION}:${reviewId}:`,
-  ];
+  const currentPrefix = reviewActionStoragePrefix(reviewId);
+  const legacyPrefix = `review-desk:v${LEGACY_WORKSPACE_STORAGE_VERSION}:${reviewId}:`;
   const exactKeys = new Set([`review-desk:v${REVIEW_ID_ONLY_STORAGE_VERSION}:${reviewId}`]);
-  const keys = storageKeys(storage).filter((key) => exactKeys.has(key) || prefixes.some((prefix) => key.startsWith(prefix)));
+  const keys = storageKeys(storage).filter((key) => (
+    exactKeys.has(key)
+    || key.startsWith(currentPrefix)
+    // Legacy v1 stored a SHA-256 ledger fingerprint after the final colon.
+    // Checking the suffix prevents review "a" from clearing review "a:b".
+    || (key.startsWith(legacyPrefix) && /^[a-f0-9]{64}$/.test(key.slice(legacyPrefix.length)))
+  ));
   for (const key of keys) storage.removeItem(key);
   return keys.length;
 }

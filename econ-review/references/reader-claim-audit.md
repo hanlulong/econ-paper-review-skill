@@ -2,6 +2,15 @@
 
 Use this protocol in every full review and whenever the user asks whether a paper is clear, internally consistent, convincing, or appropriately calibrated. The audit asks what a careful economics reader would understand after one pass. It is not a copy-editing checklist and does not reward a preferred style.
 
+## Contents
+
+- [Reader and cross-section claim maps](#1-build-the-reader-map)
+- [Terminology and variable definitions](#3-build-the-terminology-and-variable-map)
+- [Claim calibration and convincingness](#4-calibrate-the-claim-strength)
+- [Data-limit fairness](#6-apply-the-data-limitation-fairness-gate)
+- [Tone and writing passes](#7-audit-author-facing-tone)
+- [Admission and verification](#9-admission-and-verification-rules)
+
 ## 1. Build the reader map
 
 For the title, abstract, introduction, each substantive section, and conclusion, record:
@@ -44,6 +53,10 @@ Do not require definitions of universally standard notation when the local meani
 
 Record the manuscript coverage units checked for terminology and variables, including numbered equations and definition-bearing exhibit notes. Mark the inventory complete within the declared assessment boundary. An undefined, inconsistent, or overloaded load-bearing item cannot remain as an unmapped adverse state: link it to a verified finding. A remotely defined item needs a finding only when the search cost is material.
 
+Make this inventory auditable rather than retrospective. For every PDF source, reconcile the exact `ingestion.json.symbols` inventory and assign each candidate one disposition: mapped load-bearing term, standard unambiguous notation, prose noise, extraction artifact, or non-load-bearing notation. Retain the candidate's exact codepoints and all block-derived occurrence anchors. For structured Markdown or TeX, declare the candidate inventory produced by the source pass; if no dependable candidate pass can be completed, use a bounded manual scope with the reason instead of claiming completeness. Every mapped term records a precise first-use anchor and, when defined, at least one definition anchor. An undefined mapped term records a source-wide checked-absence anchor. Standard notation still records its first occurrence and a paper-specific reason; “standard” is not a catch-all for unexamined symbols.
+
+The structured claim ledger uses the same typed evidence-reference vocabulary as the writing audit. `direct_support` resolves to a precise anchor, passed finding evidence, computation, or verified external support record; `checked_absence` resolves to a source-wide scope anchor or passed absence-scope evidence. A clean reader or term state cannot be certified by free text, an unrelated anchor, reviewer observation, or evidence attached to a dismissed, resolved, pending, failed, or bounded finding.
+
 ## 4. Calibrate the claim strength
 
 Use the strongest level supported by the paper, not the strongest available verb:
@@ -63,9 +76,13 @@ For every important inference, verify that a reader can see the complete chain:
 
 `claim -> evidence or result -> warrant connecting evidence to claim -> uncertainty or maintained assumptions -> bounded takeaway`.
 
+For headline contributions, expand this into the economic chain required by [argument-evidence-audit.md](argument-evidence-audit.md): identify the role of each measured or modeled intermediate object, the decision or equilibrium endpoint, and the strongest bypass channel or reverse ordering. A reader may understand the prose while remaining unconvinced that an intermediate outcome is necessary, causal, or economically consequential. Do not repair that gap by demanding a formal model automatically; first state the missing warrant and the strongest narrower contribution.
+
 Create a finding when a missing or contradictory link changes what the reader is entitled to conclude. Ask for intuition only when the formal or empirical step is otherwise hard to evaluate. Do not demand more discussion when the chain is already clear.
 
 In the report, answer the reader-level question directly: identify which parts of the central argument are convincing, which links remain provisional or unsupported, and the smallest changes that would make the argument persuasive. Distinguish a technically valid but poorly explained step from a well-explained step that lacks evidentiary support.
+
+Also reconcile results the paper asks the reader to connect. A difference is not an inconsistency until comparison, population or domain, horizon, estimand, support, and ordering have been checked. Record explained differences as checked-clean rather than manufacturing a concern.
 
 ## 6. Apply the data-limitation fairness gate
 
@@ -119,5 +136,7 @@ Retain a clarity, consistency, or tone finding only when:
 - the manuscript's other occurrences and qualifiers were checked;
 - the strongest supported replacement claim or concrete clarification is supplied;
 - the fix improves comprehension, evidentiary calibration, or credibility rather than enforcing taste.
+
+For current full reviews, exact quotations and source-derived locators in the claim and writing ledgers must reconcile to the canonical source anchor. Normalized transcription may reconcile quote marks, Unicode composition, and whitespace for comparison; it must not apply compatibility normalization, fold letter case, or change words, symbols, signs, or meaning. Claim-family, reader-row, term-row, writing-row, evidence, and coverage links are reciprocal, so removing or dismissing one side cannot leave a falsely clean certification.
 
 Before shipping, run a cold-reader pass on the report itself. Check that its summary, severity, descriptions, and fixes do not overclaim the evidence, treat inherent data limits as faults, or use a harsher tone than the manuscript evidence warrants.

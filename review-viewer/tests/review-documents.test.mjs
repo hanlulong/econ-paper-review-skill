@@ -8,6 +8,7 @@ import {
   markdownHeadingSlug,
   resolveReviewDocumentLink,
   resolveReviewDocumentHref,
+  safeExternalReviewDocumentHref,
   sortReviewDocuments,
   validateReviewDocumentManifest,
 } from "../lib/review-documents.ts";
@@ -42,7 +43,7 @@ test("validates arbitrary review documents and rejects ambiguous manifests", asy
   }
 });
 
-test("rejects traversal, URLs, platform separators, and non-Markdown paths", () => {
+test("rejects traversal, URLs, platform aliases, and non-Markdown paths", () => {
   for (const path of [
     "report.md",
     "reports/custom-analysis.md",
@@ -61,7 +62,30 @@ test("rejects traversal, URLs, platform separators, and non-Markdown paths", () 
     "reports/report.md?download=1",
     "reports/report.txt",
     " reports/report.md",
+    "audit./report.md",
+    "e\u0301vidence/report.md",
+    "audit/bad\u0000name.md",
+    "audit/CON.md",
   ]) assert.equal(isSafeReviewDocumentPath(path), false, path);
+});
+
+test("rejects document paths that collide on common case-insensitive filesystems", () => {
+  assert.throws(() => validateReviewDocumentManifest({
+    schema_version: "0.1",
+    review_id: "review-001",
+    documents: [
+      { id: "mechanism-note", title: "Mechanism note", group: "reports", path: "reports/mechanism-note.md", order: 70 },
+      { id: "mechanism-copy", title: "Mechanism copy", group: "reports", path: "Reports/mechanism-note.md", order: 71 },
+    ],
+  }), /case-unambiguous/);
+});
+
+test("allows only explicit HTTP(S) links outside declared review documents", () => {
+  assert.equal(safeExternalReviewDocumentHref("https://example.test/paper?q=1"), "https://example.test/paper?q=1");
+  assert.equal(safeExternalReviewDocumentHref("HTTP://example.test/paper"), "http://example.test/paper");
+  for (const unsafe of ["/internal", "../outside.md", "javascript:alert(1)", "data:text/html,x", "file:///private/paper.pdf", " https://example.test"]) {
+    assert.equal(safeExternalReviewDocumentHref(unsafe), null);
+  }
 });
 
 test("sorts documents by stable group, explicit order, title, ID, and path", () => {
@@ -186,6 +210,9 @@ test("every synced manifest reference exists and remains inside its synthetic bu
     const base = new URL(`../public/reviews/${entry.slug}/`, import.meta.url);
     const manifest = validateReviewDocumentManifest(await readFile(new URL("review-manifest.json", base), "utf8"));
     const run = JSON.parse(await readFile(new URL("run.json", base), "utf8"));
+    const sourceManifest = JSON.parse(await readFile(new URL("evidence/source-manifest.json", base), "utf8"));
+    const sourceMarkdown = new Set(sourceManifest.sources.flatMap((source) => [source.path, source.extraction?.path])
+      .filter((path) => typeof path === "string" && /\.md$/i.test(path)));
     assert.equal(manifest.review_id, run.review_id);
     for (const document of manifest.documents) {
       assert.equal(isSafeReviewDocumentPath(document.path), true);
@@ -198,7 +225,7 @@ test("every synced manifest reference exists and remains inside its synthetic bu
         const parent = candidate.parentPath.replace(new URL(base).pathname.replace(/\/$/, ""), "").replace(/^\//, "");
         return parent ? `${parent}/${candidate.name}` : candidate.name;
       })
-      .filter((path) => path !== "manuscript.md")
+      .filter((path) => !sourceMarkdown.has(path))
       .sort();
     assert.deepEqual(
       bundledMarkdown,

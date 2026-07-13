@@ -1,5 +1,14 @@
 # Workflow and Run State
 
+## Contents
+
+- [Mode matrix](#mode-matrix)
+- [Stage and overall run state](#stage-state)
+- [Assessment boundary](#assessment-boundary)
+- [Identity and literature degradation](#best-effort-identity-minimization)
+- [Parsing and numerical degradation](#parsing-degradation)
+- [Checkpoint behavior](#checkpoint-behavior)
+
 ## Mode matrix
 
 | Stage | `quick` | `full` |
@@ -10,21 +19,21 @@
 | Literature frontier | Closest papers needed for contribution risk; venue work only when requested | Full closest-paper and claimed-gap check; add venue evidence only when requested |
 | Candidate audit | Top risks only | Exhaustive section, rendered table/figure, analytical-ledger, and dimension sweeps; conditional lenses |
 | Counterargument | Required for reported major risks | Independent refutation where available for critical/major; fairness check for every minor |
-| Synthesis | Up to 3 risks | Up to 3 essentials plus every surviving detailed comment, ranked 1..N |
+| Synthesis | Up to 3 central risks in the bounded pass | Normally a few root-cause essentials, with every independently or cumulatively dispositive concern preserved, plus every surviving detailed comment ranked 1..N |
 | Verification | Required | Required for every detailed comment, line by line |
 | Outputs | Current-contract core (`run.json`, `findings.json`, `synthesis.json`, `report.md`, `fix-plan.md`); `writing-report.md` when writing findings exist or writing analysis is requested | Complete current-contract package, including structured source/verification records, `synthesis.json`, and `writing-report.md` |
 
-Do not market `quick` as a low-quality review. Make it narrower and explicit about what was not assessed.
+Do not market `quick` as a low-quality review. Make it narrower and explicit about what was not assessed. Its categorical risk label is technical or revision risk when no venue or broad tier supplies a publication bar; in that case publication posture remains `Not assessed`.
 
 Set expectations qualitatively rather than promising a fixed runtime. A quick review is one bounded pass over the central claim and largest risks; a full review is a multi-pass inventory of every available section and exhibit and will take materially longer. During an interactive run, report each material stage transition (intake, reconstruction, audit, synthesis, and verification), including a short progress result and the next stage. Do not stream every internal check or substitute progress messages for the saved `stage_status` record.
 
-Contract v0.4 adds a source-grounded trust spine and atomic finalization while retaining canonical synthesis plus separate substance and writing reports. Existing v0.1–v0.3 reviews remain valid under their declared layouts. Select only a version supported by the installed schemas and validator; never relabel an existing review merely to obtain a new presentation or trust marker.
+Contract v0.4 adds a source-grounded trust spine and fail-closed finalization with per-file atomic replacement while retaining canonical synthesis plus separate substance and writing reports. Current full runs record optional author-facing analyses in `requested_addons` and generate the writing-report preamble from writing-audit v0.4; journal fit appears only under its explicit flag. Existing v0.1–v0.3 reviews remain valid under their declared layouts. Select only a version supported by the installed schemas and validator; never relabel an existing review merely to obtain a new presentation or trust marker.
 
 ## Stage state
 
 Record each stage as `pending`, `in_progress`, `passed`, `bounded`, `failed`, or `not_applicable`. Use `bounded` when the stage ran but missing inputs or tools limited its conclusion.
 
-For full mode, also record `comment_policy`: the user-requested minimum target, an optional user-requested maximum (`null` otherwise), and whether exhaustive coverage passed. No universal comment count exists. Run a second sweep when an explicit user target remains unmet, source-derived coverage is incomplete, an activated burden is thinly audited relative to the objects it contains, manuscript scale warrants another pass, or the first pass was visibly dominated by one issue class. If fewer comments survive than an explicit target, document the source-specific shortfall and never pad. Do not set `exhaustive=true` until every source-derived unit and activated burden appears in `evidence/coverage.json` and its readable rendering.
+For full mode, also record `comment_policy`: the user-requested minimum target, `maximum: null`, and whether exhaustive coverage passed. A current full review is never truncated by a comment cap; when the user wants a fixed-size output, use the explicitly bounded `quick` mode or ask which objective controls. No universal comment count exists. Run a second sweep when an explicit user target remains unmet, source-derived coverage is incomplete, an activated burden is thinly audited relative to the objects it contains, manuscript scale warrants another pass, or the first pass was visibly dominated by one issue class. If fewer comments survive than an explicit target, document the source-specific shortfall and never pad. Do not set `exhaustive=true` until every source-derived unit and activated burden appears in `evidence/coverage.json` and its readable rendering. Treat `paper_family`, `designs`, and coverage branches as descriptive routing metadata; none activates or suppresses a burden.
 
 Use overall run states:
 
@@ -34,7 +43,7 @@ Use overall run states:
 - `verification_failed`: a draft exists but one or more surviving detailed comments failed verification.
 - `complete`: all promised stages and artifact consistency checks passed.
 
-Never set `complete` merely because files exist. For the current contract, use the atomic finalization command defined by the installed scripts. It stages a completed run and generated artifacts, verifies source integrity, structured evidence, deterministic generation, contract consistency, safe paths, and hashes, commits the staged artifacts, and writes the finalization receipt last as the completion marker. Legacy contracts retain their documented compatibility gates.
+Never set `complete` merely because files exist. For the current contract, use the finalization command defined by the installed scripts. It stages a completed run and generated artifacts, verifies source integrity, structured evidence, deterministic source/coverage/report generation, contract consistency, safe paths, exact gate semantics, and hashes, atomically replaces each generated artifact with rollback on ordinary failures, and writes the finalization receipt last so a partial update cannot remain receipt-valid. Legacy contracts retain their documented compatibility gates.
 
 Do not set `complete` when a comment target remains unexplained. After the required second sweep, a documented evidence-based shortfall is acceptable when exhaustive coverage is otherwise complete; weak comments added to meet a number are not.
 
@@ -42,13 +51,13 @@ Do not set `complete` when a comment target remains unexplained. After the requi
 
 Record:
 
-- every source file supplied;
+- every internal source file supplied, including code and data dictionaries, joined by source ID, path, and hash to the source manifest;
 - whether each was fully read, partially read, unreadable, or not opened;
 - appendix and exhibit coverage;
 - whether figures were visually inspected, only captions/text were available, were not assessed, or were confirmed not present;
 - whether equations were preserved by extraction, render-verified, bounded, not assessed, or confirmed not present;
 - whether literature search was available;
-- whether code was supplied and whether execution was permitted;
+- whether code was not supplied, supplied but review was not permitted, inspected statically, or executed with permission;
 - any page, token, OCR, access, or tool limitations.
 - every section, exhibit, appendix component, and audit dimension checked, through `evidence/coverage.md` in full mode.
 - whether every table was rendered and separately audited, and whether extraction conflicts were resolved;
@@ -64,7 +73,7 @@ Use `not_present` only after inspecting the complete rendered manuscript and con
 
 ## Best-effort identity minimization
 
-In a single-agent v0.1 run, avoid recording identities in reconstruction and evaluation artifacts. If duplicate-publication checks need author variants, perform them after the substantive internal audit and keep identity-bearing queries in the sources audit trail. Label the procedure `identity_minimized`, not `blinded`.
+In a single-agent run, avoid recording identities in reconstruction and evaluation artifacts. If duplicate-publication checks need author variants, perform them after the substantive internal audit and keep identity-bearing queries in the sources audit trail. Label the procedure `identity_minimized`, not `blinded`.
 
 ## Literature degradation
 

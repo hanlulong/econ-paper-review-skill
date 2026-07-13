@@ -27,7 +27,7 @@ Use one or more typed evidence records. `type` names the source object:
 - `absence_scope`: the exact sections, appendix items, exhibits, and search terms checked before claiming something is missing.
 - `computation`: declared source-linked inputs, tool and version, method, tolerance, output artifact, and hash.
 
-Separately, `representation` states what the evidence content is: `verbatim`, `normalized_transcription`, `composite_comparison`, `reviewer_observation`, `checked_absence`, or `computed_result`. A table or figure observation therefore remains evidence type `table_cell` or `figure` with representation `reviewer_observation`; it does not become a quotation. A rendered transcription is normally type `quote` with representation `normalized_transcription` and a render-backed anchor. Keep the visible label consistent with that state: use `[Reviewer observation]`, `[Figure observation]`, or `[Table observation]` for reviewer observations, and reserve `[Rendered transcription]` for an anchor-matching normalized transcription.
+Separately, `representation` states what the evidence content is: `verbatim`, `normalized_transcription`, `composite_comparison`, `reviewer_observation`, `checked_absence`, or `computed_result`. A table or figure observation therefore remains evidence type `table_cell` or `figure` with representation `reviewer_observation`; it does not become a quotation. A rendered transcription is normally type `quote` with representation `normalized_transcription` and a render-backed anchor. Preserve this distinction through typed metadata and presentation semantics: source excerpts may use block quotes; reviewer observations and other derived notes must not. Do not expose internal bracket labels in author-facing reports.
 
 Never invent quotations, line numbers, table values, citations, equations, results, or code behavior. Every retained evidence record must resolve through the source manifest, structured external-source record, computation record, or absence log. If a stable locator is unavailable, label the evidence bounded rather than converting reviewer prose into a quote.
 
@@ -58,5 +58,5 @@ Prefer `inconclusive_from_text` to a manufactured pass or failure. An omission b
 - Do not prescribe a named estimator, package, threshold, or diagnostic unless it addresses the paper's actual threat and fits the design.
 - Do not turn author-acknowledged limitations into self-healing concessions; assess whether the limitation changes the claim.
 - Do not ask the author to write a different paper or perform work without decision value.
-- Never present a review posture as an editorial decision or replace human judgment.
+- Never imply that an editor has decided the paper or replace human judgment.
 - Name what already works and what should be preserved when a repair changes a load-bearing section, exhibit, proof, or design choice.

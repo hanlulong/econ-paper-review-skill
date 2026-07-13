@@ -4,6 +4,15 @@
   "title": "econ-review separate rendered-table audit",
   "type": "object",
   "$defs": {
+    "safe_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*[\\\\:])(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)(?!.*[\\x00-\\x1f\\x7f]).+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "check": {
       "type": "object",
       "additionalProperties": false,
@@ -12,77 +21,221 @@
         "status": {"enum": ["clear", "issue", "bounded", "not_applicable"]},
         "result": {"type": "string", "minLength": 1}
       }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number_title_panels", "row_column_alignment", "cell_completeness",
+        "units_transformations", "sample_denominator_support", "uncertainty_inference",
+        "definitions_sources", "cross_table_consistency", "calculation_traceability",
+        "text_claim_reconciliation"
+      ],
+      "properties": {
+        "number_title_panels": {"$ref": "#/$defs/check"},
+        "row_column_alignment": {"$ref": "#/$defs/check"},
+        "cell_completeness": {"$ref": "#/$defs/check"},
+        "units_transformations": {"$ref": "#/$defs/check"},
+        "sample_denominator_support": {"$ref": "#/$defs/check"},
+        "uncertainty_inference": {"$ref": "#/$defs/check"},
+        "definitions_sources": {"$ref": "#/$defs/check"},
+        "cross_table_consistency": {"$ref": "#/$defs/check"},
+        "calculation_traceability": {"$ref": "#/$defs/check"},
+        "text_claim_reconciliation": {"$ref": "#/$defs/check"}
+      }
+    },
+    "source_locator_v0_2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "pages"],
+      "properties": {
+        "source_id": {"type": "string", "pattern": "^SRC-[0-9]{2,}$"},
+        "pages": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 1}
+        },
+        "context": {"type": "string", "minLength": 1}
+      }
+    },
+    "visible_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["basis", "text", "status", "notes"],
+      "properties": {
+        "basis": {
+          "enum": [
+            "table_label",
+            "caption_or_title",
+            "panel_or_header_text",
+            "row_or_column_text",
+            "notes_or_annotation",
+            "distinctive_visible_text",
+            "visual_structure"
+          ]
+        },
+        "text": {"type": "string", "minLength": 1},
+        "status": {"enum": ["matched", "mismatch", "bounded"]},
+        "notes": {"type": "string", "minLength": 1}
+      }
+    },
+    "assessment_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checked_scope", "status_basis", "reason", "missing_input", "decisive_evidence_needed"
+      ],
+      "properties": {
+        "checked_scope": {"type": "string", "minLength": 1},
+        "status_basis": {
+          "enum": [
+            "unreadable_render",
+            "ambiguous_visual_identity",
+            "incomplete_extraction",
+            "missing_surrounding_context",
+            "unavailable_source",
+            "other"
+          ]
+        },
+        "reason": {"type": "string", "minLength": 1},
+        "missing_input": {"type": "string", "minLength": 1},
+        "decisive_evidence_needed": {"type": "string", "minLength": 1}
+      }
+    },
+    "rendered_asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "pdf_page", "render_type", "source_object_id", "visible_identity"],
+      "properties": {
+        "path": {"$ref": "#/$defs/safe_path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "pdf_page": {"type": ["integer", "null"], "minimum": 1},
+        "render_type": {"enum": ["crop", "full_page"]},
+        "source_object_id": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "visible_identity": {"$ref": "#/$defs/visible_identity"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"render_type": {"const": "full_page"}},
+            "required": ["render_type"]
+          },
+          "then": {"properties": {"source_object_id": {"type": "null"}}}
+        }
+      ]
+    },
+    "table_v0_1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "coverage_unit_id", "label", "pdf_pages", "source_locator", "render_paths",
+        "render_status", "extraction_status", "visual_status", "claim_correspondence_status",
+        "checks", "finding_ids", "notes"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^TBL-[0-9]{2,}$"},
+        "coverage_unit_id": {"type": "string", "minLength": 1},
+        "label": {"type": "string", "minLength": 1},
+        "pdf_pages": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
+        "source_locator": {"type": "string", "minLength": 1},
+        "render_paths": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "render_status": {"enum": ["inspected", "bounded"]},
+        "extraction_status": {"enum": ["consistent", "conflict_resolved_from_render", "conflict_unresolved", "not_applicable", "bounded"]},
+        "visual_status": {"enum": ["clear", "issue", "bounded"]},
+        "claim_correspondence_status": {"enum": ["consistent", "issue", "bounded", "not_applicable"]},
+        "checks": {"$ref": "#/$defs/checks"},
+        "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "notes": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"render_status": {"const": "inspected"}}},
+          "then": {"properties": {"render_paths": {"minItems": 1}}}
+        }
+      ]
+    },
+    "table_v0_2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "source_id", "coverage_unit_id", "label", "pdf_pages", "source_locator",
+        "identity_keys", "rendered_assets", "render_status", "extraction_status", "visual_status",
+        "claim_correspondence_status", "checks", "assessment_boundary", "finding_ids", "notes"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^TBL-[0-9]{2,}$"},
+        "source_id": {"type": "string", "pattern": "^SRC-[0-9]{2,}$"},
+        "coverage_unit_id": {"type": "string", "minLength": 1},
+        "label": {"type": "string", "minLength": 1},
+        "pdf_pages": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
+        "source_locator": {"$ref": "#/$defs/source_locator_v0_2"},
+        "identity_keys": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 2}
+        },
+        "rendered_assets": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/rendered_asset"}
+        },
+        "render_status": {"enum": ["inspected", "bounded"]},
+        "extraction_status": {"enum": ["consistent", "conflict_resolved_from_render", "conflict_unresolved", "not_applicable", "bounded"]},
+        "visual_status": {"enum": ["clear", "issue", "bounded"]},
+        "claim_correspondence_status": {"enum": ["consistent", "issue", "bounded", "not_applicable"]},
+        "checks": {"$ref": "#/$defs/checks"},
+        "assessment_boundary": {
+          "oneOf": [
+            {"$ref": "#/$defs/assessment_boundary"},
+            {"type": "null"}
+          ]
+        },
+        "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+        "notes": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"render_status": {"const": "inspected"}}},
+          "then": {"properties": {"rendered_assets": {"minItems": 1}}}
+        }
+      ]
     }
   },
   "additionalProperties": false,
   "required": ["schema_version", "review_id", "source", "inventory_complete_within_assessment_boundary", "no_tables_confirmed", "tables", "boundary_notes"],
   "properties": {
-    "schema_version": {"const": "0.1"},
+    "schema_version": {"enum": ["0.1", "0.2"]},
     "review_id": {"type": "string", "minLength": 1},
     "source": {"type": "string", "minLength": 1},
     "inventory_complete_within_assessment_boundary": {"const": true},
     "no_tables_confirmed": {"type": "boolean"},
     "boundary_notes": {"type": "string", "minLength": 1},
-    "tables": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "id", "coverage_unit_id", "label", "pdf_pages", "source_locator", "render_paths",
-          "render_status", "extraction_status", "visual_status", "claim_correspondence_status",
-          "checks", "finding_ids", "notes"
-        ],
-        "properties": {
-          "id": {"type": "string", "pattern": "^TBL-[0-9]{2,}$"},
-          "coverage_unit_id": {"type": "string", "minLength": 1},
-          "label": {"type": "string", "minLength": 1},
-          "pdf_pages": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
-          "source_locator": {"type": "string", "minLength": 1},
-          "render_paths": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-          "render_status": {"enum": ["inspected", "bounded"]},
-          "extraction_status": {"enum": ["consistent", "conflict_resolved_from_render", "conflict_unresolved", "not_applicable", "bounded"]},
-          "visual_status": {"enum": ["clear", "issue", "bounded"]},
-          "claim_correspondence_status": {"enum": ["consistent", "issue", "bounded", "not_applicable"]},
-          "checks": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "number_title_panels", "row_column_alignment", "cell_completeness",
-              "units_transformations", "sample_denominator_support", "uncertainty_inference",
-              "definitions_sources", "cross_table_consistency", "calculation_traceability",
-              "text_claim_reconciliation"
-            ],
-            "properties": {
-              "number_title_panels": {"$ref": "#/$defs/check"},
-              "row_column_alignment": {"$ref": "#/$defs/check"},
-              "cell_completeness": {"$ref": "#/$defs/check"},
-              "units_transformations": {"$ref": "#/$defs/check"},
-              "sample_denominator_support": {"$ref": "#/$defs/check"},
-              "uncertainty_inference": {"$ref": "#/$defs/check"},
-              "definitions_sources": {"$ref": "#/$defs/check"},
-              "cross_table_consistency": {"$ref": "#/$defs/check"},
-              "calculation_traceability": {"$ref": "#/$defs/check"},
-              "text_claim_reconciliation": {"$ref": "#/$defs/check"}
-            }
-          },
-          "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
-          "notes": {"type": "string", "minLength": 1}
-        },
-        "allOf": [
-          {
-            "if": {"properties": {"render_status": {"const": "inspected"}}},
-            "then": {"properties": {"render_paths": {"minItems": 1}}}
-          }
-        ]
-      }
-    }
+    "tables": {"type": "array"}
   },
   "allOf": [
     {
       "if": {"properties": {"no_tables_confirmed": {"const": true}}},
       "then": {"properties": {"tables": {"maxItems": 0}}},
       "else": {"properties": {"tables": {"minItems": 1}}}
+    }
+  ],
+  "oneOf": [
+    {
+      "properties": {
+        "schema_version": {"const": "0.1"},
+        "tables": {"items": {"$ref": "#/$defs/table_v0_1"}}
+      }
+    },
+    {
+      "properties": {
+        "schema_version": {"const": "0.2"},
+        "tables": {"items": {"$ref": "#/$defs/table_v0_2"}}
+      }
     }
   ]
 }

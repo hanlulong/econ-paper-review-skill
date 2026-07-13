@@ -1,3 +1,6 @@
+import { parseStrictJson } from "./strict-json.ts";
+import { normalizePackagePath } from "./local-review-package.ts";
+
 export const REVIEW_DOCUMENT_MANIFEST_VERSION = "0.1" as const;
 
 export const REVIEW_DOCUMENT_GROUPS = [
@@ -84,6 +87,11 @@ function compareText(left: string, right: string): number {
 export function isSafeReviewDocumentPath(value: unknown): value is string {
   if (typeof value !== "string" || !value || value.length > MAX_PATH_CHARS || value !== value.trim()) return false;
   if (!value.endsWith(".md") || value.startsWith("/") || value.includes("\\") || value.includes(":")) return false;
+  try {
+    if (normalizePackagePath(value) !== value) return false;
+  } catch {
+    return false;
+  }
   const segments = value.split("/");
   return segments.length > 0 && segments.every((segment) => (
     segment !== "."
@@ -164,6 +172,17 @@ export function resolveReviewDocumentHref(
   return resolveReviewDocumentLink(currentPath, href, documents)?.document || null;
 }
 
+/** Permit only explicit HTTP(S) destinations outside the declared review document set. */
+export function safeExternalReviewDocumentHref(value: string | undefined): string | null {
+  if (!value || value !== value.trim() || /[\u0000-\u001f\u007f]/.test(value)) return null;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
 function cloneDocument(value: unknown, label: string): ReviewDocument {
   if (!isRecord(value)) throw new Error(`${label} must be an object`);
   assertExactKeys(value, ["id", "title", "group", "path", "order"], label);
@@ -202,7 +221,7 @@ export function validateReviewDocumentManifest(value: unknown): ReviewDocumentMa
   let raw = value;
   if (typeof raw === "string") {
     try {
-      raw = JSON.parse(raw) as unknown;
+      raw = parseStrictJson(raw);
     } catch (error) {
       const detail = error instanceof Error ? error.message : "invalid JSON";
       throw new Error(`review document manifest contains invalid JSON: ${detail}`);
@@ -224,6 +243,9 @@ export function validateReviewDocumentManifest(value: unknown): ReviewDocumentMa
   const paths = documents.map((document) => document.path);
   if (new Set(ids).size !== ids.length) throw new Error("review document manifest IDs must be unique");
   if (new Set(paths).size !== paths.length) throw new Error("review document manifest paths must be unique");
+  if (new Set(paths.map((path) => path.toLocaleLowerCase("en-US"))).size !== paths.length) {
+    throw new Error("review document manifest paths must be case-unambiguous");
+  }
   return {
     schema_version: REVIEW_DOCUMENT_MANIFEST_VERSION,
     review_id: raw.review_id,

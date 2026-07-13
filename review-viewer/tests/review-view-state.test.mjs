@@ -41,7 +41,64 @@ test("accepts the object-based v0.4 burden metadata from the bundled fixture", a
   const run = JSON.parse(await readFile(new URL("../../tests/fixtures/valid-review/run.json", import.meta.url), "utf8"));
   const burdens = validateActivatedBurdens(run.activated_burdens);
   assert.equal(burdens.length, run.activated_burdens.length);
+  assert.equal(burdens[0].parent_id, run.activated_burdens[0].parent_id);
   assert.ok(burdens.some((burden) => burden.status === "active" && burden.triggers.length));
   assert.ok(burdens.some((burden) => burden.status === "not_applicable" && burden.nonactivation_reason));
   assert.throws(() => validateActivatedBurdens([{ ...burdens[0], triggers: [], nonactivation_reason: null }]), /need a trigger/);
+});
+
+test("accepts exactly the burden parents declared by the canonical run schema", async () => {
+  const schema = JSON.parse(await readFile(new URL("../../econ-review/assets/run.schema.json", import.meta.url), "utf8"));
+  const parentIds = schema.$defs.burden.properties.parent_id.enum.filter((value) => value !== null);
+  assert.ok(parentIds.length > 0);
+
+  for (const [index, parentId] of parentIds.entries()) {
+    const [burden] = validateActivatedBurdens([{
+      id: `schema_parent_${index}`,
+      parent_id: parentId,
+      object_type: "claim",
+      status: "active",
+      activation_basis: "observed",
+      triggers: [{ kind: "claim", ref: "CLM-01", rationale: "Schema parity check." }],
+      nonactivation_reason: null,
+    }]);
+    assert.equal(burden.parent_id, parentId);
+  }
+
+  assert.throws(() => validateActivatedBurdens([{
+    id: "unsupported_parent",
+    parent_id: "measurement",
+    object_type: "measurement",
+    status: "active",
+    activation_basis: "observed",
+    triggers: [{ kind: "claim", ref: "CLM-01", rationale: "Negative parity check." }],
+    nonactivation_reason: null,
+  }]), /parent_id is unsupported/);
+});
+
+test("accepts every burden object type declared by the canonical run schema", async () => {
+  const schema = JSON.parse(await readFile(new URL("../../econ-review/assets/run.schema.json", import.meta.url), "utf8"));
+  const objectTypes = schema.$defs.burden.properties.object_type.enum;
+  assert.ok(Array.isArray(objectTypes) && objectTypes.length > 0);
+
+  for (const [index, objectType] of objectTypes.entries()) {
+    const [burden] = validateActivatedBurdens([{
+      id: `schema_object_${index}`,
+      object_type: objectType,
+      status: "active",
+      activation_basis: "observed",
+      triggers: [{ kind: "claim", ref: "CLM-01", rationale: "Schema parity check." }],
+      nonactivation_reason: null,
+    }]);
+    assert.equal(burden.object_type, objectType);
+  }
+
+  assert.throws(() => validateActivatedBurdens([{
+    id: "unsupported_object",
+    object_type: "unsupported",
+    status: "active",
+    activation_basis: "observed",
+    triggers: [{ kind: "claim", ref: "CLM-01", rationale: "Negative parity check." }],
+    nonactivation_reason: null,
+  }]), /object_type is unsupported/);
 });

@@ -21,9 +21,24 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+from safe_io import canonical_portable_path, strict_json_load, strict_json_loads  # noqa: E402
+from dependency_versions import (  # noqa: E402
+    DependencyContractError,
+    RequirementStatus,
+    check_manifest_requirement,
+    incompatibility_message,
+)
+
 
 MATHPIX_API_ROOT = "https://api.mathpix.com/v3"
+SKILL_ROOT = SCRIPT_DIR.parent
+DOCLING_REQUIREMENTS = SKILL_ROOT / "requirements-docling.txt"
+MATHPIX_REQUIREMENTS = SKILL_ROOT / "requirements-mathpix.txt"
 MAX_VENDOR_RESPONSE_BYTES = 250_000_000
+MAX_VENDOR_CONTROL_BYTES = 5_000_000
 MAX_BACKEND_ARTIFACTS = 10_000
 MAX_BACKEND_ARTIFACT_BYTES = 2_000_000_000
 
@@ -45,36 +60,58 @@ def _package_version(name: str) -> str | None:
         return version(name)
     except PackageNotFoundError:
         return None
+    except Exception as exc:
+        raise BackendError(f"could not read installed-version metadata for {name}: {exc}") from exc
 
 
 def _private_mkdir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if path.is_symlink() or not path.is_dir():
+        raise BackendError(f"backend private directory is not a real directory: {path.name}")
     path.chmod(0o700)
 
 
 def _private_write(path: Path, data: bytes) -> None:
     _private_mkdir(path.parent)
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "wb") as handle:
-        handle.write(data)
-        handle.flush()
-        os.fsync(handle.fileno())
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise BackendError(f"backend private file destination is unsafe: {path.name}")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except OSError as exc:
+        raise BackendError(f"could not write backend private file: {path.name}") from exc
 
 
 def _safe_artifacts(root: Path, review_relative_root: str) -> list[dict[str, str]]:
+    try:
+        portable_root = canonical_portable_path(review_relative_root)
+    except ValueError as exc:
+        raise BackendError(f"backend review root is not portable: {exc}") from exc
     artifacts: list[dict[str, str]] = []
     total_bytes = 0
     for path in sorted(root.rglob("*")):
-        if path.is_symlink():
+        metadata = path.lstat()
+        mode = metadata.st_mode
+        if stat.S_ISLNK(mode):
             raise BackendError(f"backend output must not contain symbolic links: {path.name}")
-        if not path.is_file() or not stat.S_ISREG(path.stat().st_mode):
+        if stat.S_ISDIR(mode):
             continue
-        total_bytes += path.stat().st_size
+        if not stat.S_ISREG(mode):
+            raise BackendError(f"backend output must contain only regular files: {path.name}")
+        total_bytes += metadata.st_size
         if len(artifacts) >= MAX_BACKEND_ARTIFACTS:
             raise BackendError("backend exceeded the artifact-count limit")
         if total_bytes > MAX_BACKEND_ARTIFACT_BYTES:
             raise BackendError("backend exceeded the total artifact-size limit")
         relative = path.relative_to(root).as_posix()
+        try:
+            portable_path = canonical_portable_path(f"{portable_root}/{relative}")
+        except ValueError as exc:
+            raise BackendError(f"backend output path is not portable: {exc}") from exc
         suffix = path.suffix.casefold()
         media_type = {
             ".json": "application/json",
@@ -85,7 +122,7 @@ def _safe_artifacts(root: Path, review_relative_root: str) -> list[dict[str, str
             ".jpeg": "image/jpeg",
         }.get(suffix, "application/octet-stream")
         artifacts.append({
-            "path": f"{review_relative_root}/{relative}",
+            "path": portable_path,
             "sha256": sha256_file(path),
             "media_type": media_type,
         })
@@ -96,6 +133,23 @@ def _safe_artifacts(root: Path, review_relative_root: str) -> list[dict[str, str
 
 def docling_version() -> str | None:
     return _package_version("docling")
+
+
+def docling_requirement_status() -> RequirementStatus:
+    try:
+        installed = docling_version()
+        return check_manifest_requirement(
+            DOCLING_REQUIREMENTS, "docling", installed_version=installed,
+        )
+    except DependencyContractError as exc:
+        raise BackendError(f"could not evaluate the Docling version contract: {exc}") from exc
+
+
+def mathpix_http_requirement_status() -> RequirementStatus:
+    try:
+        return check_manifest_requirement(MATHPIX_REQUIREMENTS, "requests")
+    except DependencyContractError as exc:
+        raise BackendError(f"could not evaluate the Mathpix adapter version contract: {exc}") from exc
 
 
 def docling_runtime_version() -> str | None:
@@ -246,11 +300,14 @@ def run_docling(
     device: str,
 ) -> dict[str, Any]:
     executable = docling_executable()
-    installed = docling_version()
-    if not executable or not installed:
+    status = docling_requirement_status()
+    if not status.compatible:
+        raise BackendError(incompatibility_message(status, optional=True))
+    installed = status.installed_version
+    if not executable:
         raise BackendError(
-            "Docling is unavailable; install the optional "
-            f"{Path(__file__).resolve().parents[1] / 'requirements-docling.txt'} environment"
+            "optional backend Docling command is unavailable; install the "
+            f"{DOCLING_REQUIREMENTS} environment"
         )
     proposal_dir = stage / "proposals" / "docling"
     _private_mkdir(proposal_dir)
@@ -308,6 +365,10 @@ def run_docling(
         raise BackendError(f"Docling failed with exit code {exc.returncode}") from exc
 
     relative_root = f"{output_relative}/proposals/docling"
+    # Treat converter output as untrusted until its entire tree has passed the
+    # same portable-path, type, count, and size boundary used for receipts.
+    # This must happen before reading or rewriting any converter-created file.
+    _safe_artifacts(proposal_dir, relative_root)
     stage_text = str(stage)
     proposal_text = relative_root
     for path in sorted(proposal_dir.rglob("*")):
@@ -325,8 +386,8 @@ def run_docling(
     if len(document_files) != 1:
         raise BackendError("Docling did not create exactly one structured document JSON")
     try:
-        normalized = _normalize_docling(json.loads(document_files[0].read_text(encoding="utf-8")))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        normalized = _normalize_docling(strict_json_load(document_files[0]))
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         raise BackendError("Docling structured JSON could not be normalized") from exc
     _private_write(
         proposal_dir / "normalized.json",
@@ -400,11 +461,11 @@ def run_docling(
     }
 
 
-def _bounded_content(response: Any, label: str) -> bytes:
+def _bounded_content(response: Any, label: str, *, limit: int = MAX_VENDOR_RESPONSE_BYTES) -> bytes:
     length = response.headers.get("Content-Length") if hasattr(response, "headers") else None
     if length is not None:
         try:
-            if int(length) > MAX_VENDOR_RESPONSE_BYTES:
+            if int(length) > limit:
                 raise BackendError(f"Mathpix {label} exceeded the configured response limit")
         except ValueError as exc:
             raise BackendError(f"Mathpix {label} returned an invalid Content-Length") from exc
@@ -415,13 +476,24 @@ def _bounded_content(response: Any, label: str) -> bytes:
             if not chunk:
                 continue
             content.extend(chunk)
-            if len(content) > MAX_VENDOR_RESPONSE_BYTES:
+            if len(content) > limit:
                 raise BackendError(f"Mathpix {label} exceeded the configured response limit")
     except BackendError:
         raise
     except Exception as exc:
         raise BackendError(f"Mathpix {label} response streaming failed") from exc
     return bytes(content)
+
+
+def _bounded_json(response: Any, label: str) -> dict[str, Any]:
+    content = _bounded_content(response, label, limit=MAX_VENDOR_CONTROL_BYTES)
+    try:
+        value = strict_json_loads(content)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise BackendError(f"Mathpix {label} response was not valid JSON") from exc
+    if not isinstance(value, dict):
+        raise BackendError(f"Mathpix {label} response was not a JSON object")
+    return value
 
 
 def _mathpix_request(
@@ -459,12 +531,15 @@ def run_mathpix(
 ) -> dict[str, Any]:
     if not app_id or not app_key:
         raise BackendError("Mathpix requires MATHPIX_APP_ID and MATHPIX_APP_KEY")
+    requests_status = mathpix_http_requirement_status()
+    if not requests_status.compatible:
+        raise BackendError(incompatibility_message(requests_status, optional=True))
     try:
         import requests
     except ImportError as exc:
         raise BackendError(
             "Mathpix requires the optional "
-            f"{Path(__file__).resolve().parents[1] / 'requirements-mathpix.txt'} environment"
+            f"{MATHPIX_REQUIREMENTS} environment"
         ) from exc
 
     proposal_dir = stage / "proposals" / "mathpix"
@@ -497,9 +572,9 @@ def run_mathpix(
                 data={"options_json": json.dumps(options, sort_keys=True)},
             )
         try:
-            submitted = response.json()
+            submitted = _bounded_json(response, "submission")
             pdf_id = submitted["pdf_id"]
-        except (ValueError, KeyError, TypeError) as exc:
+        except (KeyError, TypeError) as exc:
             raise BackendError("Mathpix submission did not return a pdf_id") from exc
         if not isinstance(pdf_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{4,160}", pdf_id):
             raise BackendError("Mathpix returned an unsafe request identifier")
@@ -516,10 +591,7 @@ def run_mathpix(
                 headers=headers,
                 timeout=min(60, timeout),
             )
-            try:
-                status = response.json()
-            except ValueError as exc:
-                raise BackendError("Mathpix status response was not JSON") from exc
+            status = _bounded_json(response, "status")
             state = status.get("status")
             status_summary = {
                 key: status[key]
@@ -549,14 +621,14 @@ def run_mathpix(
             content = _bounded_content(response, extension)
             if extension == "lines.json":
                 try:
-                    json.loads(content)
-                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    strict_json_loads(content)
+                except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
                     raise BackendError("Mathpix lines.json was invalid") from exc
             _private_write(proposal_dir / name, content)
         try:
-            lines = json.loads((proposal_dir / "lines.json").read_text(encoding="utf-8"))
+            lines = strict_json_load(proposal_dir / "lines.json")
             normalized = _normalize_mathpix(lines, expected_pages)
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
             raise BackendError("Mathpix lines.json could not be normalized") from exc
         _private_write(
             proposal_dir / "normalized.json",

@@ -1,6 +1,6 @@
 # Writing and Venue Audit
 
-Use this protocol in every full review. Activate journal fit only when the user explicitly requests venue analysis. Keep language mechanics, substantive clarity, and any requested journal fit distinct. A polished paragraph can contain a substantive overclaim; a technically correct paragraph can still contain grammar or usage errors. Literature positioning and whether a named source supports a load-bearing claim belong to substantive review, not the writing report.
+Use this protocol in every full review. Activate journal fit only when the user explicitly requests venue analysis, and record that request canonically as `journal_fit` in `run.json.requested_addons`; record an empty array when no add-on was requested. Keep language mechanics, substantive clarity, and any requested journal fit distinct. A polished paragraph can contain a substantive overclaim; a technically correct paragraph can still contain grammar or usage errors. Literature positioning and whether a named source supports a load-bearing claim belong to substantive review, not the writing report.
 
 ## 1. Language mechanics pass
 
@@ -15,7 +15,8 @@ Read the complete manuscript sentence by sentence and separately check:
 - spelling, capitalization, punctuation, and possessives;
 - hyphenation and compound modifiers;
 - sentence fragments, run-ons, parallelism, and modifier placement;
-- internal cross-references, numbering, bibliography-style consistency, and objective typographical errors.
+- internal cross-references, numbering, bibliography-style consistency, and objective typographical errors;
+- exhibit range and referent integrity: prose column/panel ranges must match rendered cardinality, and labels such as `same`, `other`, `baseline`, or `reference` must say what they are relative to when the referent is not visually local and unambiguous.
 
 Do not put citation accuracy, source support, missing literature, or reference-record verification in the writing report. Those are substantive evidence checks and belong in the literature/source ledger and substance findings. The writing pass may correct only mechanical bibliography presentation that can be established from the manuscript itself, such as inconsistent author-year punctuation or a visibly broken cross-reference.
 
@@ -76,7 +77,7 @@ End with an ambitious-to-safe submission sequence and distinguish as-is fit from
 
 Write `evidence/writing.json` and a readable `evidence/writing.md`. Record the activated reader tasks, writing strengths, section audit, redundancy map, checked mechanics, consistency groups, and concrete style suggestions. Populate venue candidates only for an explicitly requested venue audit. Each mechanics group records every verified occurrence, correction, reader consequence, priority, render state, and source provenance. Every adverse mechanics, consistency, or requested-venue state that materially affects a report must map to an active finding. Record checked-clean groups as well as problems. Do not infer the writing scope from a single paper-type label; theory, empirical evidence, institutional description, computation, and policy interpretation may coexist in one section.
 
-For new contract-v0.4 runs, surface this audit in `writing-report.md`. Writing-audit schema v0.3 uses this full-mode structure:
+For current contract-v0.4 full runs, surface this audit in `writing-report.md`. Writing-audit schema v0.4 is canonical input to this full-mode structure:
 
 - `## Writing assessment`, including specific strengths and overall priority;
 - `## Highest-return writing revisions`, linked concisely to finding IDs;
@@ -84,10 +85,13 @@ For new contract-v0.4 runs, surface this audit in `writing-report.md`. Writing-a
 - `## Terminology, definitions, and notation`;
 - `## Tables and figures as writing`;
 - `## Mechanics and copyedit inventory`, separating main text from instruments or reproduced materials;
+- `## Style and writing improvements`, including the redundancy map;
 - `## Detailed Writing Comments (N)`.
 
-Report-contract and writing-audit versions are independent. New packages use writing-audit schema v0.3 and this six-section preamble. Legacy report and writing-audit packages remain valid under their declared versions. Keep summary sections concise and put the complete correction inventory in the audit ledger so the same diagnosis is not repeated.
+Report-contract and writing-audit versions are independent. Current full packages use writing-audit schema v0.4 and generate every core preamble section from `evidence/writing.json`; an existing Markdown preamble is never canonical input. Legacy report, writing-audit, and receipt packages remain valid under their declared versions. Keep summary sections concise and put the complete correction inventory in the audit ledger so the same diagnosis is not repeated. Never add an author-facing `Assessment Boundary` section; retain scope details in canonical evidence and the audit trail.
 
 Route mechanics, article usage, language consistency, exhibit presentation, and optional style to the writing channel. Route unclear or misleading expression at load-bearing points and source-support failures to substance. The writing report must distinguish objective corrections from optional style improvements.
 
-When journal fit is explicitly requested, add `## Journal fit and submission strategy` to `writing-report.md`, never to the substance report. Quick mode creates the writing report only when writing-channel findings exist or the user explicitly requests writing analysis. Contract v0.1 keeps its legacy output placement.
+When journal fit is explicitly requested, add `journal_fit` to `run.json.requested_addons`, populate `venue_fit` as `assessed` or `bounded`, and generate `## Journal fit and submission strategy` in `writing-report.md`, never in the substance report. Official-scope and comparator links must use HTTPS, and their evidence dates cannot exceed the recorded assessment date or current date. Without that flag, use `venue_fit.status: not_requested`, retain no dated/candidate/finding payload, and emit no journal-fit section. Quick mode creates the writing report only when writing-channel findings exist or the user explicitly requests writing analysis. Contract v0.1 keeps its legacy output placement.
+
+Every current source-derived writing row must cite the coverage units it audits and canonical evidence that supports it. Bind each retained mechanics occurrence to an exact or normalized-transcription anchor. Use a scope anchor with `purpose: checked_absence` for checked-clean mechanics groups and terminology groups marked consistent. Adverse rows may use `finding_evidence` only when it belongs to an active, verification-passed finding; do not treat a prose locator as source proof.

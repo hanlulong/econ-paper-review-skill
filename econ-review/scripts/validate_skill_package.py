@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import ast
+import json
 import os
 import re
 import sys
@@ -11,6 +13,10 @@ from pathlib import Path
 from urllib.parse import unquote
 
 import yaml
+from jsonschema import Draft202012Validator, SchemaError
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from safe_io import strict_json_load  # noqa: E402
 
 
 FRONTMATTER = re.compile(r"\A---\n(.*?)\n---(?:\n|\Z)", re.DOTALL)
@@ -18,18 +24,100 @@ LOCAL_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 SKILL_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 ALLOWED_FRONTMATTER = {"name", "description"}
 ALLOWED_OPENAI_TOP_LEVEL = {"interface", "dependencies", "policy"}
+REQUIRED_RUNTIME = {
+    "dependency_versions.py",
+    "finalize_review.py",
+    "propose_source_inventory.py",
+    "safe_io.py",
+    "trust_spine.py",
+    "validate_review.py",
+}
+
+
+class UniqueKeySafeLoader(yaml.SafeLoader):
+    """Safe YAML loader that rejects duplicate mapping keys."""
+
+
+def _construct_unique_mapping(
+    loader: UniqueKeySafeLoader, node: yaml.MappingNode, deep: bool = False,
+) -> dict:
+    loader.flatten_mapping(node)
+    mapping: dict = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        try:
+            duplicate = key in mapping
+        except TypeError as exc:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                "found an unhashable mapping key",
+                key_node.start_mark,
+            ) from exc
+        if duplicate:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"found duplicate key {key!r}",
+                key_node.start_mark,
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+UniqueKeySafeLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_unique_mapping,
+)
 
 
 def _yaml_mapping(text: str, label: str, errors: list[str]) -> dict:
+    loader = UniqueKeySafeLoader(text)
     try:
-        value = yaml.safe_load(text)
+        value = loader.get_single_data()
     except yaml.YAMLError as exc:
         errors.append(f"{label} is not valid YAML: {exc}")
         return {}
+    finally:
+        loader.dispose()
     if not isinstance(value, dict):
         errors.append(f"{label} must contain a YAML mapping")
         return {}
     return value
+
+
+def _validate_json_schemas(root: Path, errors: list[str]) -> None:
+    asset_root = root / "assets"
+    schemas = sorted(asset_root.glob("*.schema.json")) if asset_root.is_dir() else []
+    if not schemas:
+        errors.append("assets must contain at least one *.schema.json contract")
+        return
+    identifiers: dict[str, Path] = {}
+    for path in schemas:
+        label = path.relative_to(root)
+        try:
+            schema = strict_json_load(path)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            errors.append(f"{label} is not strict JSON: {exc}")
+            continue
+        if not isinstance(schema, dict):
+            errors.append(f"{label} must contain a JSON object")
+            continue
+        if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
+            errors.append(f"{label} must declare JSON Schema Draft 2020-12")
+        try:
+            Draft202012Validator.check_schema(schema)
+        except SchemaError as exc:
+            errors.append(f"{label} is not a valid Draft 2020-12 schema: {exc.message}")
+        identifier = schema.get("$id")
+        if not isinstance(identifier, str) or not identifier.strip():
+            errors.append(f"{label} requires a nonempty $id")
+        elif identifier in identifiers:
+            errors.append(
+                f"{label} repeats $id {identifier!r} from {identifiers[identifier].relative_to(root)}"
+            )
+        else:
+            identifiers[identifier] = path
 
 
 def _inside(root: Path, candidate: Path) -> bool:
@@ -63,9 +151,84 @@ def _validate_links(root: Path, errors: list[str]) -> None:
                 errors.append(f"{document.relative_to(root)} has a missing link target: {raw}")
 
 
+def _validate_reference_navigation(root: Path, errors: list[str]) -> None:
+    reference_root = root / "references"
+    if not reference_root.is_dir():
+        return
+    for document in sorted(reference_root.glob("*.md")):
+        if document.is_symlink():
+            continue
+        text = document.read_text(encoding="utf-8")
+        if len(text.splitlines()) > 100 and not re.search(r"^## Contents\s*$", text, re.MULTILINE):
+            errors.append(
+                f"{document.relative_to(root)} exceeds 100 lines and requires a compact ## Contents section"
+            )
+
+
+def _validate_runtime(root: Path, errors: list[str]) -> None:
+    scripts = root / "scripts"
+    if not scripts.is_dir():
+        errors.append("scripts runtime directory is missing")
+        return
+    for name in sorted(REQUIRED_RUNTIME):
+        path = scripts / name
+        if not path.is_file() or path.is_symlink():
+            errors.append(f"required runtime script is missing or unsafe: scripts/{name}")
+
+    parsed: dict[Path, ast.AST] = {}
+    texts: dict[Path, str] = {}
+    for path in sorted(scripts.glob("*.py")):
+        try:
+            text = path.read_text(encoding="utf-8")
+            texts[path] = text
+            parsed[path] = ast.parse(text, filename=str(path))
+            compile(text, str(path), "exec")
+        except (OSError, UnicodeError, SyntaxError) as exc:
+            errors.append(f"{path.relative_to(root)} is not compilable Python: {exc}")
+
+    finalizer = scripts / "finalize_review.py"
+    tree = parsed.get(finalizer)
+    declared_generators: set[str] = set()
+    if tree is not None:
+        for node in getattr(tree, "body", []):
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if not any(isinstance(target, ast.Name) and target.id == "GENERATORS" for target in targets):
+                continue
+            value = node.value
+            if isinstance(value, (ast.Tuple, ast.List)):
+                for element in value.elts:
+                    if (
+                        isinstance(element, ast.BinOp)
+                        and isinstance(element.op, ast.Div)
+                        and isinstance(element.right, ast.Constant)
+                        and isinstance(element.right.value, str)
+                    ):
+                        declared_generators.add(element.right.value)
+        if not declared_generators:
+            errors.append("scripts/finalize_review.py must declare a statically inspectable GENERATORS list")
+    for name in sorted(declared_generators):
+        path = scripts / name
+        if not path.is_file() or path.is_symlink():
+            errors.append(f"finalizer generator is missing or unsafe: scripts/{name}")
+
+    schema_names = {
+        match
+        for text in texts.values()
+        for match in re.findall(r"[\"']([A-Za-z0-9-]+\.schema\.json)[\"']", text)
+    }
+    for name in sorted(schema_names):
+        if not (root / "assets" / name).is_file():
+            errors.append(f"runtime references missing schema: assets/{name}")
+
+
 def validate_skill_package(root: Path) -> list[str]:
     errors: list[str] = []
-    root = root.expanduser().resolve()
+    root = root.expanduser().absolute()
+    if root.is_symlink():
+        return [f"skill directory must not be a symbolic link: {root}"]
+    root = root.resolve()
     if not root.is_dir():
         return [f"skill directory does not exist: {root}"]
 
@@ -74,6 +237,10 @@ def validate_skill_package(root: Path) -> list[str]:
             path = Path(current, name)
             if path.is_symlink():
                 errors.append(f"skill package contains a symbolic link: {path.relative_to(root)}")
+    if errors:
+        # Do not follow an already-rejected assets, references, or scripts
+        # subtree during the deeper schema/link/runtime passes below.
+        return errors
 
     skill_path = root / "SKILL.md"
     if not skill_path.is_file() or skill_path.is_symlink():
@@ -123,6 +290,9 @@ def validate_skill_package(root: Path) -> list[str]:
                 errors.append(f"agents/openai.yaml interface.default_prompt must mention ${name}")
 
     _validate_links(root, errors)
+    _validate_reference_navigation(root, errors)
+    _validate_json_schemas(root, errors)
+    _validate_runtime(root, errors)
     return errors
 
 

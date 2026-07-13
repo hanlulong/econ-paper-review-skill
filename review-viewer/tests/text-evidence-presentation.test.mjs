@@ -3,6 +3,8 @@ import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
+  authorReportDisplayMarkdown,
+  evidenceDisplayText,
   EvidenceSemanticFrame,
   textEvidencePresentation,
 } from "../lib/review-text-evidence-presentation.ts";
@@ -69,4 +71,32 @@ test("representation beats a misleading legacy prefix and compact mode keeps ide
     assert.equal((html.match(/\[Rendered transcription\]/g) || []).length, 1);
   }
   assert.match(compact, /class="evidence-note compact"/);
+});
+
+test("internal observation labels are omitted from visible evidence", () => {
+  assert.equal(
+    evidenceDisplayText("[Reviewer observation] The values diverge.", "reviewer_observation"),
+    "The values diverge.",
+  );
+  assert.equal(
+    evidenceDisplayText("[Figure observation] The confidence band widens.", "reviewer_observation"),
+    "The confidence band widens.",
+  );
+  assert.equal(
+    evidenceDisplayText("[Reviewer observation] Keep this mismatch visible.", "verbatim"),
+    "[Reviewer observation] Keep this mismatch visible.",
+  );
+});
+
+test("legacy author report observations become unquoted notes", () => {
+  const markdown = [
+    "**Relevant text**:",
+    "> [Reviewer observation] The displayed values diverge.",
+    "> The divergence persists in the appendix.",
+    "",
+    "**Concern**: The comparison is unclear.",
+  ].join("\n");
+  const visible = authorReportDisplayMarkdown(markdown);
+  assert.doesNotMatch(visible, /\[Reviewer observation\]|^>/m);
+  assert.match(visible, /The displayed values diverge\.\nThe divergence persists/);
 });

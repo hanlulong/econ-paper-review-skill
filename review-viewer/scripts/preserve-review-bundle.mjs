@@ -18,7 +18,9 @@ async function pathExists(path) {
 export async function withPreservedReviewBundle(reviewsRoot, operation) {
   const parent = dirname(reviewsRoot);
   await mkdir(parent, { recursive: true });
-  const backupRoot = await mkdtemp(resolve(parent, ".review-test-backup-"));
+  // Keep the temporary backup outside `public/`; otherwise the site build can
+  // copy a confidential pre-test bundle into dist while the test is running.
+  const backupRoot = await mkdtemp(resolve(dirname(parent), ".review-test-backup-"));
   const savedReviews = resolve(backupRoot, basename(reviewsRoot));
   const existed = await pathExists(reviewsRoot);
   if (existed) await rename(reviewsRoot, savedReviews);

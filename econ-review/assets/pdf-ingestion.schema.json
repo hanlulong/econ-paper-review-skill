@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "allOf": [
     {
-      "if": {"properties": {"schema_version": {"const": "0.2"}}},
+      "if": {"properties": {"schema_version": {"enum": ["0.2", "0.3"]}}},
       "then": {
         "required": ["proposals", "reconciliation"],
         "properties": {
@@ -21,6 +21,10 @@
           }
         }
       }
+    },
+    {
+      "if": {"properties": {"schema_version": {"const": "0.3"}}},
+      "then": {"required": ["detector_contract"]}
     }
   ],
   "required": [
@@ -29,11 +33,20 @@
     "equations", "symbols", "proposal", "quality"
   ],
   "properties": {
-    "schema_version": {"enum": ["0.1", "0.2"]},
+    "schema_version": {"enum": ["0.1", "0.2", "0.3"]},
     "review_id": {"type": "string", "minLength": 1},
     "source_id": {"type": "string", "pattern": "^SRC-[0-9]{2,}$"},
     "source_role": {"enum": ["manuscript", "appendix", "supplement"]},
     "pipeline_fingerprint": {"$ref": "#/$defs/sha256"},
+    "detector_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "source_sha256"],
+      "properties": {
+        "version": {"const": "1"},
+        "source_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
     "parser_repairs": {
       "type": "object", "additionalProperties": false,
       "required": [
@@ -80,6 +93,7 @@
       "properties": {
         "dpi": {"type": "integer", "minimum": 150, "maximum": 400},
         "ocr": {"enum": ["auto", "never", "always"]},
+        "ocr_language": {"type": "string", "pattern": "^[A-Za-z0-9_+-]{1,64}$"},
         "max_pages": {"type": "integer", "minimum": 1},
         "max_bytes": {"type": "integer", "minimum": 1},
         "markitdown_proposal": {"type": "boolean"},
@@ -199,7 +213,11 @@
     }
   },
   "$defs": {
-    "safePath": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
+    "safePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*[\\\\:])(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)(?!.*[\\x00-\\x1f\\x7f]).+$"
+    },
     "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "bbox": {
       "type": "array", "minItems": 4, "maxItems": 4,

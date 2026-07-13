@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.1",
+  "schema_version": "0.2",
   "review_id": "synthetic-valid-001",
   "branches_applied": [
     "universal",
@@ -8,6 +8,8 @@
   "units": [
     {
       "id": "paper",
+      "source_id": "SRC-01",
+      "anchor_ids": ["ANC-01", "ANC-02", "ANC-03", "ANC-100", "ANC-101", "ANC-102", "ANC-103"],
       "type": "section",
       "label": "Complete synthetic manuscript",
       "status": "findings",
@@ -226,9 +228,9 @@
       "id": "timing-test-semantics",
       "label": "Timing fields, information sets, test restrictions, covariance, and labels",
       "branch": "universal",
-      "status": "not_applicable",
+      "status": "checked_no_issue",
       "finding_ids": [],
-      "notes": "No applicable object appears in this synthetic fixture."
+      "notes": "The timing ledger checks the static choice timing and finds no separate timing inconsistency."
     },
     {
       "id": "availability-exclusivity",
@@ -237,6 +239,166 @@
       "status": "not_applicable",
       "finding_ids": [],
       "notes": "No applicable object appears in this synthetic fixture."
+    },
+    {
+      "id": "economic-argument-chain",
+      "label": "Economic argument, object roles, alternatives, and contribution after narrowing",
+      "branch": "universal",
+      "status": "findings",
+      "finding_ids": ["LOGIC-01"],
+      "notes": "The payoff ranking supports uniqueness away from equality but not throughout the stated domain."
+    },
+    {
+      "id": "intervention-comparison-content",
+      "label": "Complete focal-versus-benchmark and intervention content",
+      "branch": "universal",
+      "status": "not_applicable",
+      "finding_ids": [],
+      "notes": "The fixture contains no staged intervention, counterfactual, robustness, or compound comparison."
+    },
+    {
+      "id": "cross-result-coherence",
+      "label": "Cross-result coherence and logical or temporal ordering",
+      "branch": "universal",
+      "status": "not_applicable",
+      "finding_ids": [],
+      "notes": "The fixture contains one proposition and no separate results that are linked in the argument."
+    },
+    {
+      "id": "evidence-object-completeness",
+      "label": "Promised, measured, modeled, and reported evidence-object completeness",
+      "branch": "universal",
+      "status": "checked_no_issue",
+      "finding_ids": [],
+      "notes": "The payoff comparison and proposition are both reported; no motivated or promised object is omitted."
+    },
+    {
+      "id": "magnitude-plausibility",
+      "label": "Comparison-specific magnitude context, support, and benchmarks",
+      "branch": "universal",
+      "status": "not_applicable",
+      "finding_ids": [],
+      "notes": "The qualitative fixture reports no headline numerical magnitude."
+    },
+    {
+      "id": "population-claim-transport",
+      "label": "Population, domain, setting, and policy-claim transport",
+      "branch": "universal",
+      "status": "findings",
+      "finding_ids": ["LOGIC-01"],
+      "notes": "The proposition transports strict-ranking uniqueness to the equality boundary without a selection condition."
+    }
+  ],
+  "burden_audits": [
+    {
+      "burden_id": "claim_consistency",
+      "parent_id": "logical_validity",
+      "status": "findings",
+      "coverage_unit_ids": ["paper"],
+      "finding_ids": ["LOGIC-01"],
+      "notes": "The global uniqueness language was compared with the stated equality boundary."
+    },
+    {
+      "burden_id": "logical_validity",
+      "parent_id": "logical_validity",
+      "status": "findings",
+      "coverage_unit_ids": ["paper"],
+      "finding_ids": ["LOGIC-01"],
+      "notes": "The conclusion does not follow at the equality boundary."
+    },
+    {
+      "burden_id": "technical_validity",
+      "parent_id": "technical_validity",
+      "status": "findings",
+      "coverage_unit_ids": ["paper"],
+      "finding_ids": ["LOGIC-01"],
+      "notes": "The boundary calculation was checked against the stated payoff comparison."
+    },
+    {
+      "burden_id": "methodological_validity",
+      "parent_id": "methodological_validity",
+      "status": "checked_no_issue",
+      "coverage_unit_ids": ["paper"],
+      "finding_ids": [],
+      "notes": "Within the note's stated static domain, the theoretical comparison is an appropriate way to study uniqueness."
+    },
+    {
+      "burden_id": "writing_mechanics",
+      "parent_id": "communication_integrity",
+      "status": "findings",
+      "coverage_unit_ids": ["paper"],
+      "finding_ids": ["WRT-01"],
+      "notes": "The complete prose was checked sentence by sentence for mechanics and stable wording."
+    },
+    {
+      "burden_id": "source_support",
+      "parent_id": "source_support",
+      "status": "bounded",
+      "coverage_unit_ids": ["paper"],
+      "finding_ids": [],
+      "notes": "The literature frontier was assessed but remains bounded by the recorded search scope and source access."
+    },
+    {
+      "burden_id": "figure_integrity",
+      "parent_id": "exhibit_integrity",
+      "status": "not_applicable",
+      "coverage_unit_ids": ["paper"],
+      "finding_ids": [],
+      "notes": "The scope anchor confirms that the complete source contains no figure."
+    }
+  ],
+  "source_inventory": [
+    {
+      "id": "INV-001",
+      "source_id": "SRC-01",
+      "object_type": "outline_heading",
+      "object_id": "SRC-01-OUT-H001",
+      "locator": "Heading 1 (level 1): A Boundary Case in a Static Signaling Model",
+      "state": "covered",
+      "anchor_ids": ["ANC-100"],
+      "coverage_unit_ids": ["paper"],
+      "audit_record_id": null,
+      "duplicate_of": null,
+      "reason": null
+    },
+    {
+      "id": "INV-002",
+      "source_id": "SRC-01",
+      "object_type": "outline_heading",
+      "object_id": "SRC-01-OUT-H002",
+      "locator": "Heading 2 (level 2): 1. Setup",
+      "state": "covered",
+      "anchor_ids": ["ANC-101"],
+      "coverage_unit_ids": ["paper"],
+      "audit_record_id": null,
+      "duplicate_of": null,
+      "reason": null
+    },
+    {
+      "id": "INV-003",
+      "source_id": "SRC-01",
+      "object_type": "outline_heading",
+      "object_id": "SRC-01-OUT-H003",
+      "locator": "Heading 3 (level 2): 2. Result",
+      "state": "covered",
+      "anchor_ids": ["ANC-102"],
+      "coverage_unit_ids": ["paper"],
+      "audit_record_id": null,
+      "duplicate_of": null,
+      "reason": null
+    },
+    {
+      "id": "INV-004",
+      "source_id": "SRC-01",
+      "object_type": "outline_heading",
+      "object_id": "SRC-01-OUT-H004",
+      "locator": "Heading 4 (level 2): 3. Proposition",
+      "state": "covered",
+      "anchor_ids": ["ANC-103"],
+      "coverage_unit_ids": ["paper"],
+      "audit_record_id": null,
+      "duplicate_of": null,
+      "reason": null
     }
   ],
   "second_sweep": {

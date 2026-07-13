@@ -144,6 +144,12 @@ for current, directories, files in os.walk(root, followlinks=False):
         path = Path(current, name)
         if path.is_symlink():
             raise SystemExit(f"source tree contains a symbolic link: {path.relative_to(root)}")
+        if (
+            name == ".env"
+            or (name.startswith(".env.") and name != ".env.example")
+            or path.suffix.casefold() in {".key", ".pem", ".p12"}
+        ):
+            raise SystemExit(f"source tree contains a credential-bearing file: {path.relative_to(root)}")
 PY
 }
 
@@ -157,6 +163,7 @@ import json
 import re
 import stat
 import sys
+import unicodedata
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -171,11 +178,34 @@ actual_sha = hashlib.sha256(archive_path.read_bytes()).hexdigest()
 if actual_sha != expected_sha:
     raise SystemExit(f"archive SHA-256 mismatch: expected {expected_sha}, got {actual_sha}")
 
+WINDOWS_RESERVED_BASENAMES = frozenset(
+    {"con", "prn", "aux", "nul", "clock$"}
+    | {f"com{number}" for number in range(1, 10)}
+    | {f"lpt{number}" for number in range(1, 10)}
+)
+
 def safe_name(raw):
-    if not raw or "\\" in raw or raw.startswith("/") or any(ord(character) < 32 or ord(character) == 127 for character in raw):
+    if (
+        not raw
+        or "\\" in raw
+        or ":" in raw
+        or raw.startswith("/")
+        or raw != unicodedata.normalize("NFC", raw)
+        or any(ord(character) < 32 or ord(character) == 127 for character in raw)
+    ):
         raise SystemExit(f"unsafe archive path: {raw!r}")
     path = PurePosixPath(raw)
-    if path.is_absolute() or ".." in path.parts or any(part in {"", "."} for part in path.parts):
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or any(
+            part in {"", "."}
+            or part != part.strip()
+            or part.endswith(".")
+            or part.split(".", 1)[0].casefold() in WINDOWS_RESERVED_BASENAMES
+            for part in path.parts
+        )
+    ):
         raise SystemExit(f"unsafe archive path: {raw!r}")
     if raw != path.as_posix():
         raise SystemExit(f"non-canonical archive path: {raw!r}")
@@ -203,7 +233,7 @@ with zipfile.ZipFile(archive_path) as archive:
         kind = stat.S_IFMT(mode)
         if kind not in {0, stat.S_IFREG}:
             raise SystemExit(f"non-regular archive entry is not allowed: {info.filename}")
-        folded_name = path.as_posix().casefold()
+        folded_name = unicodedata.normalize("NFC", path.as_posix()).casefold()
         if folded_name in folded:
             raise SystemExit(f"duplicate or case-colliding archive entry: {info.filename}")
         folded.add(folded_name)
@@ -221,8 +251,14 @@ with zipfile.ZipFile(archive_path) as archive:
                 raise ValueError(f"duplicate JSON key: {key}")
             value[key] = item
         return value
+    def reject_json_constant(value):
+        raise ValueError(f"non-standard JSON numeric constant: {value}")
     try:
-        manifest = json.loads(archive.read(manifest_name), object_pairs_hook=reject_duplicate_pairs)
+        manifest = json.loads(
+            archive.read(manifest_name),
+            object_pairs_hook=reject_duplicate_pairs,
+            parse_constant=reject_json_constant,
+        )
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise SystemExit(f"invalid release manifest: {exc}")
     if (
@@ -308,7 +344,9 @@ find_source() {
     *) fail "remote archive URL must use HTTPS" ;;
   esac
   TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/econ-review.XXXXXX")"
-  curl -fL --retry 2 --connect-timeout 15 "${curl_protocols[@]}" "$archive_url" -o "$TEMP_DIR/release.zip" || fail "failed to download release archive"
+  curl -fL --retry 2 --connect-timeout 15 --max-time 900 --max-filesize 104857600 \
+    "${curl_protocols[@]}" "$archive_url" -o "$TEMP_DIR/release.zip" \
+    || fail "failed to download release archive"
   verify_and_extract_archive "$TEMP_DIR/release.zip" "$archive_sha" "$TEMP_DIR/source" || fail "release archive verification failed"
   validate_skill_tree "$TEMP_DIR/source/econ-review" || fail "extracted skill validation failed"
   SOURCE_DIR="$TEMP_DIR/source/econ-review"
@@ -327,7 +365,23 @@ install_one() {
   parent="$(dirname "$destination")"
   mkdir -p "$parent"
   ACTIVE_STAGE="$(mktemp -d "$parent/.econ-review.stage.XXXXXX")"
-  cp -R "$source_dir/." "$ACTIVE_STAGE/"
+  python3 - "$source_dir" "$ACTIVE_STAGE" <<'PY'
+import shutil
+import sys
+from pathlib import Path
+
+source, stage = map(Path, sys.argv[1:])
+shutil.copytree(
+    source,
+    stage,
+    dirs_exist_ok=True,
+    symlinks=True,
+    ignore=shutil.ignore_patterns(
+        ".DS_Store", "__pycache__", "*.pyc", "*.pyo",
+        ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    ),
+)
+PY
   validate_skill_tree "$ACTIVE_STAGE" || fail "staged package validation failed"
 
   ACTIVE_BACKUP=""
@@ -355,7 +409,6 @@ install_one() {
 
 require_command python3
 require_command mktemp
-require_command cp
 require_command mv
 python3 - <<'PY' || fail "Python 3.10 or newer is required"
 import sys
@@ -376,7 +429,8 @@ if [ "$MODE" = "global" ]; then
   fi
 else
   TARGET="${TARGET:-.}"
-  TARGET="$(CDPATH= cd -- "$TARGET" && pwd)"
+  [ -d "$TARGET" ] || fail "local target directory does not exist: $TARGET"
+  TARGET="$(CDPATH= cd -- "$TARGET" && pwd)" || fail "cannot resolve local target directory: $TARGET"
   if [ "$PLATFORM" = "all" ] || [ "$PLATFORM" = "claude" ]; then
     install_one "$SOURCE_DIR" "$TARGET/.claude/skills/econ-review" "Claude Code (project)"
   fi
@@ -385,4 +439,8 @@ else
   fi
 fi
 
-echo "econ-review installation complete."
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "econ-review dry run complete; no files changed."
+else
+  echo "econ-review installation complete."
+fi

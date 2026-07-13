@@ -1,9 +1,10 @@
 {
-  "schema_version": "0.1",
+  "schema_version": "0.2",
   "review_id": "synthetic-valid-001",
   "audit_scope": {
     "inventory_complete_within_assessment_boundary": true,
     "coverage_unit_ids": ["paper"],
+    "scope_anchor_ids": ["ANC-03"],
     "headline_claim_ids": ["CLM-01"],
     "terminology_scope_checked": ["Complete synthetic manuscript, including its proposition and parameter-domain wording"],
     "boundary_notes": "The fixture contains one short proposition and no exhibits or appendix."
@@ -11,6 +12,7 @@
   "claim_families": [
     {
       "id": "CLM-01",
+      "anchor_ids": ["ANC-01"],
       "is_headline": true,
       "canonical_supported_claim": "The equilibrium action is unique away from the equality boundary; both actions are optimal at equality absent a tie-breaking rule.",
       "load_bearing_qualifiers": ["away from the equality boundary", "absent a tie-breaking rule"],
@@ -19,7 +21,9 @@
         {
           "id": "CLM-01-O1",
           "coverage_unit_id": "paper",
-          "locator": "Section 3.1",
+          "anchor_id": "ANC-01",
+          "representation": "verbatim",
+          "locator": "Section 3, paragraph 1",
           "text": "The equilibrium action is unique for every parameter value.",
           "claim_vector": {
             "object": "equilibrium action",
@@ -44,6 +48,10 @@
     {
       "id": "main-result",
       "coverage_unit_id": "paper",
+      "claim_ids": ["CLM-01"],
+      "evidence_refs": [
+        {"kind": "finding_evidence", "id": "EVD-LOGIC-01-A", "purpose": "direct_support"}
+      ],
       "label": "Main proposition",
       "takeaway": "The paper claims a unique equilibrium action throughout the parameter domain.",
       "status": "inconsistent",
@@ -55,23 +63,268 @@
   "terms": [
     {
       "id": "TERM-01",
+      "label": "a",
+      "kind": "symbol",
+      "coverage_unit_ids": ["paper"],
+      "first_use_anchor_id": "ANC-101",
+      "evidence_refs": [
+        {"kind": "anchor", "id": "ANC-101", "purpose": "direct_support"},
+        {"kind": "anchor", "id": "ANC-03", "purpose": "checked_absence"}
+      ],
+      "first_use": "Heading 2 (level 2): 1. Setup",
+      "definition": "The binary action chosen by the agent.",
+      "unit_or_domain": "a is in {0,1}",
+      "variants": [],
+      "status": "defined_clear",
+      "finding_ids": []
+    },
+    {
+      "id": "TERM-02",
+      "label": "\\theta",
+      "kind": "parameter",
+      "coverage_unit_ids": ["paper"],
+      "first_use_anchor_id": "ANC-101",
+      "evidence_refs": [
+        {"kind": "anchor", "id": "ANC-101", "purpose": "direct_support"},
+        {"kind": "anchor", "id": "ANC-03", "purpose": "checked_absence"}
+      ],
+      "first_use": "Heading 2 (level 2): 1. Setup",
+      "definition": "The public payoff parameter observed before the action choice.",
+      "unit_or_domain": "Compared with the positive cost parameter c",
+      "variants": [],
+      "status": "defined_clear",
+      "finding_ids": []
+    },
+    {
+      "id": "TERM-03",
+      "label": "c",
+      "kind": "parameter",
+      "coverage_unit_ids": ["paper"],
+      "first_use_anchor_id": "ANC-101",
+      "evidence_refs": [
+        {"kind": "anchor", "id": "ANC-101", "purpose": "direct_support"},
+        {"kind": "anchor", "id": "ANC-03", "purpose": "checked_absence"}
+      ],
+      "first_use": "Heading 2 (level 2): 1. Setup",
+      "definition": "The positive cost subtracted from the payoff to action 1.",
+      "unit_or_domain": "c > 0 in the same payoff units as theta",
+      "variants": [],
+      "status": "defined_clear",
+      "finding_ids": []
+    },
+    {
+      "id": "TERM-04",
       "label": "equilibrium action",
       "kind": "economic_term",
       "coverage_unit_ids": ["paper"],
-      "first_use": "Section 3.1",
-      "definition": "The action selected in the static signaling equilibrium.",
-      "unit_or_domain": "The stated parameter domain",
+      "first_use_anchor_id": "ANC-01",
+      "evidence_refs": [
+        {"kind": "anchor", "id": "ANC-01", "purpose": "direct_support"},
+        {"kind": "anchor", "id": "ANC-101", "purpose": "direct_support"},
+        {"kind": "anchor", "id": "ANC-03", "purpose": "checked_absence"}
+      ],
+      "first_use": "Section 3, paragraph 1",
+      "definition": "The action selected by the payoff comparison in the static model.",
+      "unit_or_domain": "The binary action set {0,1} over the stated parameter domain",
       "variants": [],
       "status": "defined_clear",
       "finding_ids": []
     }
   ],
+  "terminology_inventory": {
+    "sources": [
+      {
+        "source_id": "SRC-01",
+        "method": "declared_candidates",
+        "scope_anchor_id": "ANC-03",
+        "candidate_ids": ["TRM-CAND-01", "TRM-CAND-02", "TRM-CAND-03", "TRM-CAND-04"],
+        "boundary_reason": null
+      }
+    ],
+    "candidates": [
+      {
+        "id": "TRM-CAND-01",
+        "source_id": "SRC-01",
+        "candidate": "a",
+        "codepoints": ["U+0061"],
+        "occurrence_anchor_ids": ["ANC-101"],
+        "disposition": "mapped_term",
+        "term_id": "TERM-01",
+        "first_use_anchor_id": "ANC-101",
+        "definition_anchor_ids": ["ANC-101"],
+        "definition_absence_anchor_ids": [],
+        "reason": "This is the manuscript's binary choice variable and is defined in the setup."
+      },
+      {
+        "id": "TRM-CAND-02",
+        "source_id": "SRC-01",
+        "candidate": "\\theta",
+        "codepoints": [],
+        "occurrence_anchor_ids": ["ANC-101", "ANC-102"],
+        "disposition": "mapped_term",
+        "term_id": "TERM-02",
+        "first_use_anchor_id": "ANC-101",
+        "definition_anchor_ids": ["ANC-101"],
+        "definition_absence_anchor_ids": [],
+        "reason": "This is the public payoff parameter and appears in the setup and result."
+      },
+      {
+        "id": "TRM-CAND-03",
+        "source_id": "SRC-01",
+        "candidate": "c",
+        "codepoints": ["U+0063"],
+        "occurrence_anchor_ids": ["ANC-101", "ANC-102"],
+        "disposition": "mapped_term",
+        "term_id": "TERM-03",
+        "first_use_anchor_id": "ANC-101",
+        "definition_anchor_ids": ["ANC-101"],
+        "definition_absence_anchor_ids": [],
+        "reason": "This is the positive payoff cost parameter and appears in the setup and result."
+      },
+      {
+        "id": "TRM-CAND-04",
+        "source_id": "SRC-01",
+        "candidate": "equilibrium action",
+        "codepoints": [],
+        "occurrence_anchor_ids": ["ANC-01", "ANC-103"],
+        "disposition": "mapped_term",
+        "term_id": "TERM-04",
+        "first_use_anchor_id": "ANC-01",
+        "definition_anchor_ids": ["ANC-101"],
+        "definition_absence_anchor_ids": [],
+        "reason": "This is the proposition's label for the action selected from the binary choice set."
+      }
+    ]
+  },
   "central_argument_assessment": {
     "status": "partially_convincing",
     "convincing_links": ["The payoff comparison identifies the preferred action away from equality."],
     "provisional_or_unsupported_links": ["Strict uniqueness is unsupported at the equality boundary."],
     "smallest_changes": ["State a tie-breaking rule or narrow uniqueness away from equality."],
     "finding_ids": ["LOGIC-01"]
+  },
+  "argument_audit": {
+    "strongest_supported_contribution": "The payoff comparison establishes a unique equilibrium action away from the equality boundary and a set-valued optimum at equality.",
+    "optional_validation_opportunities": [],
+    "economic_links": [
+      {
+        "id": "ARG-01",
+        "headline_claim_ids": ["CLM-01"],
+        "coverage_unit_ids": ["paper"],
+        "economic_question": "When does the static payoff comparison uniquely determine the equilibrium action?",
+        "starting_object": "The manuscript compares the payoffs from the two available actions over the stated parameter domain.",
+        "actor_or_constraint_map": ["The agent chooses one action after observing the parameter value."],
+        "intermediate_objects": ["The payoff ranking determines the set of optimal actions."],
+        "endpoint": "The theoretical endpoint is uniqueness of the equilibrium action throughout the claimed domain.",
+        "warrant": "A strict payoff ranking selects one action uniquely, while equality leaves both actions optimal unless an additional selection rule applies.",
+        "benchmark": "The relevant benchmark is the equality case where the two displayed payoffs coincide.",
+        "scale_or_domain": "The stated domain includes both strict inequalities and the equality boundary.",
+        "object_roles": [
+          {
+            "object": "Payoff comparison",
+            "role": "prerequisite",
+            "reason": "The payoff ranking is the formal prerequisite for the uniqueness conclusion."
+          },
+          {
+            "object": "Equilibrium action",
+            "role": "target",
+            "reason": "Uniqueness of this action is the proposition's headline theoretical object."
+          }
+        ],
+        "alternative_channels": ["An explicit tie-breaking rule could restore uniqueness at equality."],
+        "alternative_orderings": ["Without a tie-breaking rule, the equality boundary produces a set of optimal actions rather than a unique action."],
+        "alternative_assessment": "The boundary case is the strongest live alternative to global uniqueness; no additional channel is needed to establish that limitation.",
+        "discriminating_evidence": "The displayed equality case directly distinguishes strict selection from set-valued optimality.",
+        "status": "partially_supported",
+        "contribution_after_narrowing": "The uniqueness result remains valid away from equality, and the equality case can be stated as set-valued.",
+        "boundary": null,
+        "evidence_refs": [
+          {"kind": "finding_evidence", "id": "EVD-LOGIC-01-A"}
+        ],
+        "finding_ids": ["LOGIC-01"]
+      }
+    ],
+    "comparison_protocols": {
+      "status": "not_applicable",
+      "entries": [],
+      "boundary": {
+        "checked_scope": "The complete fixture, including the setup, payoff comparison, proposition, and available appendix scope.",
+        "status_basis": "absent_object_or_trigger",
+        "reason": "The fixture contains no intervention, counterfactual, robustness, or other focal-versus-benchmark protocol beyond the payoff ordering already audited as an argument link.",
+        "missing_input": null,
+        "decisive_evidence_needed": null,
+        "evidence_refs": [{"kind": "anchor", "id": "ANC-03"}]
+      },
+      "notes": "The fixture contains no intervention, counterfactual, robustness, or other focal-versus-benchmark comparison beyond the payoff ordering already audited."
+    },
+    "result_relationships": {
+      "status": "not_applicable",
+      "entries": [],
+      "boundary": {
+        "checked_scope": "The complete fixture and its single proposition were checked for separate results linked by an asserted explanation or validation relationship.",
+        "status_basis": "absent_object_or_trigger",
+        "reason": "The fixture contains one proposition and no separate results that the manuscript asks the reader to connect.",
+        "missing_input": null,
+        "decisive_evidence_needed": null,
+        "evidence_refs": [{"kind": "anchor", "id": "ANC-03"}]
+      },
+      "notes": "The fixture contains one proposition and no separate results that the manuscript asks the reader to connect."
+    },
+    "evidence_objects": [
+      {
+        "id": "OBJ-01",
+        "label": "Payoff comparison and uniqueness proposition",
+        "claim_ids": ["CLM-01"],
+        "coverage_unit_ids": ["paper"],
+        "role": "headline",
+        "provenance": ["modeled"],
+        "relevance_to_argument": "The payoff comparison is the complete formal object used to support the uniqueness proposition.",
+        "status": "accounted_for",
+        "accounting": "The manuscript reports the comparison and proposition; the remaining problem is interpretation of the equality boundary rather than an omitted object.",
+        "boundary": null,
+        "evidence_refs": [
+          {"kind": "anchor", "id": "ANC-01"}
+        ],
+        "finding_ids": []
+      }
+    ],
+    "magnitude_assessments": {
+      "status": "not_applicable",
+      "entries": [],
+      "boundary": {
+        "checked_scope": "The proposition, payoff comparison, and stated parameter domain were checked for a headline quantitative magnitude.",
+        "status_basis": "absent_object_or_trigger",
+        "reason": "The fixture makes a qualitative boundary proposition and reports no quantitative estimate, calibration, forecast, welfare number, or comparative-static magnitude.",
+        "missing_input": null,
+        "decisive_evidence_needed": null,
+        "evidence_refs": [{"kind": "anchor", "id": "ANC-03"}]
+      },
+      "notes": "The fixture makes a qualitative boundary proposition and reports no headline quantitative magnitude."
+    },
+    "transport_assessments": {
+      "status": "complete",
+      "entries": [
+        {
+          "id": "TRN-01",
+          "claim_ids": ["CLM-01"],
+          "coverage_unit_ids": ["paper"],
+          "source_population_or_domain": "Parameter values with a strict payoff ranking support a unique optimal action.",
+          "target_population_or_domain": "The proposition extends uniqueness to every parameter value, including equality.",
+          "transport_basis": "The manuscript relies on strict monotonicity but supplies no tie-breaking condition at equality.",
+          "overlap_or_support": "The equality boundary lies inside the stated domain but outside the strict-ranking support for uniqueness.",
+          "adjustment_or_validation": "Narrow the domain or add and justify a tie-breaking rule that applies at equality.",
+          "supported_scope": "Uniqueness is supported only away from the equality boundary under the stated assumptions.",
+          "status": "unsupported",
+          "evidence_refs": [
+            {"kind": "finding_evidence", "id": "EVD-LOGIC-01-A"}
+          ],
+          "boundary": null,
+          "finding_ids": ["LOGIC-01"]
+        }
+      ],
+      "boundary": null,
+      "notes": "The domain expansion from strict ranking to equality is the scope issue audited here."
+    }
   },
   "writing_audit": {
     "status": "issues_found",

@@ -11,6 +11,9 @@ Load this lens whenever the reported object creates a sampling, randomization, d
 | Repeated observations with persistent outcomes or policy timing | Check whether serial correlation is reflected in the variance estimator or randomization scheme. |
 | Many outcomes, arms, subgroups, horizons, specifications, or model moments | Reconstruct confirmatory families and distinguish preregistered from exploratory analysis; assess familywise or false-discovery control and simultaneous intervals where the claim requires them. |
 | Treatment affects outcome observability, follow-up, employment, survival, or sample inclusion | Check response by assignment and define the observed-sample estimand. Use weighting, bounds, or claim narrowing only under their actual assumptions. |
+| The claim targets a population broader than the recruited, observed, selected, calibrated, or linked sample | Define the sample and target estimands separately. Check overlap and defensible effect modifiers before suggesting weighting or standardization; otherwise narrow the claim. |
+| Randomized estimates add covariates or omit a substantively prominent baseline variable | Recover the prespecified adjustment set, timing, prognostic rationale, and assignment-respecting specification. Do not require a named control for identification or permit post-treatment adjustment. |
+| The paper motivates, preregisters, collects, or reports several related outcomes or margins | Reconcile the evidence-object inventory with the reported family. Distinguish a justified non-use from unexplained omission or selective emphasis before creating a finding. |
 | Estimates are selected for significance or the design has low power | Ask for an ex ante or design-based minimum detectable effect and interpret large selected estimates cautiously; do not infer bias from low power alone. |
 | A sufficiently complete family of comparable test statistics or p-values is available and selective reporting is a live concern | Inspect threshold heaping or discontinuities only after defining the test universe and reconciling rounding, discreteness, one- versus two-sided tests, and heterogeneous specifications. Treat the pattern as a diagnostic, never proof of manipulation. |
 | Robustness is argued from coefficient stability after adding controls | Check the exact selection-on-observables argument and sensitivity parameters. Do not convert a conventional parameter value into a universal pass/fail threshold. |
@@ -32,6 +35,18 @@ Inventory outcomes, arms, subgroups, horizons, models, and displayed specificati
 ### Attrition and selected outcome observation
 
 If assignment changes whether an outcome is observed, an observed-sample comparison need not retain the original randomized estimand. Check arm-specific observation rates and baseline composition. Weighting requires a defensible response model; Lee-style bounds require the relevant monotonicity structure. If neither is credible, define the respondent-sample estimand and narrow the claim.
+
+### Sample-to-target transport
+
+A randomized effect in the recruited sample need not equal a population effect. State both objects before recommending a repair. Reweighting or standardization can help only when the target population is declared, overlap is adequate, the relevant effect modifiers are observed, and the adjustment model is credible. Nonprobability recruitment can leave selection on unobservables unresolved after demographic balance. When transport is not identified, describe the sample and narrow the claim rather than treating unavailable population data as a defect.
+
+### Covariate adjustment in randomized designs
+
+Baseline covariates are not required for identification under valid randomization. Audit whether the adjustment set was prespecified, measured before assignment, prognostic or precision-motivated, and implemented consistently with blocks or assignment probabilities. If heterogeneity by a baseline variable is central, ask for the direct interaction or subgroup contrast and its uncertainty; do not infer that putting that variable in the main-effect control vector tests heterogeneity.
+
+### Outcome and margin completeness
+
+Use the argument-and-evidence inventory to trace outcomes and margins mentioned in the motivation, registration, instrument, methods, and results. An unreported collected variable is not automatically selective reporting. Retain a concern when non-reporting breaks a stated promise, hides a relevant margin needed to interpret the headline result, conflicts with a registration, or makes the reported family incomplete. A transparent explanation, relegation of an immaterial exploratory item, or correction of the motivating prose may be the sufficient repair.
 
 ### Power, minimum detectable effects, and winner's curse
 
@@ -55,6 +70,8 @@ When treatment was randomized, reconstruct the actual assignment: blocks, cluste
 - Do not prescribe state clustering merely because states appear in the data.
 - Do not treat multiplicity adjustment as mandatory for every descriptive or exploratory result.
 - Do not call inverse-probability weighting a cure without checking overlap and the response model.
+- Do not prescribe population reweighting merely because sample demographics differ from a census target.
+- Do not require a substantively prominent baseline covariate in the default control set merely because it predicts the outcome or appears in heterogeneity analysis.
 - Do not demand Lee bounds unless the selection structure and monotonicity interpretation fit.
 - Do not treat an Oster sensitivity parameter of one as a universal validity threshold.
 - Do not assert a numerical inconsistency from hand arithmetic. Recompute it with `scripts/stat_recompute.py` or mark the check bounded.

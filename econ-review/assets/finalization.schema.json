@@ -6,19 +6,24 @@
   "additionalProperties": false,
   "required": ["schema_version", "review_id", "contract_version", "artifacts", "gates"],
   "properties": {
-    "schema_version": {"const": "0.1"},
+    "schema_version": {"enum": ["0.1", "0.2", "0.3"]},
     "review_id": {"type": "string", "minLength": 1},
     "contract_version": {"const": "0.4"},
     "artifacts": {
       "type": "object",
       "minProperties": 1,
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^(?!(?:finalization|review-actions)\\.json$)(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*(?:^|/)\\.DS_Store$)(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f]+$"
+      },
       "additionalProperties": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
     },
     "gates": {
       "type": "array",
       "minItems": 3,
       "uniqueItems": true,
-      "items": {"enum": ["source_integrity", "source_ingestion", "structured_verification", "report_generation", "fix_plan_generation", "contract_validation"]}
+      "items": {"enum": ["source_integrity", "source_ingestion", "structured_verification", "structured_audit_v02", "burden_coverage_v02", "report_generation", "fix_plan_generation", "contract_validation"]}
     }
   }
 }

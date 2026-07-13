@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -79,6 +80,32 @@ class UpgradeReviewV03Tests(unittest.TestCase):
         }]
         with self.assertRaisesRegex(ValueError, "invalid decision_role 'urgent'"):
             MODULE.rerank(rows)
+
+    def test_full_migration_rolls_back_both_files_when_second_write_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "review"
+            shutil.copytree(FIXTURE, target)
+            run_path = target / "run.json"
+            ledger_path = target / "findings.json"
+            run = json.loads(run_path.read_text(encoding="utf-8"))
+            run["schema_version"] = "0.2"
+            run_path.write_text(json.dumps(run, indent=2) + "\n", encoding="utf-8")
+            ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+            ledger["schema_version"] = "0.2"
+            ledger_path.write_text(json.dumps(ledger, indent=2) + "\n", encoding="utf-8")
+            before = {path: path.read_bytes() for path in (run_path, ledger_path)}
+            real_write = MODULE.atomic_write_json
+
+            def fail_findings(root: Path, relative: str, value: object) -> Path:
+                if relative == "findings.json":
+                    raise OSError("synthetic second-write failure")
+                return real_write(root, relative, value)
+
+            with mock.patch.object(MODULE, "atomic_write_json", side_effect=fail_findings):
+                with self.assertRaisesRegex(OSError, "synthetic second-write failure"):
+                    MODULE.migrate(target)
+
+            self.assertEqual({path: path.read_bytes() for path in before}, before)
 
 
 if __name__ == "__main__":

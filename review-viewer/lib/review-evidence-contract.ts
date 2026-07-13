@@ -47,19 +47,24 @@ export type ReviewEvidenceLocator = {
 };
 
 const REVIEW_EVIDENCE_REPRESENTATION_SET: ReadonlySet<string> = new Set(REVIEW_EVIDENCE_REPRESENTATIONS);
+const LOCATOR_KEYS = new Set(["section", "page", "paragraph", "exhibit", "equation", "lines", "file"]);
+const EVIDENCE_KEYS = new Set([
+  "id", "type", "representation", "anchor_id", "anchor_ids", "computation_id",
+  "source_record_id", "support_record_id", "source", "locator", "content", "scope_checked",
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 export function isValidReviewEvidenceLocator(value: unknown): value is ReviewEvidenceLocator {
-  if (!isRecord(value)) return false;
+  if (!isRecord(value) || Object.keys(value).some((key) => !LOCATOR_KEYS.has(key))) return false;
   for (const key of ["section", "paragraph", "exhibit", "equation", "lines", "file"]) {
     const field = value[key];
     if (!(typeof field === "string" || field === null || field === undefined)) return false;
   }
   const page = value.page;
-  return typeof page === "number" ? Number.isFinite(page) : page === null || page === undefined;
+  return typeof page === "number" ? Number.isInteger(page) && page >= 1 : page === null || page === undefined;
 }
 
 /**
@@ -68,11 +73,28 @@ export function isValidReviewEvidenceLocator(value: unknown): value is ReviewEvi
  */
 export function isValidReviewEvidence(value: unknown, schemaVersion: unknown): boolean {
   if (
-    !isRecord(value) || !isReviewEvidenceType(value.type)
-    || typeof value.source !== "string" || !isValidReviewEvidenceLocator(value.locator)
+    !isRecord(value) || Object.keys(value).some((key) => !EVIDENCE_KEYS.has(key))
+    || !isReviewEvidenceType(value.type)
+    || typeof value.source !== "string" || !value.source.length || !isValidReviewEvidenceLocator(value.locator)
     || !(typeof value.content === "string" || value.content === null)
     || !(typeof value.scope_checked === "string" || value.scope_checked === null || value.scope_checked === undefined)
   ) return false;
+
+  if (value.representation !== undefined && (
+    typeof value.representation !== "string" || !REVIEW_EVIDENCE_REPRESENTATION_SET.has(value.representation)
+  )) return false;
+  if (!(value.anchor_id === undefined || value.anchor_id === null || (
+    typeof value.anchor_id === "string" && /^ANC-[0-9]{2,}$/.test(value.anchor_id)
+  ))) return false;
+  if (!(value.computation_id === undefined || value.computation_id === null || (
+    typeof value.computation_id === "string" && /^CMP-[0-9]{2,}$/.test(value.computation_id)
+  ))) return false;
+  if (!(value.source_record_id === undefined || value.source_record_id === null || (
+    typeof value.source_record_id === "string" && /^EXT-[0-9]{2,}$/.test(value.source_record_id)
+  ))) return false;
+  if (!(value.support_record_id === undefined || value.support_record_id === null || (
+    typeof value.support_record_id === "string" && /^EXT-[0-9]{2,}-SUP-[0-9]{2,}$/.test(value.support_record_id)
+  ))) return false;
 
   const anchorIds = value.anchor_ids;
   if (anchorIds !== undefined && (
@@ -84,7 +106,7 @@ export function isValidReviewEvidence(value: unknown, schemaVersion: unknown): b
   )) return false;
 
   return schemaVersion !== "0.4" || (
-    typeof value.id === "string" && Boolean(value.id.trim())
+    typeof value.id === "string" && /^EVD-[A-Z0-9_-]+$/.test(value.id)
     && typeof value.representation === "string"
     && REVIEW_EVIDENCE_REPRESENTATION_SET.has(value.representation)
   );

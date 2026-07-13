@@ -6,7 +6,18 @@ Under the current contract, create `synthesis.json` and a cohesive referee openi
 
 Synthesis is a projection of canonical evidence, not a new evidence layer. Link each strength, assessment statement, posture rationale, convincingness judgment, concern rationale, and upgrade condition to the claim IDs, finding IDs, and evidence IDs that support it. A strength must be source-grounded just as a criticism is. If a sentence cannot be linked, narrow it, mark it bounded, or remove it.
 
+## Contents
+
+- [Decision relevance and repair portfolios](#1-rank-by-decision-relevance)
+- [Finding buckets and calibration](#2-separate-buckets)
+- [Referee opening and recommendation](#4-write-the-referee-opening)
+- [Signature and publication-value tests](#6-apply-the-signature-test)
+
 The synthesis should leave the author with a better paper, not merely a verdict. Explain which assets to preserve, which changes have the highest return, and why the minimum repair improves the central argument. Do not equate rigor with maximal workload.
+
+When the current framing outruns the evidence, include the strongest supported contribution as a rescue path. Keep attractive validation opportunities separate from defects: realized-outcome comparisons, additional benchmarks, or alternative framings are optional unless the central claim cannot stand without them.
+
+Treat materially different repairs as a portfolio, not a cumulative task list. For each principal concern, identify the minimum path that preserves the strongest currently supported contribution. Then state a broader-claim path only if additional evidence could genuinely support that broader claim. Claim narrowing, reframing, new analysis, new evidence, and redesign are often alternatives; do not instruct the author to complete all of them. If choosing one path makes another request unnecessary, make that dependency explicit in the fix plan.
 
 ## 1. Rank by decision relevance
 
@@ -17,10 +28,13 @@ For each finding, ask:
 3. Is it fixable within the paper's design and a plausible revision cycle?
 4. What is the smallest decisive repair?
 5. Would the finding remain after the strongest plausible author reply?
+6. Are proposed repairs alternatives or complements, and which one is the minimum publishable path?
 
 Record the answer through linked canonical IDs rather than unsupported free text. Principal concerns may group findings, but may not silently add a new diagnosis or amplify a bounded one into a verified defect.
 
 For data-related concerns, rank the consequence for the paper's actual bounded claim, not the imperfection of the dataset in the abstract. An inherent limitation that is disclosed and claim-calibrated is not a weakness. If claim narrowing fully resolves the concern, severity follows from where and how strongly the overclaim appears, not from the unavailable ideal data.
+
+A missing economic warrant can be posture-material even when the underlying estimate, proof, or simulation is technically correct. This applies when the warrant is necessary to understand why the measured or modeled object supports the claimed contribution or endpoint. State the strongest bypass channel or alternative ordering and the contribution that survives narrowing. Lower the severity when a coherent narrower framing preserves a publishable contribution. Do not convert this rule into a mandatory-formal-model requirement.
 
 Group shared root causes into principal concerns. Count the root-cause concern once in the headline tally even when it is supported by several findings or appears in many manuscript locations; occurrence count is evidence about scope, not a mechanical severity multiplier. A concise referee synthesis will normally have one to three principal concerns, but this is an editorial norm rather than a validator cap. Preserve every independently or cumulatively dispositive concern.
 
@@ -68,6 +82,8 @@ Do not imitate any one journal's stock opening or word limit. The transferable s
 
 ## 5. Set a posture
 
+If both the target venue and broad tier are unspecified, set the publication posture to `Not assessed`. Still give a clear technical and contribution assessment, identify the revision path, and state what evidence would resolve each concern. Do not translate technical severity into an acceptance or revise-and-resubmit label without a publication bar. A named venue is not required when the user supplies a broad tier.
+
 Use:
 
 - `Reject`: one or more essential problems are not realistically repairable within the present design, or the contribution falls materially short of the target bar.
@@ -75,7 +91,7 @@ Use:
 - `Strong R&R`: the paper is promising and the remaining essential work is clear and feasible.
 - `Accept`: no essential or major issue remains; use rarely in pre-submission review.
 
-Call this a review posture, not a prediction or decision. State what evidence or revision would upgrade it.
+Present this as the reviewer's recommendation, not a prediction. Do not imply that an editor has decided the paper. State what evidence or revision would upgrade the recommendation.
 
 ## 6. Apply the signature test
 
@@ -90,5 +106,6 @@ For every requested change, record:
 - the minimum decisive analysis or edit;
 - likely effort and dependencies;
 - why the change improves validity, interpretation, contribution, or venue readiness.
+- whether the change is required on the minimum path, conditional on retaining a broader claim, or optional strengthening.
 
 Delete recommendations that add work without changing any evaluation.

@@ -42,6 +42,14 @@ class PublicReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "undeclared file"):
                 MODULE.public_files(root)
 
+    def test_generated_tool_caches_do_not_break_the_release_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.make_contract_root(Path(tmp), {"scripts/public-release-files.json": b""})
+            cache = root / "review-viewer" / ".pytest_cache" / "v" / "cache"
+            cache.mkdir(parents=True)
+            (cache / "nodeids").write_text("[]", encoding="utf-8")
+            self.assertEqual(MODULE.public_files(root), [Path("scripts/public-release-files.json")])
+
     def test_missing_declared_file_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = self.make_contract_root(
@@ -63,6 +71,21 @@ class PublicReleaseTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
                 MODULE.public_files(root)
+
+    def test_file_contract_rejects_nonportable_paths(self) -> None:
+        for value in (
+            "econ-review/e\u0301.md",
+            "econ-review/name:stream.md",
+            "econ-review/trailing. ",
+            "econ-review/CON.md",
+            "NUL/review-viewer/file.ts",
+            "econ-review/COM1",
+            "econ-review/lpt9.txt",
+            "econ-review/CLOCK$.json",
+        ):
+            with self.subTest(path=value):
+                with self.assertRaisesRegex(ValueError, "unsafe|non-canonical"):
+                    MODULE._safe_relative(value)
 
     def test_privacy_scan_rejects_home_paths_and_secret_filenames(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -193,7 +216,19 @@ class InstallerTests(unittest.TestCase):
             self.assertIn("installation complete", result.stdout)
             self.assertTrue((destination / "SKILL.md").is_file())
             self.assertFalse((destination / "old.txt").exists())
+            self.assertFalse((destination / ".DS_Store").exists())
+            self.assertFalse((destination / "scripts" / "__pycache__").exists())
             self.assertFalse(list(destination.parent.glob(".econ-review.*")))
+
+    def test_dry_run_reports_no_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            result = self.run_installer(
+                ROOT / "install.sh", "--global", "--all", "--dry-run", env={"HOME": str(home)},
+            )
+            self.assertIn("dry run complete; no files changed", result.stdout)
+            self.assertFalse((home / ".claude").exists())
+            self.assertFalse((home / ".codex").exists())
 
     def test_codex_and_claude_global_and_project_install_contracts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -215,7 +250,9 @@ class InstallerTests(unittest.TestCase):
                 self.assertTrue((destination / "references" / "workflow.md").is_file())
                 self.assertTrue((destination / "requirements-core.txt").is_file())
                 self.assertTrue((destination / "requirements-docling.txt").is_file())
+                self.assertTrue((destination / "requirements-markitdown.txt").is_file())
                 self.assertTrue((destination / "requirements-mathpix.txt").is_file())
+                self.assertTrue((destination / "scripts" / "dependency_versions.py").is_file())
                 self.assertTrue(os.access(destination / "scripts" / "validate_review.py", os.X_OK))
 
             project_result = self.run_installer(
@@ -320,6 +357,9 @@ class InstallerTests(unittest.TestCase):
     def test_remote_archive_rejects_traversal_ambiguous_roots_and_case_collisions(self) -> None:
         cases = (
             ("econ-paper-review-skill/../escape", "unsafe archive path"),
+            ("econ-paper-review-skill/e\u0301.txt", "unsafe archive path"),
+            ("econ-paper-review-skill/name:stream", "unsafe archive path"),
+            ("econ-paper-review-skill/econ-review/NUL.txt", "unsafe archive path"),
             ("second-root/file.txt", "exactly one econ-paper-review-skill root"),
             ("econ-paper-review-skill/README.MD", "duplicate or case-colliding"),
         )

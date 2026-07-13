@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from pypdf import PdfWriter
@@ -93,6 +94,14 @@ def package(review: Path, source_id: str = "SRC-01") -> Path:
     return review / "evidence" / "pdf-ingestion" / source_id
 
 
+def compatible_pdf_runtime() -> bool:
+    try:
+        MODULE.ensure_core_python_runtime()
+    except MODULE.IngestionError:
+        return False
+    return all(shutil.which(command) for command in ("pdfinfo", "pdftotext", "pdftoppm"))
+
+
 class PdfXmlSanitizationTests(unittest.TestCase):
     def test_xml_forbidden_control_is_removed_only_from_parser_input_and_recorded(self) -> None:
         fixture = (
@@ -117,6 +126,125 @@ class PdfXmlSanitizationTests(unittest.TestCase):
         self.assertEqual(repairs["xml_forbidden_codepoints"], ["U+000F"])
         self.assertNotEqual(repairs["raw_xhtml_sha256"], repairs["parser_input_sha256"])
         self.assertEqual(repairs["action"], "removed_xml_forbidden_controls_from_parser_input")
+
+    def test_portable_paths_and_logical_block_order_fail_closed(self) -> None:
+        self.assertEqual(MODULE.safe_relative("evidence/pdf-ingestion/SRC-01"), "evidence/pdf-ingestion/SRC-01")
+        for unsafe in (
+            "/absolute/path", "../escape", "evidence\\windows", "C:/drive/path",
+            "evidence//double", "evidence/./dot", "evidence/\x00control",
+            "evidence/decomposed-e\u0301", "evidence/trailing.", "evidence/AUX/file.json",
+            "evidence/ padded/file.json",
+        ):
+            with self.assertRaisesRegex(MODULE.IngestionError, "safe and relative"):
+                MODULE.safe_relative(unsafe)
+
+        blocks = [
+            {"id": "left-1", "page": 1, "bbox": [10, 10, 100, 20]},
+            {"id": "left-2", "page": 1, "bbox": [10, 30, 100, 40]},
+            {"id": "right-1", "page": 1, "bbox": [200, 10, 300, 20]},
+        ]
+        self.assertEqual(
+            [row["id"] for row in MODULE.page_blocks(blocks)[1]],
+            ["left-1", "left-2", "right-1"],
+            "two-column content-stream order must not be interleaved by a global y/x sort",
+        )
+
+    def test_ocr_language_is_passed_as_one_non_shell_argument(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, b"recognized", b"")
+        with mock.patch.object(MODULE, "run", return_value=completed) as runner:
+            self.assertEqual(MODULE.extract_ocr(Path("page.png"), "eng+fra"), "recognized")
+        self.assertEqual(runner.call_args.args[0][4], "eng+fra")
+
+    def test_image_verification_rejects_disguised_or_truncated_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "page.png"
+            path.write_text("<html>not an image</html>", encoding="utf-8")
+            with self.assertRaisesRegex(MODULE.IngestionError, "not a decodable image"):
+                MODULE.verified_image_shape(path, "page render")
+
+
+class PdfCandidateClassificationTests(unittest.TestCase):
+    @staticmethod
+    def classify(text: str, *, y0: float = 100.0, y1: float = 140.0) -> tuple[str, str]:
+        return MODULE.classify_block({
+            "raw_text": text,
+            "bbox": [72.0, y0, 540.0, y1],
+            "page_height": 792.0,
+        }, set())
+
+    def test_caption_prefixes_and_identifier_styles_are_design_agnostic(self) -> None:
+        cases = {
+            "Table 1: Summary statistics": "caption_table",
+            "Table 1 Summary statistics": "caption_table",
+            "Appendix Table A.1: Matching rate analysis": "caption_table",
+            "Online Appendix Figure OA.2 - Robustness results": "caption_figure",
+            "Online Supplementary Appendix Table S1 Results": "caption_table",
+            "Supplemental Appendix Fig. B-3. Dynamics": "caption_figure",
+            "Supporting Information Figure 2b: Sample construction": "caption_figure",
+            "Figure IV: Equilibrium regions": "caption_figure",
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(self.classify(text)[0], expected)
+
+    def test_repeated_top_caption_is_not_discarded_as_a_running_header(self) -> None:
+        text = "Table 1: Results (continued)"
+        block = {
+            "raw_text": text,
+            "bbox": [72.0, 20.0, 540.0, 50.0],
+            "page_height": 792.0,
+        }
+        normalized = "table #: results (continued)"
+        self.assertEqual(
+            MODULE.classify_block(block, {("top", normalized)})[0],
+            "caption_table",
+        )
+
+    def test_narrative_cross_references_are_not_captions(self) -> None:
+        prose = (
+            "Table A.2 summarizes the ownership-spell dataset constructed from the matched records.",
+            "Figure B.1 plots the geographical distribution of the cities.",
+            "Appendix Table D.1 reports the corresponding estimates.",
+            "Table 2 and Figure 3 provide the remaining results.",
+            "Table 4 is discussed in the next section.",
+        )
+        for text in prose:
+            with self.subTest(text=text):
+                self.assertEqual(self.classify(text)[0], "paragraph")
+
+    def test_clear_prose_equalities_are_not_equation_candidates(self) -> None:
+        prose = (
+            "26 The results are robust to alternative lag lengths of p = 2 and p = 6.",
+            "The calibration sets p = 2 and q = 6.",
+        )
+        for text in prose:
+            with self.subTest(text=text):
+                self.assertNotEqual(self.classify(text, y0=670.0, y1=690.0)[0], "equation_candidate")
+        for equation in ("p = 2\nq = 6", "y = a + b x   (1)"):
+            with self.subTest(equation=equation):
+                self.assertEqual(self.classify(equation)[0], "equation_candidate")
+
+    def test_detector_contract_changes_current_but_not_legacy_fingerprints(self) -> None:
+        configuration = {"source_id": "SRC-01", "source_role": "manuscript"}
+        toolchain = {"primary": {"name": "pdftotext", "version": "synthetic"}}
+        current = MODULE.pipeline_fingerprint(
+            configuration, toolchain,
+            detector_contract={"version": "1", "source_sha256": "a" * 64},
+        )
+        changed = MODULE.pipeline_fingerprint(
+            configuration, toolchain,
+            detector_contract={"version": "1", "source_sha256": "b" * 64},
+        )
+        self.assertNotEqual(current, changed)
+        legacy_a = MODULE.pipeline_fingerprint(
+            configuration, toolchain, pipeline_version="0.2",
+            detector_contract={"version": "1", "source_sha256": "a" * 64},
+        )
+        legacy_b = MODULE.pipeline_fingerprint(
+            configuration, toolchain, pipeline_version="0.2",
+            detector_contract={"version": "1", "source_sha256": "b" * 64},
+        )
+        self.assertEqual(legacy_a, legacy_b)
 
 
 class PdfObjectRegionTests(unittest.TestCase):
@@ -186,10 +314,19 @@ class PdfObjectRegionTests(unittest.TestCase):
         self.assertGreaterEqual(first_bbox[2], 542)
         self.assertLess(first_bbox[3], second_bbox[1])
 
+    def test_detector_failures_are_preserved_as_bounded_warnings(self) -> None:
+        with mock.patch("pdfplumber.open", side_effect=RuntimeError("synthetic parser failure")):
+            tables, table_warnings = MODULE.table_candidates(Path("synthetic.pdf"))
+            graphics, graphic_warnings = MODULE.page_graphic_candidates(Path("synthetic.pdf"))
+        self.assertEqual(tables, {})
+        self.assertEqual(graphics, {})
+        self.assertTrue(any("table-grid detector failed" in warning for warning in table_warnings))
+        self.assertTrue(any("graphic-extent detector failed" in warning for warning in graphic_warnings))
+
 
 @unittest.skipUnless(
-    all(shutil.which(command) for command in ("pdfinfo", "pdftotext", "pdftoppm")),
-    "Poppler commands are required for PDF ingestion integration tests",
+    compatible_pdf_runtime(),
+    "compatible requirements-core.txt environment and Poppler commands are required for PDF integration tests",
 )
 class PdfIngestionTests(unittest.TestCase):
     def run_cli(
@@ -236,6 +373,98 @@ class PdfIngestionTests(unittest.TestCase):
             self.assertIn("already current", result.stdout)
             self.assertEqual((first / "ingestion.json").read_bytes(), before)
 
+    def test_current_ingestion_generates_exactly_one_authenticated_scope_anchor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pdf, review = root / "synthetic.pdf", root / "review"
+            make_pdf(pdf)
+            current = self.ingest(pdf, review)
+            ingestion = json.loads((current / "ingestion.json").read_text(encoding="utf-8"))
+            generated = json.loads(
+                (current / "source-manifest.generated.json").read_text(encoding="utf-8")
+            )
+            markdown_text = (current / "manuscript.md").read_text(encoding="utf-8")
+            markdown_bytes = markdown_text.encode("utf-8")
+
+            scope_anchors = [
+                row for row in generated["anchors"] if row.get("kind") == "scope"
+            ]
+            self.assertEqual(len(generated["anchors"]), len(ingestion["blocks"]) + 1)
+            self.assertEqual(len(scope_anchors), 1)
+            scope = scope_anchors[0]
+            self.assertEqual(
+                scope["id"],
+                MODULE.source_anchor_id("SRC-01", len(ingestion["blocks"]) + 1),
+            )
+            self.assertEqual(scope["source_id"], "SRC-01")
+            self.assertEqual(
+                (scope["start_char"], scope["end_char"]),
+                (0, len(markdown_text)),
+            )
+            self.assertEqual(scope["content_sha256"], MODULE.sha256_bytes(markdown_bytes))
+            self.assertEqual(scope["content_sha256"], ingestion["markdown"]["sha256"])
+            checked = self.run_cli("check", str(current), check=False)
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+
+    def test_scope_anchor_tampering_and_duplicate_scope_are_detected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pdf, review = root / "synthetic.pdf", root / "review"
+            make_pdf(pdf)
+            current = self.ingest(pdf, review)
+            generated_path = current / "source-manifest.generated.json"
+            original = json.loads(generated_path.read_text(encoding="utf-8"))
+
+            def duplicate_scope(value: dict[str, Any]) -> None:
+                value["anchors"][0]["kind"] = "scope"
+
+            def change_block_kind(value: dict[str, Any]) -> None:
+                value["anchors"][0]["kind"] = "figure"
+
+            def change_scope_identity(value: dict[str, Any]) -> None:
+                value["anchors"][-1]["source_id"] = "SRC-99"
+
+            def change_scope_span(value: dict[str, Any]) -> None:
+                value["anchors"][-1]["end_char"] -= 1
+
+            def change_scope_hash(value: dict[str, Any]) -> None:
+                value["anchors"][-1]["content_sha256"] = "0" * 64
+
+            cases = (
+                ("duplicate scope", duplicate_scope, "exactly one scope anchor"),
+                ("block kind", change_block_kind, "kind differs from its canonical block"),
+                ("scope identity", change_scope_identity, "scope anchor differs"),
+                ("scope span", change_scope_span, "scope anchor differs"),
+                ("scope hash", change_scope_hash, "scope anchor differs"),
+            )
+            for label, mutate, expected in cases:
+                with self.subTest(label=label):
+                    tampered = json.loads(json.dumps(original))
+                    mutate(tampered)
+                    generated_path.write_bytes(MODULE.canonical_json(tampered))
+                    checked = self.run_cli("check", str(current), check=False)
+                    self.assertNotEqual(checked.returncode, 0)
+                    self.assertIn(expected, checked.stderr)
+            generated_path.write_bytes(MODULE.canonical_json(original))
+            checked = self.run_cli("check", str(current), check=False)
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+
+    def test_legacy_block_only_generated_manifest_remains_verifiable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pdf, review = root / "synthetic.pdf", root / "review"
+            make_pdf(pdf)
+            current = self.ingest(pdf, review)
+            generated_path = current / "source-manifest.generated.json"
+            generated = json.loads(generated_path.read_text(encoding="utf-8"))
+            removed = generated["anchors"].pop()
+            self.assertEqual(removed["kind"], "scope")
+            self.assertFalse(any(row["kind"] == "scope" for row in generated["anchors"]))
+            generated_path.write_bytes(MODULE.canonical_json(generated))
+
+            checked = self.run_cli("check", str(current), check=False)
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+
     def test_changed_configuration_requires_force_and_changes_fingerprint(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -243,6 +472,7 @@ class PdfIngestionTests(unittest.TestCase):
             make_pdf(pdf)
             current = self.ingest(pdf, review)
             before = json.loads((current / "ingestion.json").read_text())
+            self.assertEqual(before["configuration"]["ocr_language"], "eng")
             refused = self.run_cli(
                 "ingest", str(pdf), str(review), "--review-id", "PDF-TEST", "--source-id", "SRC-01",
                 "--ocr", "never", "--dpi", "200", check=False,
@@ -361,8 +591,23 @@ class PdfIngestionTests(unittest.TestCase):
                     "--markitdown-proposal", check=False,
                 )
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("requires the local markitdown command", result.stderr)
+                self.assertIn("optional backend markitdown is unavailable", result.stderr)
         self.assertIn("network: forbidden by default", self.run_cli("doctor").stdout)
+
+    @unittest.skipUnless(shutil.which("markitdown"), "compatible MarkItDown command is not installed")
+    def test_pinned_markitdown_proposal_is_non_authoritative_and_verifiable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pdf, review = root / "synthetic.pdf", root / "review"
+            make_pdf(pdf)
+            current = self.ingest(pdf, review, "--markitdown-proposal")
+            manifest = json.loads((current / "ingestion.json").read_text(encoding="utf-8"))
+            proposal = manifest["proposal"]
+            self.assertEqual(proposal["engine"], "markitdown")
+            self.assertFalse(proposal["authoritative"])
+            self.assertTrue((current / "proposals/markitdown.md").is_file())
+            checked = self.run_cli("check", str(current), check=False)
+            self.assertEqual(checked.returncode, 0, checked.stderr)
 
     def test_mathpix_requires_two_explicit_authorizations_before_credentials_or_network(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -391,6 +636,7 @@ class PdfIngestionTests(unittest.TestCase):
             current = self.ingest(pdf, review, "--semantic-backend", "none")
             manifest = json.loads((current / "ingestion.json").read_text())
             manifest["schema_version"] = "0.1"
+            manifest.pop("detector_contract")
             manifest.pop("proposals")
             manifest.pop("reconciliation")
             manifest["toolchain"].pop("semantic_backends")
@@ -404,6 +650,35 @@ class PdfIngestionTests(unittest.TestCase):
                     "source_role": manifest["source_role"],
                 },
                 manifest["toolchain"], pipeline_version="0.1",
+            )
+            ingestion_bytes = MODULE.canonical_json(manifest)
+            (current / "ingestion.json").write_bytes(ingestion_bytes)
+            generated = json.loads((current / "source-manifest.generated.json").read_text())
+            scope = generated["anchors"].pop()
+            self.assertEqual(scope["kind"], "scope")
+            self.assertFalse(any(row["kind"] == "scope" for row in generated["anchors"]))
+            extraction = generated["sources"][0]["extraction"]
+            extraction["ingestion_manifest_sha256"] = MODULE.sha256_bytes(ingestion_bytes)
+            extraction["pipeline_fingerprint"] = manifest["pipeline_fingerprint"]
+            (current / "source-manifest.generated.json").write_bytes(MODULE.canonical_json(generated))
+            result = self.run_cli("check", str(current), check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_legacy_v02_package_remains_verifiable_without_detector_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pdf, review = root / "synthetic.pdf", root / "review"
+            make_pdf(pdf)
+            current = self.ingest(pdf, review, "--semantic-backend", "none")
+            manifest = json.loads((current / "ingestion.json").read_text())
+            manifest["schema_version"] = "0.2"
+            manifest.pop("detector_contract")
+            manifest["pipeline_fingerprint"] = MODULE.pipeline_fingerprint(
+                {
+                    **manifest["configuration"], "source_id": manifest["source_id"],
+                    "source_role": manifest["source_role"],
+                },
+                manifest["toolchain"], pipeline_version="0.2",
             )
             ingestion_bytes = MODULE.canonical_json(manifest)
             (current / "ingestion.json").write_bytes(ingestion_bytes)

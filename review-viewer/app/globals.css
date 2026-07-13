@@ -283,9 +283,13 @@ kbd { min-width: 20px; display: inline-grid; place-items: center; padding: 2px 5
 .report-document .katex-display { overflow-x: auto; overflow-y: hidden; padding-block: 4px; }
 .report-document code { padding: 2px 4px; background: #efede7; border-radius: 3px; font-family: var(--font-geist-mono), monospace; font-size: 0.9em; }
 .report-document pre { padding: 14px; overflow: auto; background: #efede7; }
+.markdown-render-error { display: grid; gap: 6px; padding: 14px; color: #5f2f24; background: #fbf0ec; border: 1px solid #d7a99d; border-radius: 5px; }
+.markdown-render-error span { color: #6b514b; font-size: 12px; }
+.markdown-render-error pre { max-height: 60vh; margin: 4px 0 0; overflow: auto; color: #27343a; white-space: pre-wrap; overflow-wrap: anywhere; }
 .report-document table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .report-document th, .report-document td { padding: 8px; text-align: left; border: 1px solid var(--line); }
 .blocked-report-image { display: block; margin: 12px 0; padding: 10px; color: var(--muted); background: var(--paper); border: 1px dashed var(--control-line); font-size: 12px; }
+.blocked-report-link { color: inherit; text-decoration: underline dotted; text-underline-offset: 0.14em; cursor: not-allowed; }
 .report-document-link { display: inline; margin: 0; padding: 0; color: #0a655d; background: transparent; border: 0; font: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 0.14em; cursor: pointer; }
 .report-finding-link { display: inline; margin: 0; padding: 1px 4px; color: #0a655d; background: #e7f1ee; border: 1px solid #a9ccc4; border-radius: 3px; font: inherit; font-family: var(--font-geist-mono), monospace; font-weight: 800; cursor: pointer; }
 .side-by-side-reader { grid-column: 2; grid-row: 1; min-width: 0; }
@@ -356,6 +360,9 @@ kbd { min-width: 20px; display: inline-grid; place-items: center; padding: 2px 5
 .local-review-title { overflow: hidden; color: #d8dddf; font-size: 12px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
 .compact-review-summary { min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 10px; color: #d8dddf; font-size: 10px; }
 .compact-review-summary .posture-chip { flex: 0 0 auto; min-height: 24px; padding: 4px 8px; }
+.package-trust { flex: 0 0 auto; padding: 4px 7px; border: 1px solid currentColor; border-radius: 999px; font-size: 9px; font-weight: 850; letter-spacing: 0.04em; white-space: nowrap; }
+.package-trust.trust-verified { color: #9bddcf; background: #183f39; }
+.package-trust.trust-unverified { color: #f3d58b; background: #4b3c20; }
 .compact-severity-counts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .compact-severity-counts span { white-space: nowrap; }
 .compact-progress { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
@@ -429,6 +436,13 @@ kbd { min-width: 20px; display: inline-grid; place-items: center; padding: 2px 5
 .evidence-boundary strong { color: #3d494f; font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; }
 .manuscript-sheet mark { padding: 2px 0; color: inherit; background: #ffe58f; box-shadow: 0 0 0 2px #ffe58f; }
 .author-workspace { margin-top: 20px; padding-bottom: 8px; }
+.action-history { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.action-history summary { color: #405057; font-size: 11px; font-weight: 800; cursor: pointer; }
+.action-history summary span { display: inline-grid; min-width: 20px; min-height: 20px; place-items: center; margin-left: 4px; color: var(--muted); background: #ece9e1; border-radius: 99px; font-size: 9px; }
+.action-history ol { display: grid; gap: 7px; margin: 9px 0 0; padding: 0; list-style: none; }
+.action-history li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 8px 9px; color: #35434a; background: #f5f2e9; border-radius: 4px; font-size: 11px; }
+.action-history time { color: var(--muted); font-family: var(--font-geist-mono), monospace; font-size: 9px; }
+.action-history > p { margin: 8px 0 0; color: var(--muted); font-size: 11px; }
 .author-action-bar { position: relative; z-index: 13; height: var(--author-action-dock-height); min-height: var(--author-action-dock-height); display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 8px clamp(14px, 3vw, 28px); box-shadow: 0 -8px 18px rgba(32, 43, 47, 0.06); }
 .action-bar-heading { flex: 0 0 auto; margin: 0; text-transform: none; }
 .action-bar-heading .status-dot { display: inline-block; margin: 0; }

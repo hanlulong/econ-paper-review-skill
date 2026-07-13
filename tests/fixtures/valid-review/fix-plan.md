@@ -4,7 +4,7 @@
 > **Review package:** [Start here](README.md) · [Referee report](report.md) · [Writing report](writing-report.md) · [Revision plan](fix-plan.md) · [Audit trail](evidence/verification.md)
 <!-- review-navigation:end -->
 
-Objective: make the paper more publishable for the intended audience by resolving the verified concerns below.
+Objective: improve the paper for the intended audience by resolving the verified concerns below.
 
 ## How to use this plan
 

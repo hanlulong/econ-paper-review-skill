@@ -6,11 +6,15 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from safe_io import canonical_portable_path, strict_json_load  # noqa: E402
 
 
 SCHEMA = Path(__file__).resolve().parents[1] / "assets" / "review-actions.schema.json"
@@ -18,6 +22,10 @@ MAX_ACTIONS_BYTES = 5 * 1024 * 1024
 
 
 def timestamp(value: str) -> datetime:
+    if len(value) < 20 or value[10] != "T" or value.endswith("z"):
+        raise ValueError(
+            "timestamps must use canonical RFC 3339 with uppercase T and uppercase Z when used"
+        )
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
@@ -26,13 +34,13 @@ def validate(path: Path) -> list[str]:
     try:
         if path.stat().st_size > MAX_ACTIONS_BYTES:
             return [f"review-actions file exceeds {MAX_ACTIONS_BYTES} bytes"]
-        payload: Any = json.loads(path.read_text(encoding="utf-8"))
+        payload: Any = strict_json_load(path)
     except FileNotFoundError:
         return [f"missing review-actions file: {path}"]
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         return [f"cannot read review-actions file: {exc}"]
 
-    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    schema = strict_json_load(SCHEMA)
     validator = Draft202012Validator(schema, format_checker=FormatChecker())
     for error in sorted(validator.iter_errors(payload), key=lambda item: list(item.absolute_path)):
         location = ".".join(str(part) for part in error.absolute_path)
@@ -42,16 +50,32 @@ def validate(path: Path) -> list[str]:
 
     entries = payload.get("entries", [])
     ids = [entry.get("finding_id") for entry in entries if isinstance(entry, dict)]
-    duplicates = sorted({finding_id for finding_id in ids if ids.count(finding_id) > 1})
+    duplicates = sorted(finding_id for finding_id, count in Counter(ids).items() if count > 1)
     if duplicates:
         errors.append("duplicate finding IDs: " + ", ".join(duplicates))
     paths = [source.get("path") for source in payload.get("source_manuscripts", []) if isinstance(source, dict)]
-    duplicate_paths = sorted({source for source in paths if paths.count(source) > 1})
+    for index, raw_path in enumerate(paths):
+        if not isinstance(raw_path, str):
+            continue
+        try:
+            canonical = canonical_portable_path(raw_path)
+        except ValueError as exc:
+            errors.append(f"source_manuscripts[{index}].path is not portable: {exc}")
+        else:
+            if canonical != raw_path:
+                errors.append(
+                    f"source_manuscripts[{index}].path is not canonical: {raw_path!r}"
+                )
+    duplicate_paths = sorted(source for source, count in Counter(paths).items() if count > 1)
     if duplicate_paths:
         errors.append("duplicate source manuscript paths: " + ", ".join(duplicate_paths))
+    folded_paths = [path.casefold() for path in paths if isinstance(path, str)]
+    if len(set(folded_paths)) != len(folded_paths):
+        errors.append("source manuscript paths must not collide by case")
 
     try:
         exported_at = timestamp(payload["exported_at"])
+        all_event_ids: list[str] = []
         for index, entry in enumerate(entries):
             history = entry["status_history"]
             if history[-1]["disposition"] != entry["disposition"]:
@@ -67,26 +91,26 @@ def validate(path: Path) -> list[str]:
             if payload.get("schema_version") == "0.3":
                 events = entry["events"]
                 event_ids = [event["event_id"] for event in events]
-                duplicate_events = sorted({event_id for event_id in event_ids if event_ids.count(event_id) > 1})
+                all_event_ids.extend(event_ids)
+                duplicate_events = sorted(
+                    event_id for event_id, count in Counter(event_ids).items() if count > 1
+                )
                 if duplicate_events:
                     errors.append(f"entries[{index}] has duplicate event IDs: {', '.join(duplicate_events)}")
-                seen: set[str] = set()
                 event_times: list[datetime] = []
                 replay_disposition = "open"
                 replay_note = ""
                 replay_history: list[dict[str, str]] = []
                 for event_index, event in enumerate(events):
-                    event_id = event["event_id"]
                     parent = event.get("parent_event_id")
                     if event_index == 0 and parent is not None:
                         errors.append(f"entries[{index}].events[0] must have a null parent_event_id")
-                    elif event_index > 0 and parent not in seen:
+                    elif event_index > 0 and parent != events[event_index - 1]["event_id"]:
                         errors.append(
-                            f"entries[{index}].events[{event_index}] parent_event_id must reference an earlier event"
+                            f"entries[{index}].events[{event_index}] parent_event_id must reference the preceding event"
                         )
                     if event.get("type") == "reversed" and parent is None:
                         errors.append(f"entries[{index}].events[{event_index}] reversal requires a parent event")
-                    seen.add(event_id)
                     event_at = timestamp(event["at"])
                     event_times.append(event_at)
                     if "disposition" in event:
@@ -106,9 +130,19 @@ def validate(path: Path) -> list[str]:
                     errors.append(f"entries[{index}] status_history differs from replayed events")
                 if events and entry["updated_at"] != events[-1]["at"]:
                     errors.append(f"entries[{index}] updated_at differs from final event time")
-    except (KeyError, IndexError, TypeError, ValueError):
-        # Structural/date errors were already reported by JSON Schema.
-        pass
+        duplicate_event_ids = sorted(
+            event_id for event_id, count in Counter(all_event_ids).items() if count > 1
+        )
+        if duplicate_event_ids:
+            errors.append(
+                "event IDs must be globally unique across entries: "
+                + ", ".join(duplicate_event_ids)
+            )
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        # Schema format checkers and runtime date parsers do not accept exactly
+        # the same RFC 3339 surface. Never let that mismatch skip replay or
+        # chronology validation silently.
+        errors.append(f"semantic action validation failed: {exc}")
     return errors
 
 

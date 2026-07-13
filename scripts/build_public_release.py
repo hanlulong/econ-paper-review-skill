@@ -10,6 +10,7 @@ import os
 import re
 import stat
 import tempfile
+import unicodedata
 import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -34,22 +35,32 @@ ROOT_FILES = {
     Path("THIRD_PARTY_NOTICES.md"),
     Path("install.sh"),
     Path("requirements-docling.txt"),
+    Path("requirements-markitdown.txt"),
     Path("requirements-mathpix.txt"),
     Path("requirements.txt"),
 }
 EXCLUDED_DIRECTORY_NAMES = {
+    ".mypy_cache",
     ".next",
+    ".nox",
+    ".nyc_output",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
     ".vite",
     ".vinext",
     ".wrangler",
     "__pycache__",
+    "coverage",
     "dist",
     "node_modules",
     "outputs",
     "public",
+    "venv",
     "work",
 }
-EXCLUDED_FILE_NAMES = {".DS_Store", "tsconfig.tsbuildinfo"}
+EXCLUDED_FILE_NAMES = {".DS_Store", ".coverage", "tsconfig.tsbuildinfo"}
 TEXT_SUFFIXES = {
     "",
     ".css",
@@ -86,6 +97,11 @@ CONTENT_SCAN_ALLOWED_MATCHES = {
     "review-viewer/tests/review-actions.test.mjs": {"private home path": {"/" + "Users/researcher/"}},
     "tests/test_validate_review_actions.py": {"private home path": {"/" + "Users/person/"}},
 }
+WINDOWS_RESERVED_BASENAMES = frozenset(
+    {"con", "prn", "aux", "nul", "clock$"}
+    | {f"com{number}" for number in range(1, 10)}
+    | {f"lpt{number}" for number in range(1, 10)}
+)
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -105,6 +121,10 @@ def _reject_duplicate_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return value
 
 
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON numeric constant: {value}")
+
+
 def _release_mode(path: Path) -> int:
     """Canonicalize modes so archives do not depend on checkout umasks."""
     return 0o755 if stat.S_IMODE(path.stat().st_mode) & 0o111 else 0o644
@@ -116,12 +136,20 @@ def _safe_relative(raw: str) -> Path:
         not raw
         or raw.startswith("/")
         or "\\" in raw
+        or ":" in raw
+        or raw != unicodedata.normalize("NFC", raw)
         or any(ord(character) < 32 or ord(character) == 127 for character in raw)
         or pure.is_absolute()
         or ".." in pure.parts
     ):
         raise ValueError(f"unsafe path in public file contract: {raw!r}")
-    if raw != pure.as_posix() or any(part in {"", "."} for part in pure.parts):
+    if raw != pure.as_posix() or any(
+        part in {"", "."}
+        or part != part.strip()
+        or part.endswith(".")
+        or part.split(".", 1)[0].casefold() in WINDOWS_RESERVED_BASENAMES
+        for part in pure.parts
+    ):
         raise ValueError(f"non-canonical path in public file contract: {raw!r}")
     return Path(*pure.parts)
 
@@ -131,17 +159,23 @@ def load_file_contract(root: Path) -> tuple[dict[str, Any], list[Path]]:
     if not path.is_file() or path.is_symlink():
         raise ValueError(f"required public file contract is missing or unsafe: {FILE_CONTRACT}")
     try:
-        contract = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_pairs)
+        contract = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_pairs,
+            parse_constant=_reject_json_constant,
+        )
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise ValueError(f"invalid public file contract: {exc}") from exc
-    if not isinstance(contract, dict) or contract.get("schema_version") != "1":
-        raise ValueError("public file contract must be an object with schema_version '1'")
+    if not isinstance(contract, dict) or set(contract) != {"schema_version", "files"}:
+        raise ValueError("public file contract must contain exactly schema_version and files")
+    if contract.get("schema_version") != "1":
+        raise ValueError("public file contract must use schema_version '1'")
     raw_files = contract.get("files")
     if not isinstance(raw_files, list) or not raw_files or not all(isinstance(item, str) for item in raw_files):
         raise ValueError("public file contract files must be a non-empty string array")
     if raw_files != sorted(raw_files) or len(raw_files) != len(set(raw_files)):
         raise ValueError("public file contract files must be sorted and unique")
-    if len({item.casefold() for item in raw_files}) != len(raw_files):
+    if len({unicodedata.normalize("NFC", item).casefold() for item in raw_files}) != len(raw_files):
         raise ValueError("public file contract files must not collide by case")
     files = [_safe_relative(raw) for raw in raw_files]
     scan_root_names = {path.as_posix() for path in SCAN_ROOTS}

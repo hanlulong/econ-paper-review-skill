@@ -5,9 +5,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from decimal import Decimal, InvalidOperation, localcontext
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from safe_io import strict_json_load  # noqa: E402
 
 
 def decimal(value: Any, label: str) -> Decimal:
@@ -29,8 +33,8 @@ def recompute(check: dict[str, Any]) -> dict[str, Any]:
         context.prec = 40
         if kind == "t_from_beta_se":
             beta, se = decimal(check.get("beta"), "beta"), decimal(check.get("se"), "se")
-            if se == 0:
-                raise ValueError("se must be non-zero")
+            if se <= 0:
+                raise ValueError("se must be positive")
             value = beta / se
         elif kind == "f_from_t":
             t_value = decimal(check.get("t"), "t")
@@ -40,7 +44,10 @@ def recompute(check: dict[str, Any]) -> dict[str, Any]:
             if total <= 0:
                 raise ValueError("total must be positive")
             value = count / total
-            if check.get("percent", True):
+            percent = check.get("percent", True)
+            if not isinstance(percent, bool):
+                raise ValueError("percent must be a boolean")
+            if percent:
                 value *= 100
         elif kind == "residual_df":
             n, parameters = decimal(check.get("n"), "n"), decimal(check.get("parameters"), "parameters")
@@ -60,7 +67,9 @@ def recompute(check: dict[str, Any]) -> dict[str, Any]:
             mean, n = decimal(check.get("mean"), "mean"), decimal(check.get("n"), "n")
             if n <= 0 or n != n.to_integral_value():
                 raise ValueError("n must be a positive integer")
-            decimals = int(check.get("decimals", 2))
+            decimals = check.get("decimals", 2)
+            if not isinstance(decimals, int) or isinstance(decimals, bool):
+                raise ValueError("decimals must be an integer")
             if decimals < 0 or decimals > 12:
                 raise ValueError("decimals must be between 0 and 12")
             scaled = mean * n
@@ -125,7 +134,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, help="Write JSON output here; stdout otherwise")
     args = parser.parse_args()
     try:
-        payload = json.loads(args.input.read_text(encoding="utf-8"))
+        payload = strict_json_load(args.input)
         if not isinstance(payload, dict):
             raise ValueError("input root must be an object")
         rendered = json.dumps(run(payload), indent=2) + "\n"

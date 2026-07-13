@@ -62,11 +62,20 @@ test("clears current and legacy snapshots for only the requested review", () => 
   const storage = new MemoryStorage();
   storage.setItem("review-desk:v3:review-1:a", "{}");
   storage.setItem("review-desk:v2:review-1", "{}");
-  storage.setItem("review-desk:v1:review-1:old", "{}");
+  storage.setItem(`review-desk:v1:review-1:${"a".repeat(64)}`, "{}");
   storage.setItem("review-desk:v3:review-2:a", "{}");
   assert.equal(clearBrowserReviewActions(storage, "review-1"), 3);
   assert.equal(storage.length, 1);
   assert.ok(storage.getItem("review-desk:v3:review-2:a"));
+});
+
+test("storage keys isolate review IDs that contain delimiter characters", () => {
+  const storage = new MemoryStorage();
+  storage.setItem(reviewActionStorageKey("review", "ledger-a"), "{}");
+  storage.setItem(reviewActionStorageKey("review:variant", "ledger-b"), "{}");
+  assert.match(reviewActionStorageKey("review:variant", "ledger-b"), /review%3Avariant/);
+  assert.equal(clearBrowserReviewActions(storage, "review"), 1);
+  assert.ok(storage.getItem(reviewActionStorageKey("review:variant", "ledger-b")));
 });
 
 test("an exact current-fingerprint payload wins while older snapshots remain visible", () => {
