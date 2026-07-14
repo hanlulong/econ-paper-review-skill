@@ -1,20 +1,12 @@
-import { lstat, readdir } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { withPreservedReviewBundle } from "./preserve-review-bundle.mjs";
 
 const viewerRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const reviewsRoot = resolve(viewerRoot, "public/reviews");
-
-async function pathExists(path) {
-  try {
-    await lstat(path);
-    return true;
-  } catch (error) {
-    if (error?.code === "ENOENT") return false;
-    throw error;
-  }
-}
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
 function run(command, args, extraEnv = {}) {
   return new Promise((resolveRun, rejectRun) => {
@@ -31,17 +23,19 @@ function run(command, args, extraEnv = {}) {
   });
 }
 
-const bundlePredatedTest = await pathExists(reviewsRoot);
-
-try {
-  await run("npm", ["run", "build"], { ALLOW_PUBLISH: "1" });
-  const tests = (await readdir(resolve(viewerRoot, "tests")))
-    .filter((name) => name.endsWith(".test.mjs"))
-    .sort()
-    .map((name) => resolve(viewerRoot, "tests", name));
-  await run(process.execPath, ["--test", ...tests]);
-} finally {
-  // Do not erase a bundle that was already serving a local preview when the
-  // test began. Tests clean up only assets they created themselves.
-  if (!bundlePredatedTest) await run(process.execPath, ["scripts/clear-review-bundles.mjs"]);
-}
+await withPreservedReviewBundle(reviewsRoot, async () => {
+  try {
+    await run(npmCommand, ["run", "build"], { ALLOW_PUBLISH: "1" });
+    const tests = (await readdir(resolve(viewerRoot, "tests")))
+      .filter((name) => name.endsWith(".test.mjs"))
+      .sort()
+      .map((name) => resolve(viewerRoot, "tests", name));
+    // Node 22.18+ strips erasable TypeScript syntax by default. Keep the test
+    // harness runnable on the project's supported 22.14 baseline as well.
+    await run(process.execPath, ["--experimental-strip-types", "--test", ...tests]);
+  } finally {
+    // Remove the synthetic build copy before the outer helper restores any
+    // pre-test public bundle. This holds even when build or tests fail.
+    await run(process.execPath, ["scripts/clear-review-bundles.mjs"]);
+  }
+});

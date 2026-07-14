@@ -1,0 +1,2 @@
+-r requirements-core.txt
+docling==2.102.1

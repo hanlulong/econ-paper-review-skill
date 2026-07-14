@@ -26,8 +26,15 @@ SPEC.loader.exec_module(MODULE)
 class PublicReleaseTests(unittest.TestCase):
     def test_exact_contract_excludes_private_and_generated_material(self) -> None:
         paths = {path.as_posix() for path in MODULE.public_files(ROOT)}
+        self.assertIn("CONTRIBUTING.md", paths)
+        self.assertIn(".github/PULL_REQUEST_TEMPLATE.md", paths)
+        self.assertIn("docs/CONTRIBUTOR_LICENSE_AGREEMENT.md", paths)
+        self.assertIn("econ-review/LICENSE", paths)
         self.assertIn("econ-review/SKILL.md", paths)
+        self.assertIn("review-viewer/LICENSE", paths)
         self.assertIn("review-viewer/package.json", paths)
+        self.assertIn("review-viewer/release/review-desk.zip", paths)
+        self.assertIn("review-viewer/scripts/launch_review_desk.py", paths)
         self.assertIn("tests/fixtures/valid-review/report.md", paths)
         self.assertIn("scripts/public-release-files.json", paths)
         for private in ("DESIGN.md", "HANDOFF.md", "PROJECT-REVIEW.md", "research", "test_paper2"):
@@ -41,6 +48,14 @@ class PublicReleaseTests(unittest.TestCase):
             (root / "econ-review" / "client-notes.md").write_text("not for release", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "undeclared file"):
                 MODULE.public_files(root)
+
+    def test_generated_tool_caches_do_not_break_the_release_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.make_contract_root(Path(tmp), {"scripts/public-release-files.json": b""})
+            cache = root / "review-viewer" / ".pytest_cache" / "v" / "cache"
+            cache.mkdir(parents=True)
+            (cache / "nodeids").write_text("[]", encoding="utf-8")
+            self.assertEqual(MODULE.public_files(root), [Path("scripts/public-release-files.json")])
 
     def test_missing_declared_file_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -63,6 +78,34 @@ class PublicReleaseTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
                 MODULE.public_files(root)
+
+    def test_file_contract_rejects_nonportable_paths(self) -> None:
+        for value in (
+            "econ-review/e\u0301.md",
+            "econ-review/name:stream.md",
+            "econ-review/trailing. ",
+            "econ-review/CON.md",
+            "NUL/review-viewer/file.ts",
+            "econ-review/COM1",
+            "econ-review/lpt9.txt",
+            "econ-review/CLOCK$.json",
+        ):
+            with self.subTest(path=value):
+                with self.assertRaisesRegex(ValueError, "unsafe|non-canonical"):
+                    MODULE._safe_relative(value)
+
+    def test_archive_modes_are_host_independent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            python = root / "tool.py"
+            shell = root / "install.sh"
+            markdown = root / "README.md"
+            for path in (python, shell, markdown):
+                path.write_text("fixture\n", encoding="utf-8")
+                path.chmod(0o600)
+            self.assertEqual(MODULE._release_mode(python), 0o755)
+            self.assertEqual(MODULE._release_mode(shell), 0o755)
+            self.assertEqual(MODULE._release_mode(markdown), 0o644)
 
     def test_privacy_scan_rejects_home_paths_and_secret_filenames(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -118,6 +161,22 @@ class PublicReleaseTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, label):
                     MODULE.public_files(root)
 
+    def test_first_party_license_copies_must_match(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.make_contract_root(
+                Path(tmp),
+                {
+                    "LICENSE": b"same license\n",
+                    "econ-review/LICENSE": b"same license\n",
+                    "review-viewer/LICENSE": b"same license\n",
+                    "scripts/public-release-files.json": b"",
+                },
+            )
+            self.assertEqual(MODULE.public_files(root)[0], Path("LICENSE"))
+            (root / "review-viewer" / "LICENSE").write_text("different\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "not synchronized"):
+                MODULE.public_files(root)
+
     def test_archive_has_exact_hashed_manifest_and_is_deterministic(self) -> None:
         files = MODULE.public_files(ROOT)
         with tempfile.TemporaryDirectory() as tmp:
@@ -133,10 +192,41 @@ class PublicReleaseTests(unittest.TestCase):
                 expected.add("econ-paper-review-skill/RELEASE-MANIFEST.json")
                 self.assertEqual(names, expected)
                 self.assertEqual(embedded, metadata)
+                prefix = "econ-paper-review-skill/"
+                root_license = archive.read(prefix + "LICENSE")
+                self.assertEqual(root_license, archive.read(prefix + "econ-review/LICENSE"))
+                self.assertEqual(root_license, archive.read(prefix + "review-viewer/LICENSE"))
+                for required in (
+                    "CONTRIBUTING.md",
+                    ".github/PULL_REQUEST_TEMPLATE.md",
+                    "docs/CONTRIBUTOR_LICENSE_AGREEMENT.md",
+                ):
+                    self.assertIn(prefix + required, names)
                 for record in embedded["files"]:
                     data = archive.read(f"econ-paper-review-skill/{record['path']}")
                     self.assertEqual(len(data), record["size"])
                     self.assertEqual(hashlib.sha256(data).hexdigest(), record["sha256"])
+
+    def test_nested_review_desk_license_notice_is_mandatory(self) -> None:
+        source = ROOT / "review-viewer" / "release" / "review-desk.zip"
+        notice = MODULE.REVIEW_DESK_THIRD_PARTY_NOTICE
+        with tempfile.TemporaryDirectory() as tmp:
+            rewritten = Path(tmp) / "review-desk-without-notice.zip"
+            with zipfile.ZipFile(source) as original:
+                manifest = json.loads(original.read("bundle-manifest.json"))
+                manifest["files"] = [record for record in manifest["files"] if record["path"] != notice]
+                payloads = {
+                    info.filename: (info, original.read(info.filename))
+                    for info in original.infolist()
+                    if info.filename not in {"bundle-manifest.json", notice}
+                }
+                manifest_info = original.getinfo("bundle-manifest.json")
+            with zipfile.ZipFile(rewritten, "w") as output:
+                output.writestr(manifest_info, MODULE._canonical_json(manifest))
+                for _name, (info, data) in payloads.items():
+                    output.writestr(info, data)
+            with self.assertRaisesRegex(ValueError, "third-party notices"):
+                MODULE._scan_review_desk_bundle(rewritten, (ROOT / "LICENSE").read_bytes())
 
     def test_builder_refuses_existing_or_symlink_output(self) -> None:
         files = MODULE.public_files(ROOT)
@@ -192,8 +282,83 @@ class InstallerTests(unittest.TestCase):
             result = self.run_installer(ROOT / "install.sh", "--global", "--codex", env={"HOME": str(home)})
             self.assertIn("installation complete", result.stdout)
             self.assertTrue((destination / "SKILL.md").is_file())
+            self.assertEqual((destination / "LICENSE").read_bytes(), (ROOT / "econ-review" / "LICENSE").read_bytes())
             self.assertFalse((destination / "old.txt").exists())
+            self.assertFalse((destination / ".DS_Store").exists())
+            self.assertFalse((destination / "scripts" / "__pycache__").exists())
             self.assertFalse(list(destination.parent.glob(".econ-review.*")))
+
+    def test_dry_run_reports_no_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            result = self.run_installer(
+                ROOT / "install.sh", "--global", "--all", "--dry-run", env={"HOME": str(home)},
+            )
+            self.assertIn("dry run complete; no files changed", result.stdout)
+            self.assertFalse((home / ".claude").exists())
+            self.assertFalse((home / ".codex").exists())
+
+    def test_codex_and_claude_global_and_project_install_contracts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            project = root / "project"
+            project.mkdir()
+            global_result = self.run_installer(
+                ROOT / "install.sh", "--global", "--all", env={"HOME": str(home)},
+            )
+            self.assertIn("Claude Code (global)", global_result.stdout)
+            self.assertIn("Codex (global)", global_result.stdout)
+            global_destinations = [
+                home / ".claude" / "skills" / "econ-review",
+                home / ".codex" / "skills" / "econ-review",
+            ]
+            for destination in global_destinations:
+                self.assertTrue((destination / "SKILL.md").is_file())
+                self.assertEqual(
+                    (destination / "LICENSE").read_bytes(),
+                    (ROOT / "econ-review" / "LICENSE").read_bytes(),
+                )
+                self.assertTrue((destination / "references" / "workflow.md").is_file())
+                self.assertTrue((destination / "requirements-core.txt").is_file())
+                self.assertTrue((destination / "requirements-docling.txt").is_file())
+                self.assertTrue((destination / "requirements-markitdown.txt").is_file())
+                self.assertTrue((destination / "requirements-mathpix.txt").is_file())
+                self.assertTrue((destination / "scripts" / "dependency_versions.py").is_file())
+                self.assertTrue(os.access(destination / "scripts" / "validate_review.py", os.X_OK))
+
+            project_result = self.run_installer(
+                ROOT / "install.sh", "--local", str(project), "--all", env={"HOME": str(home)},
+            )
+            self.assertIn("Claude Code (project)", project_result.stdout)
+            self.assertIn("Codex (project)", project_result.stdout)
+            project_destinations = [
+                project / ".claude" / "skills" / "econ-review",
+                project / ".agents" / "skills" / "econ-review",
+            ]
+            for destination in project_destinations:
+                self.assertTrue((destination / "SKILL.md").is_file())
+                self.assertEqual(
+                    (destination / "LICENSE").read_bytes(),
+                    (ROOT / "econ-review" / "LICENSE").read_bytes(),
+                )
+                self.assertTrue((destination / "scripts" / "pdf_ingestion.py").is_file())
+
+    def test_platform_specific_config_directory_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            claude_root = root / "claude-config"
+            codex_root = root / "codex-home"
+            self.run_installer(
+                ROOT / "install.sh", "--global", "--all",
+                env={
+                    "HOME": str(root / "home"),
+                    "CLAUDE_CONFIG_DIR": str(claude_root),
+                    "CODEX_HOME": str(codex_root),
+                },
+            )
+            self.assertTrue((claude_root / "skills" / "econ-review" / "SKILL.md").is_file())
+            self.assertTrue((codex_root / "skills" / "econ-review" / "SKILL.md").is_file())
 
     def test_remote_install_requires_url_and_checksum(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -268,6 +433,9 @@ class InstallerTests(unittest.TestCase):
     def test_remote_archive_rejects_traversal_ambiguous_roots_and_case_collisions(self) -> None:
         cases = (
             ("econ-paper-review-skill/../escape", "unsafe archive path"),
+            ("econ-paper-review-skill/e\u0301.txt", "unsafe archive path"),
+            ("econ-paper-review-skill/name:stream", "unsafe archive path"),
+            ("econ-paper-review-skill/econ-review/NUL.txt", "unsafe archive path"),
             ("second-root/file.txt", "exactly one econ-paper-review-skill root"),
             ("econ-paper-review-skill/README.MD", "duplicate or case-colliding"),
         )

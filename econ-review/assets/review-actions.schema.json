@@ -9,10 +9,15 @@
     "source_manuscripts", "exported_at", "entries"
   ],
   "properties": {
-    "schema_version": {"enum": ["0.1", "0.2", "0.3"]},
+    "schema_version": {"enum": ["0.1", "0.2", "0.3", "0.4"]},
     "kind": {"const": "econ-review-actions"},
     "source_review_id": {"type": "string", "minLength": 1, "pattern": "^\\S(?:[\\s\\S]*\\S)?$"},
-    "source_review_fingerprint": {"type": "string", "minLength": 1, "pattern": "^\\S(?:[\\s\\S]*\\S)?$"},
+    "source_review_fingerprint": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+      "description": "For v0.4 exports, the lowercase SHA-256 of the exact BOM-free UTF-8 findings.json bytes loaded by Review Desk; older action contracts retain their declared legacy fingerprint."
+    },
     "source_manuscripts": {
       "type": "array",
       "maxItems": 200,
@@ -68,6 +73,56 @@
     {
       "if": {"properties": {"schema_version": {"const": "0.3"}}, "required": ["schema_version"]},
       "then": {"properties": {"entries": {"items": {"required": ["events"]}}}}
+    },
+    {
+      "if": {"properties": {"schema_version": {"const": "0.4"}}, "required": ["schema_version"]},
+      "then": {
+        "properties": {
+          "entries": {
+            "items": {
+              "required": ["events", "user_priority", "reviewed"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"schema_version": {"enum": ["0.1", "0.2", "0.3"]}},
+        "required": ["schema_version"]
+      },
+      "then": {
+        "properties": {
+          "entries": {
+            "items": {
+              "properties": {
+                "disposition": {"enum": ["open", "ready_for_recheck", "challenged", "deferred"]},
+                "status_history": {
+                  "items": {
+                    "properties": {
+                      "disposition": {"enum": ["open", "ready_for_recheck", "challenged", "deferred"]}
+                    }
+                  }
+                },
+                "events": {
+                  "items": {
+                    "properties": {
+                      "type": {"enum": ["disposition_changed", "note_revised", "imported", "reversed"]},
+                      "disposition": {"enum": ["open", "ready_for_recheck", "challenged", "deferred"]}
+                    }
+                  }
+                }
+              },
+              "not": {
+                "anyOf": [
+                  {"required": ["user_priority"]},
+                  {"required": ["reviewed"]}
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   ],
   "$defs": {
@@ -76,7 +131,7 @@
       "additionalProperties": false,
       "required": ["disposition", "at"],
       "properties": {
-        "disposition": {"enum": ["open", "ready_for_recheck", "challenged", "deferred"]},
+        "disposition": {"enum": ["open", "ready_for_recheck", "challenged", "deferred", "not_relevant", "not_addressable"]},
         "at": {"type": "string", "format": "date-time"}
       }
     },
@@ -89,7 +144,7 @@
       ],
       "properties": {
         "finding_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]*-[0-9]{2,}$"},
-        "disposition": {"enum": ["open", "ready_for_recheck", "challenged", "deferred"]},
+        "disposition": {"enum": ["open", "ready_for_recheck", "challenged", "deferred", "not_relevant", "not_addressable"]},
         "response_note": {"type": "string", "maxLength": 10000},
         "changed_locations": {
           "type": "array",
@@ -108,9 +163,20 @@
           "minItems": 1,
           "maxItems": 10000,
           "items": {"$ref": "#/$defs/event"}
-        }
+        },
+        "user_priority": {"enum": ["P0", "P1", "P2", null]},
+        "reviewed": {"type": "boolean"}
       },
-      "description": "Author disposition with an optional note. A later review independently verifies every ready-for-recheck or challenged state. changed_locations remains for legacy imports and is normally empty in v0.2 exports."
+      "allOf": [
+        {
+          "if": {
+            "properties": {"disposition": {"enum": ["not_relevant", "not_addressable"]}},
+            "required": ["disposition"]
+          },
+          "then": {"properties": {"reviewed": {"const": true}}, "required": ["reviewed"]}
+        }
+      ],
+      "description": "Author disposition, personal priority, reviewed state, and optional note. Canonical severity is unchanged. A later review independently verifies every ready-for-recheck or challenged state."
     },
     "event": {
       "type": "object",
@@ -118,34 +184,57 @@
       "required": ["event_id", "type", "at", "parent_event_id", "origin"],
       "properties": {
         "event_id": {"type": "string", "format": "uuid"},
-        "type": {"enum": ["disposition_changed", "note_revised", "imported", "reversed"]},
+        "type": {"enum": ["disposition_changed", "note_revised", "priority_changed", "reviewed_changed", "imported", "reversed"]},
         "at": {"type": "string", "format": "date-time"},
-        "disposition": {"enum": ["open", "ready_for_recheck", "challenged", "deferred"]},
+        "disposition": {"enum": ["open", "ready_for_recheck", "challenged", "deferred", "not_relevant", "not_addressable"]},
         "note": {"type": ["string", "null"], "maxLength": 10000},
+        "user_priority": {"enum": ["P0", "P1", "P2", null]},
+        "reviewed": {"type": "boolean"},
         "parent_event_id": {"type": ["string", "null"], "format": "uuid"},
         "origin": {"enum": ["local", "import"]}
       },
       "allOf": [
         {
           "if": {"properties": {"type": {"const": "disposition_changed"}}, "required": ["type"]},
-          "then": {"required": ["disposition"], "not": {"required": ["note"]}}
+          "then": {
+            "required": ["disposition"],
+            "not": {"anyOf": [{"required": ["note"]}, {"required": ["user_priority"]}, {"required": ["reviewed"]}]}
+          }
         },
         {
           "if": {"properties": {"type": {"const": "note_revised"}}, "required": ["type"]},
-          "then": {"required": ["note"], "not": {"required": ["disposition"]}}
+          "then": {
+            "required": ["note"],
+            "not": {"anyOf": [{"required": ["disposition"]}, {"required": ["user_priority"]}, {"required": ["reviewed"]}]}
+          }
+        },
+        {
+          "if": {"properties": {"type": {"const": "priority_changed"}}, "required": ["type"]},
+          "then": {
+            "required": ["user_priority"],
+            "not": {"anyOf": [{"required": ["disposition"]}, {"required": ["note"]}, {"required": ["reviewed"]}]}
+          }
+        },
+        {
+          "if": {"properties": {"type": {"const": "reviewed_changed"}}, "required": ["type"]},
+          "then": {
+            "required": ["reviewed"],
+            "not": {"anyOf": [{"required": ["disposition"]}, {"required": ["note"]}, {"required": ["user_priority"]}]}
+          }
         },
         {
           "if": {"properties": {"type": {"const": "imported"}}, "required": ["type"]},
           "then": {
             "properties": {"origin": {"const": "import"}},
-            "not": {"anyOf": [{"required": ["disposition"]}, {"required": ["note"]}]}
+            "not": {"anyOf": [{"required": ["disposition"]}, {"required": ["note"]}, {"required": ["user_priority"]}, {"required": ["reviewed"]}]}
           }
         },
         {
           "if": {"properties": {"type": {"const": "reversed"}}, "required": ["type"]},
           "then": {
             "properties": {"parent_event_id": {"type": "string", "format": "uuid"}},
-            "anyOf": [{"required": ["disposition"]}, {"required": ["note"]}]
+            "anyOf": [{"required": ["disposition"]}, {"required": ["note"]}],
+            "not": {"anyOf": [{"required": ["user_priority"]}, {"required": ["reviewed"]}]}
           }
         }
       ]

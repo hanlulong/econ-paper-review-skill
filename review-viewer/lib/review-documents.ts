@@ -1,3 +1,6 @@
+import { parseStrictJson } from "./strict-json.ts";
+import { normalizePackagePath } from "./local-review-package.ts";
+
 export const REVIEW_DOCUMENT_MANIFEST_VERSION = "0.1" as const;
 
 export const REVIEW_DOCUMENT_GROUPS = [
@@ -49,10 +52,10 @@ const MAX_DOCUMENTS = 200;
 const MAX_TITLE_CHARS = 160;
 const MAX_PATH_CHARS = 500;
 
-const LEGACY_DOCUMENTS: Record<string, Omit<ReviewDocument, "path">> = {
+const STANDARD_DOCUMENTS: Record<string, Omit<ReviewDocument, "path">> = {
   "README.md": { id: "review-home", title: "Start here", group: "overview", order: 0 },
   "report.md": { id: "referee-report", title: "Referee report", group: "overview", order: 10 },
-  "writing-report.md": { id: "writing-report", title: "Writing report", group: "reports", order: 10 },
+  "editing-comments.md": { id: "editing-comments", title: "Editing comments", group: "reports", order: 10 },
   "fix-plan.md": { id: "revision-plan", title: "Revision plan", group: "plan", order: 10 },
   "evidence/reconstruction.md": { id: "paper-reconstruction", title: "Paper reconstruction", group: "audit", order: 10 },
   "evidence/reader-claim-audit.md": { id: "reader-claim-audit", title: "Reader and claim audit", group: "audit", order: 20 },
@@ -84,6 +87,11 @@ function compareText(left: string, right: string): number {
 export function isSafeReviewDocumentPath(value: unknown): value is string {
   if (typeof value !== "string" || !value || value.length > MAX_PATH_CHARS || value !== value.trim()) return false;
   if (!value.endsWith(".md") || value.startsWith("/") || value.includes("\\") || value.includes(":")) return false;
+  try {
+    if (normalizePackagePath(value) !== value) return false;
+  } catch {
+    return false;
+  }
   const segments = value.split("/");
   return segments.length > 0 && segments.every((segment) => (
     segment !== "."
@@ -164,6 +172,17 @@ export function resolveReviewDocumentHref(
   return resolveReviewDocumentLink(currentPath, href, documents)?.document || null;
 }
 
+/** Permit only explicit HTTP(S) destinations outside the declared review document set. */
+export function safeExternalReviewDocumentHref(value: string | undefined): string | null {
+  if (!value || value !== value.trim() || /[\u0000-\u001f\u007f]/.test(value)) return null;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
 function cloneDocument(value: unknown, label: string): ReviewDocument {
   if (!isRecord(value)) throw new Error(`${label} must be an object`);
   assertExactKeys(value, ["id", "title", "group", "path", "order"], label);
@@ -202,7 +221,7 @@ export function validateReviewDocumentManifest(value: unknown): ReviewDocumentMa
   let raw = value;
   if (typeof raw === "string") {
     try {
-      raw = JSON.parse(raw) as unknown;
+      raw = parseStrictJson(raw);
     } catch (error) {
       const detail = error instanceof Error ? error.message : "invalid JSON";
       throw new Error(`review document manifest contains invalid JSON: ${detail}`);
@@ -224,6 +243,9 @@ export function validateReviewDocumentManifest(value: unknown): ReviewDocumentMa
   const paths = documents.map((document) => document.path);
   if (new Set(ids).size !== ids.length) throw new Error("review document manifest IDs must be unique");
   if (new Set(paths).size !== paths.length) throw new Error("review document manifest paths must be unique");
+  if (new Set(paths.map((path) => path.toLocaleLowerCase("en-US"))).size !== paths.length) {
+    throw new Error("review document manifest paths must be case-unambiguous");
+  }
   return {
     schema_version: REVIEW_DOCUMENT_MANIFEST_VERSION,
     review_id: raw.review_id,
@@ -243,7 +265,7 @@ function titleFromPath(path: string): string {
 }
 
 function inferredGroup(path: string): ReviewDocumentGroup | null {
-  if (LEGACY_DOCUMENTS[path]) return LEGACY_DOCUMENTS[path].group;
+  if (STANDARD_DOCUMENTS[path]) return STANDARD_DOCUMENTS[path].group;
   const first = path.split("/", 1)[0];
   if (first === "overview") return "overview";
   if (first === "reports") return "reports";
@@ -253,7 +275,7 @@ function inferredGroup(path: string): ReviewDocumentGroup | null {
 }
 
 function inferredOrder(path: string, group: ReviewDocumentGroup): number {
-  if (LEGACY_DOCUMENTS[path]) return LEGACY_DOCUMENTS[path].order;
+  if (STANDARD_DOCUMENTS[path]) return STANDARD_DOCUMENTS[path].order;
   const groupBase = GROUP_ORDER[group] * 1000;
   return groupBase + 500;
 }
@@ -264,7 +286,7 @@ function inferredId(path: string, group: ReviewDocumentGroup): string {
 }
 
 /**
- * Discover documents from a validated manifest, or use conservative legacy folder conventions
+ * Discover documents from a validated manifest, or use conservative standard folder conventions
  * when no manifest is available. Paths must be relative to the review package root.
  */
 export function discoverReviewDocuments(
@@ -285,8 +307,8 @@ export function discoverReviewDocuments(
   for (const path of paths) {
     const group = inferredGroup(path);
     if (!group) continue;
-    const legacy = LEGACY_DOCUMENTS[path];
-    const baseId = legacy?.id || inferredId(path, group);
+    const standard = STANDARD_DOCUMENTS[path];
+    const baseId = standard?.id || inferredId(path, group);
     let id = baseId;
     let suffix = 2;
     while (usedIds.has(id)) {
@@ -297,7 +319,7 @@ export function discoverReviewDocuments(
     usedIds.add(id);
     documents.push({
       id,
-      title: legacy?.title || titleFromPath(path),
+      title: standard?.title || titleFromPath(path),
       group,
       path,
       order: inferredOrder(path, group),

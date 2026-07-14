@@ -16,6 +16,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Review Desk",
   description: "A local, evidence-first workspace for economics paper reviews.",
+  icons: { icon: "/favicon.svg" },
 };
 
 export default function RootLayout({

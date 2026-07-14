@@ -1,0 +1,208 @@
+\documentclass[11pt,oneside,%%PAGE_SIZE_OPTION%%]{article}
+
+\usepackage[%%PAGE_SIZE_OPTION%%,top=27mm,bottom=26mm,left=29mm,right=29mm,headheight=14pt]{geometry}
+\usepackage{iftex}
+\ifPDFTeX
+  \PackageError{econ-review}{This template requires LuaLaTeX or XeLaTeX}{Use the LuaLaTeX renderer.}
+\fi
+\ifLuaTeX
+  % Omit volatile trailer IDs and engine-only metadata.  Human-facing PDF
+  % metadata is set below and remains reproducible through SOURCE_DATE_EPOCH.
+  \pdfvariable suppressoptionalinfo \numexpr1+2+4+512\relax
+\fi
+\usepackage{fontspec}
+\usepackage{unicode-math}
+\IfFontExistsTF{Libertinus Serif}{
+  \setmainfont{Libertinus Serif}[Ligatures=TeX,Numbers=OldStyle]
+}{
+  \setmainfont{TeX Gyre Pagella}[Ligatures=TeX,Numbers=OldStyle]
+}
+\IfFontExistsTF{Libertinus Sans}{
+  \setsansfont{Libertinus Sans}[
+    Ligatures=TeX,
+    Scale=MatchLowercase,
+    BoldItalicFont={Libertinus Sans Italic}
+  ]
+}{
+  \setsansfont{TeX Gyre Heros}[Ligatures=TeX,Scale=MatchLowercase]
+}
+\IfFontExistsTF{Libertinus Mono}{
+  \setmonofont{Libertinus Mono}[Scale=MatchLowercase]
+}{
+  \setmonofont{Latin Modern Mono}[Scale=MatchLowercase]
+}
+\IfFontExistsTF{Libertinus Math}{
+  \setmathfont{Libertinus Math}
+}{
+  \setmathfont{TeX Gyre Pagella Math}
+}
+
+\usepackage[final,protrusion=true,expansion=true,tracking=true]{microtype}
+\usepackage{xcolor}
+\definecolor{ReviewInk}{HTML}{172033}
+\definecolor{ReviewMuted}{HTML}{657084}
+\definecolor{ReviewRule}{HTML}{D8DEE9}
+\definecolor{ReviewAccent}{HTML}{245E8C}
+\definecolor{ReviewAccentLight}{HTML}{EEF4F8}
+\definecolor{ReviewQuote}{HTML}{36445A}
+\definecolor{ReviewCode}{HTML}{F4F6F8}
+
+\usepackage{setspace}
+\setstretch{1.075}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.62em plus 0.12em minus 0.08em}
+\emergencystretch=2.5em
+\raggedbottom
+
+\usepackage{titlesec}
+\usepackage{needspace}
+\titleformat{\section}
+  {\sffamily\bfseries\color{ReviewInk}\fontsize{18}{22}\selectfont}
+  {}{0pt}{}
+  [\vspace{0.32em}{\color{ReviewAccent}\titlerule[1.1pt]}]
+\titleformat{\subsection}
+  {\sffamily\bfseries\color{ReviewInk}\fontsize{13.5}{17}\selectfont}
+  {}{0pt}{}
+\titleformat{\subsubsection}
+  {\sffamily\bfseries\color{ReviewInk}\fontsize{11.4}{14.2}\selectfont}
+  {}{0pt}{}
+\titleformat{\paragraph}[block]
+  {\sffamily\bfseries\color{ReviewInk}\normalsize}
+  {}{0pt}{}
+\titleformat{\subparagraph}[block]
+  {\sffamily\bfseries\color{ReviewMuted}\normalsize}
+  {}{0pt}{}
+\titlespacing*{\section}{0pt}{0pt}{1.25em}
+\titlespacing*{\subsection}{0pt}{2.25em}{0.65em}
+\titlespacing*{\subsubsection}{0pt}{1.65em}{0.45em}
+\titlespacing*{\paragraph}{0pt}{1.25em}{0.3em}
+\titlespacing*{\subparagraph}{0pt}{1.05em}{0.25em}
+
+\usepackage{enumitem}
+\setlist[itemize]{leftmargin=1.45em,itemsep=0.34em,topsep=0.38em,parsep=0pt,label=\textcolor{ReviewAccent}{\raisebox{0.16ex}{\scriptsize\(\bullet\)}}}
+\setlist[enumerate]{leftmargin=1.75em,itemsep=0.34em,topsep=0.38em,parsep=0pt,label=\textcolor{ReviewAccent}{\arabic*.}}
+\newcommand{\ReviewUnchecked}{%
+  \raisebox{0.05ex}{\color{ReviewMuted}\fboxsep=0pt\fbox{\rule{0pt}{1.05ex}\rule{1.05ex}{0pt}}}%
+}
+\newcommand{\ReviewChecked}{%
+  \raisebox{0.05ex}{\color{ReviewAccent}\fboxsep=0pt\fbox{\rule{0pt}{1.05ex}\rule{1.05ex}{0pt}}}\hspace{-1.08ex}\raisebox{0.14ex}{\color{ReviewAccent}\scriptsize\(\checkmark\)}%
+}
+
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{ragged2e}
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.22}
+
+\usepackage{mdframed}
+\newmdenv[
+  linewidth=0pt,
+  leftline=true,
+  linecolor=ReviewAccent,
+  linewidth=1.6pt,
+  backgroundcolor=ReviewAccentLight,
+  innerleftmargin=12pt,
+  innerrightmargin=11pt,
+  innertopmargin=8pt,
+  innerbottommargin=8pt,
+  skipabove=0.72em,
+  skipbelow=0.72em
+]{reviewquote}
+\newenvironment{reviewcode}{%
+  \begin{mdframed}[
+    linewidth=0.6pt,
+    linecolor=ReviewRule,
+    backgroundcolor=ReviewCode,
+    roundcorner=2pt,
+    innerleftmargin=9pt,
+    innerrightmargin=9pt,
+    innertopmargin=7pt,
+    innerbottommargin=7pt,
+    skipabove=0.65em,
+    skipbelow=0.65em
+  ]%
+  \small\ttfamily\color{ReviewInk}\raggedright\setlength{\parskip}{0.18em}%
+}{%
+  \end{mdframed}%
+}
+
+\usepackage{hyperref}
+\usepackage{bookmark}
+\hypersetup{
+  unicode=true,
+  colorlinks=true,
+  linkcolor=ReviewAccent,
+  urlcolor=ReviewAccent,
+  citecolor=ReviewAccent,
+  pdfborder={0 0 0},
+  pdftitle={%%PDF_TITLE%%},
+  pdfsubject={Referee Report},
+  pdfauthor={},
+  pdfcreator={econ-review},
+  pdfproducer={econ-review}
+}
+\urlstyle{same}
+
+\usepackage{tocloft}
+\setcounter{tocdepth}{2}
+\setcounter{secnumdepth}{0}
+\renewcommand{\contentsname}{Contents}
+\renewcommand{\cfttoctitlefont}{\sffamily\bfseries\color{ReviewInk}\fontsize{18}{22}\selectfont}
+\renewcommand{\cftaftertoctitle}{\par\vspace{0.55em}{\color{ReviewAccent}\hrule height 1.1pt}\vspace{0.8em}}
+\renewcommand{\cftsecfont}{\sffamily\bfseries\color{ReviewInk}}
+\renewcommand{\cftsecpagefont}{\sffamily\bfseries\color{ReviewInk}}
+\renewcommand{\cftsubsecfont}{\sffamily\color{ReviewMuted}}
+\renewcommand{\cftsubsecpagefont}{\sffamily\color{ReviewMuted}}
+\setlength{\cftbeforesecskip}{0.96em}
+\setlength{\cftbeforesubsecskip}{0.38em}
+\setlength{\cftsubsecindent}{1.15em}
+\setlength{\cftsubsecnumwidth}{0pt}
+\renewcommand{\cftsecafterpnum}{\vspace{0.08em}}
+
+\usepackage{fancyhdr}
+\renewcommand{\sectionmark}[1]{\markboth{#1}{}}
+\fancypagestyle{reviewbody}{%
+  \fancyhf{}
+  \renewcommand{\headrulewidth}{0pt}
+  \fancyhead[L]{\sffamily\footnotesize\color{ReviewMuted}\nouppercase{\leftmark}}
+  \fancyhead[R]{\sffamily\footnotesize\color{ReviewMuted}%%HEADER_TITLE%%}
+  \fancyfoot[C]{\sffamily\footnotesize\color{ReviewMuted}\thepage}
+}
+\fancypagestyle{reviewcontents}{%
+  \fancyhf{}
+  \renewcommand{\headrulewidth}{0pt}
+  \fancyfoot[C]{\sffamily\footnotesize\color{ReviewMuted}\thepage}
+}
+\pagestyle{reviewbody}
+
+\AtBeginDocument{\color{ReviewInk}}
+
+\begin{document}
+
+\hypersetup{pageanchor=false}
+\begin{titlepage}
+  \thispagestyle{empty}
+  \vspace*{0.145\textheight}
+  {\color{ReviewAccent}\rule{44mm}{1.4pt}\par}
+  \vspace{1.35cm}
+  {\sffamily\bfseries\color{ReviewInk}\raggedright\hyphenpenalty=10000\exhyphenpenalty=10000\fontsize{%%TITLE_FONT_SIZE%%}{%%TITLE_LEADING%%}\selectfont
+    %%PAPER_TITLE%%\par}
+  \vspace{1.05cm}
+  {\sffamily\color{ReviewAccent}\fontsize{15}{19}\selectfont
+    Referee Report\par}
+  \vfill
+  {\sffamily\color{ReviewMuted}\small %%ASSESSMENT_DATE%%\par}
+\end{titlepage}
+
+\hypersetup{pageanchor=true}
+\pagenumbering{roman}
+\pagestyle{reviewcontents}
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+\pagestyle{reviewbody}
+
+%%BODY%%
+
+\end{document}

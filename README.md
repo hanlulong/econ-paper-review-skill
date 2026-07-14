@@ -1,134 +1,140 @@
-# econ-review
+# Econ Paper Review Skill
 
-`econ-review` is a beta Agent Skill for constructive, author-side review of economics papers. Its objective is to improve the paper. It reconstructs the paper before judging it, activates logical, technical, and methodological checks from the actual claims and evidentiary objects, verifies surviving findings against source anchors, and saves a prioritized referee report, a separate writing report, and a dependency-aware fix plan.
+**Get a tough, fair referee report on your economics paper — before a real referee sees it.**
 
-The architecture is intended for empirical, experimental, descriptive, structural/quantitative, theoretical, macro, and mixed papers. A public-safe six-family synthetic benchmark now tests routing, seeded-issue recall, and clean false-positive traps. It is a regression harness, not evidence of superiority; end-to-end review results must be reported before making comparative quality claims.
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)](LICENSE)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-ready-8A2BE2.svg)](#install)
+[![Codex](https://img.shields.io/badge/Codex-ready-brightgreen.svg)](#install)
 
-## Current v0.4 scope
+`econ-review` is an Agent Skill for Claude Code and Codex. It reads your paper the way a careful journal referee would: first it works out what you are claiming and how your evidence supports it, then it checks everything it can verify — identification, tables, proofs, numbers, references, writing — and gives you a referee report plus a step-by-step plan for fixing what it found. It never rewrites your paper. That part stays yours.
 
-- `quick` and `full` modes with a method-agnostic reconstruction core
-- claim-family, derivation, methods, terminology/variable, reader-claim, analytical, figure, and table audits
-- offline PDF-to-structured-Markdown ingestion with page/bounding-box provenance, complete page renders, table/figure/equation crops, and symbol warnings
-- rendered inspection of figures and tables, with extraction conflicts resolved against the page image
-- conditional DiD, IV, RDD, and cross-cutting inference lenses activated by design facts rather than paper labels
-- fairness rules for inherent, disclosed, claim-bounded data limitations
-- independent refutation and verification passes when agents are available
-- source manifests, SHA-256 hashes, stable anchors, typed evidence representations, reciprocal verification mappings, and JSON Schema validation
-- bounded deterministic checks for declared numeric identities; unsupported computations require another auditable tool or a bounded finding
-- an exhaustive, importance-ranked inventory with no arbitrary comment, page, or word cap
-- a source-linked referee synthesis plus separate substance and writing reports, while preserving legacy v0.1–v0.3 validation
-- transactional finalization with atomic, symlink-resistant output writes and a hashed completion receipt
-- append-only author-action history with backward-compatible v0.1/v0.2 imports
-- a local Review Desk for filtering, annotating, tracking, and exporting review work without mutating canonical artifacts
+*Built for economics. Also works well for finance, accounting, political economy, and other social science papers that rest on data, causal inference, or formal models.*
 
-The broader challenge/deep-dive/rereview/respond loop, additional conditional method lenses, and measured blinded cross-family evaluation remain planned. No superiority claim should be made before an independent benchmark reports precision, recall, false-positive burden, usefulness, and reviewer agreement.
+## What you get
+
+A finished review lands in a clean `review/` folder next to your paper:
+
+- **`paper-review.pdf`** — the primary report: a professionally typeset, bookmarked PDF with the referee report, every detailed comment, editing comments, and the revision plan.
+- **`reports/`** — the same reports as Markdown, ready for editing or for your agents.
+- **`README.md`** — a one-page summary that tells you what to read first.
+- **`supporting/`** — working files used by the Review Desk and later review rounds; most authors never open them.
+
+Every comment quotes the relevant manuscript text — or, when the issue comes from a checked comparison or calculation, states that basis directly — then explains why it matters and what to do:
+
+> ### Section 3: The global uniqueness claim fails at the equality boundary
+>
+> **Issue**: The proposition asserts strict uniqueness although the stated payoff permits a tie.
+>
+> **Relevant text**:
+> > The equilibrium action is unique for every parameter value.
+>
+> **Concern**: At equality both actions maximize payoff, so the model supports a set-valued prediction. The proposition and comparative-static summary currently state a stronger global conclusion. No tie-breaking rule or boundary restriction appears in the supplied manuscript.
+>
+> **Suggestions**: Add a tie-breaking rule or state a set-valued equilibrium at the boundary. Align Proposition 1, its proof, and the comparative static.
+>
+> **Status**: [Pending]
+
+*(From the bundled example. Full reviews keep every issue that survives verification — up to 100 substantive comments and 30 editing comments.)*
 
 ## Install
 
-Use one installation method to avoid duplicate discovery. Remote installation is disabled unless both `ECON_REVIEW_ARCHIVE_URL` and the expected `ECON_REVIEW_ARCHIVE_SHA256` are supplied; the installer verifies the archive before safe extraction.
+Works on macOS, Windows, and Linux. Needs Python 3.10+ and [Poppler](https://poppler.freedesktop.org/) for PDF reading; no TeX, Pandoc, Node.js, or administrator access required.
 
-From a local checkout:
-
-```bash
-cd /path/to/econ-paper-review-skill
-python3 -m pip install -r requirements.txt
-./install.sh                         # Claude Code and Codex, globally
-./install.sh --global --codex       # Codex only
-./install.sh --local /path/to/repo  # project-local install
-```
-
-The requirements file installs the schema validator plus permissively licensed PDF parsing/cropping libraries. PDF ingestion also requires separately installed Poppler commands (`pdfinfo`, `pdftotext`, and `pdftoppm`); local Tesseract OCR is optional. Those executables are not bundled. Check the machine with `python3 econ-review/scripts/pdf_ingestion.py doctor`. The canonical package is `econ-review/`; installers copy that one tree rather than maintaining platform-specific source variants. See `THIRD_PARTY_NOTICES.md` and `econ-review/references/pdf-backends.md` before adding or distributing another conversion backend.
-
-## Use
-
-Put the manuscript in your working directory and give the agent its path. Supply the PDF plus LaTeX or Markdown source when available; for a Word manuscript, include a PDF export so equations, tables, figures, and page layout can be checked against the rendered document. Add the appendix and replication materials if they are in scope.
-
-If only a PDF is available, the skill now creates a local verified-transcription package before review. It produces structured Markdown for reading and stable quotation anchors, while preserving rendered pages and separate crops as authority for tables, figures, equations, and ambiguous symbols. It does not upload manuscripts or claim that generic PDF extraction can recover mathematical notation perfectly.
+Paste this into Claude Code or Codex and it will install itself:
 
 ```text
-Use $econ-review in full mode to review this paper for a leading field journal.
-Use $econ-review in quick mode and identify the three largest submission risks.
-Use $econ-review to reconstruct the theory and empirical design before giving detailed comments.
+Help me install econ-review from https://github.com/hanlulong/econ-paper-review-skill
+by following its docs/INSTALL.md. Run the dry run first, then the managed global setup
+for both Claude Code and Codex with --with-review-desk. Use my existing GitHub login —
+never ask me to paste a token — and do not install system packages, TeX, Pandoc, or
+anything needing administrator access. When done, tell me the Review Desk command and
+URL and remind me to reload my agent sessions.
 ```
 
-`quick` is a bounded pass over the central claim and largest submission risks. `full` is a materially longer, multi-pass review of every available section and exhibit. Runtime varies with paper length, browsing, rendering, and replication work, so the skill reports stage transitions and material access limits instead of promising a fixed number of minutes.
+The expanded, security-preserving prompt and project-local variants are in [docs/INSTALL.md](docs/INSTALL.md).
 
-The skill treats manuscripts as read-only and writes artifacts under `review/` unless the user requests an analysis-only response. Open `review/README.md` first when the run finishes.
-
-## Output contract
-
-Contract v0.4 retains the v0.3 two-report presentation and adds a source-grounded trust spine:
-
-- `review/README.md` is the generated start-here page: posture, priority concerns, review coverage, reading order, and a map of the human-readable artifacts.
-- `review/synthesis.json` stores the overall assessment, reviewer posture, principal rejection risks, other major issues, repairability, and upgrade conditions.
-- `review/report.md` is the substance-only referee report. It begins with a conventional referee assessment and prioritizes issues that could prevent publication before `## Detailed Comments (N)` for every active substance finding.
-- `review/writing-report.md` contains writing quality, grammar and mechanics, language consistency, exhibit presentation, optional style improvements, and `## Detailed Writing Comments (N)` for active writing findings. It is required in full mode; journal-fit guidance is added only when explicitly requested.
-- `review/fix-plan.md` covers active findings from both channels exactly once, ordered by severity and dependency.
-- `review/review-manifest.json` indexes every intended report, plan, and readable audit document; it makes the package open cleanly in the optional Review Desk without listing the manuscript.
-- `review/findings.json`, `run.json`, `synthesis.json`, and the evidence ledgers are canonical state. v0.4 evidence includes the source manifest, structured verification, computations, and external sources.
-- `review/finalization.json` records the gates and artifact hashes produced by the atomic finalizer; changing an artifact invalidates completion.
-
-The Markdown landing page, reports, and revision plan are the complete author-facing output; they work without Node.js or the Review Desk. The local viewer is optional and adds overview-first reading, filtering, source/exhibit context, paper-order and principal-concern navigation, deep links, local author-response event history, and privacy controls.
-
-Legacy v0.1–v0.3 reviews validate under their declared contracts without silent migration.
-
-Detailed comments preserve the requested outer format while allowing a natural reader-centered voice:
-
-```markdown
-## Detailed Comments (N)
-
-### 1. Section 3.1: short issue title
-
-**Issue**: Exact diagnosis.
-
-**Relevant text**:
-> Exact manuscript evidence.
-
-**Concern**: State the evidence boundary and paper-specific consequence without repeating the issue.
-
-**Suggestions**: Give the minimum repair first and add one decisive check only when needed.
-
-**Status**: [Pending]
-```
-
-`N` is the actual number of verified findings. The skill neither pads nor truncates to a target. Principal concerns are root-cause merged and concise, but no verified dispositive issue is hidden to satisfy a numerical cap.
-
-## Local Review Desk
-
-Development mode starts with no manuscript or private review embedded. Users can open a review folder containing canonical JSON, every manifest-listed report and plan, and optional rendered exhibit context. The viewer opens on the overall assessment, keeps the queue beside reports and comment detail, supports importance, paper-order, and principal-concern workflows, and records author actions as an append-only local event history. Canonical files remain read-only; a later review reconciles exported actions by stable finding ID and independently verifies closure.
+<details>
+<summary>Manual installation</summary>
 
 ```bash
-cd review-viewer
-nvm use
-npm install
-npm run dev
+git clone https://github.com/hanlulong/econ-paper-review-skill.git
+cd econ-paper-review-skill
+python3 scripts/install_econ_review.py --dry-run --global --all --with-review-desk
+python3 scripts/install_econ_review.py --global --all --with-review-desk
 ```
 
-The explicitly gated bundled build contains only the synthetic validator fixture:
+On native Windows, replace `python3` with `py -3` and use PowerShell path syntax. If compatible LuaLaTeX or Tectonic is already installed, the report uses the professional LaTeX renderer; otherwise it uses the maintained built-in PDF renderer. A LaTeX compilation error stops the build instead of silently changing renderers. Review Desk is prebuilt and needs no Node.js or npm. See [docs/INSTALL.md](docs/INSTALL.md) for skill-only, Claude-only, Codex-only, and project-local installs.
 
-```bash
-npm run dev:bundled
+</details>
+
+## Use it
+
+Put your manuscript in your working directory — the PDF, plus the LaTeX or Markdown source if you have it — and ask:
+
+```text
+Use the econ-review skill in full mode to review this paper for a leading field journal.
+Use the econ-review skill in quick mode and identify the three largest submission risks.
+Use the econ-review skill to reconstruct the theory and empirical design before giving detailed comments.
 ```
 
-Production build/sync refuses to copy review materials unless `ALLOW_PUBLISH=1` is set. Use that override only for cleared or synthetic inputs.
+`quick` gives you the biggest risks fast. `full` goes through every section, table, figure, equation, footnote, and appendix. When it finishes, open `review/paper-review.pdf`; use `review/README.md` for the file map and next-round workflow.
 
-## Validate development builds
+## Why you can trust the comments
 
-```bash
-python3 "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-creator/scripts/quick_validate.py" econ-review
-python3 -m unittest discover -s tests -v
-python3 econ-review/scripts/generate_reports.py --check tests/fixtures/valid-review
-python3 econ-review/scripts/generate_fix_plan.py --check tests/fixtures/valid-review
-python3 econ-review/scripts/validate_review.py tests/fixtures/valid-review
-python3 econ-review/scripts/finalize_review.py --check tests/fixtures/valid-review
-python3 econ-review/scripts/pdf_ingestion.py doctor
-python3 benchmarks/evaluate.py
-python3 -m unittest discover -s tests -p 'test_stat_recompute.py' -v
-python3 scripts/build_public_release.py --check
-cd review-viewer && npm run lint && npx tsc --noEmit && npm test
-bash -n install.sh
-```
+AI peer review usually fails in one of two ways: it makes things up, or it hands you a generic checklist. This skill was built specifically against both:
 
-Private development papers and comparison research are ignored by git and are not viewer bundles or distributable skill assets. The project code and documentation are proprietary and all rights reserved. Third-party components remain governed by their own licenses.
+- **It reads your paper before it judges it.** It reconstructs the argument first and, where the supplied inputs permit, re-derives key equations and traces reported results. Comments come from understanding the paper, not from pattern-matching on keywords.
+- **It checks comments against the source.** Quotations, equations, tables, and figures are checked against the supplied source or rendered PDF pages; reviewer-derived comparisons and calculations are labeled in plain language instead of presented as quotations.
+- **It argues with itself before it argues with you.** Before a major comment reaches the report, the skill searches your paper and appendix for the strongest reply you could make. If your reply would win, the comment is deleted.
+- **It checks your contribution against live literature.** Each novelty and citation claim becomes a targeted search; candidate papers are screened, authors and versions confirmed, and available full texts read before the review calls a citation missing or a contribution overstated. When the evidence is not decisive, it says so.
+- **It is fair about data limits.** If your data can't do something, you say so in the paper, and your claims stay within those limits, that is not a flaw — and the review won't treat it as one.
+- **It checks what fits your paper.** Difference-in-differences, IV, and RDD checks switch on only when your paper actually uses those designs. No demands for robustness checks that make no sense for your setting.
 
-Internal strategy documents remain local and ignored rather than entering Git history. Public archives are built from an exact allowlist. After making the owner-level license and release decision, create an archive with `python3 scripts/build_public_release.py --output /path/to/release.zip`; never publish the private working tree directly.
+Every review also passes a set of automatic consistency checks before it is shown to you as finished.
+
+## What it covers
+
+Any kind of economics paper: empirical, experimental, descriptive, prediction and machine learning, structural, theoretical, macro, and mixed. The review adapts to how your paper actually works — its identification, inference, logic and proofs, magnitudes, framing of the contribution, terminology, exhibits, references, and reproducibility.
+
+**Not just economics.** The checks target how a paper's evidence supports its claims — research design, causal inference, estimation and inference, formal models and proofs, tables and figures, reproducibility — so papers in finance, accounting, management, political science, public policy, and other empirical social sciences get the same depth of review. Journal norms and literature search are economics-first for now; anything field-specific the review can't assess is said plainly rather than guessed.
+
+## What it does not do
+
+It won't write your paper, estimate your acceptance odds, or invent citations. When it couldn't check something — a dataset it didn't have, a figure it couldn't read — it says so instead of pretending. And it doesn't claim to beat human referees: treat it as a tough extra reader before submission, not a replacement for peer review.
+
+## The Review Desk (optional)
+
+A local web viewer for working through a long review. It opens on the referee report, then walks you through the comments one by one: for each, add your instruction or disagreement, choose P0/P1/P2, and make one clear decision — keep it **Open**, mark it **Ready for review** after a change or reasoned response, or **Set aside**. Review Desk then builds a prioritized task plan and a structured response template for your implementation agents. The next review round checks every carried concern and runs a fresh full-paper sweep for new problems. Everything stays on your machine — no uploads or accounts.
+
+The recommended installer includes a verified, prebuilt copy with `--with-review-desk`; it prints one stable Python launch command and opens `http://127.0.0.1:48127/`. Node.js is required only to modify or rebuild the viewer; see [review-viewer/README.md](review-viewer/README.md).
+
+## Roadmap
+
+- A measured benchmark with published precision and recall — before any comparative claims
+- More design-specific checks (RCT, shift-share, synthetic control, structural, macro-VAR)
+- Round-by-round usability improvements for author, implementation-agent, and re-review handoffs
+- **A hosted version** — upload a PDF and receive the full review without a command line. Coming later.
+
+## Related projects
+
+- [econ-writing-skill](https://github.com/hanlulong/econ-writing-skill) — the writing-side sibling: this skill judges the paper, that one helps you write it
+- [stata-mcp](https://github.com/hanlulong/stata-mcp) — run Stata from AI agents
+- [awesome-ai-for-economists](https://github.com/hanlulong/awesome-ai-for-economists) — the broader toolbox
+
+## Development and advanced installation
+
+PDF backends, the output contract, the validation suite, and the release process are documented in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
+## License
+
+Econ Paper Review is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE). It is free to use, modify, and share for personal research, study, and other noncommercial purposes under that license. PolyForm expressly permits use by charitable organizations, educational institutions, public research organizations, public safety or health organizations, environmental protection organizations, and government institutions, regardless of their funding source or related funding obligations.
+
+Use outside those permissions, including commercial use by other organizations, requires separate terms. For commercial licensing, contact [hanlulong@gmail.com](mailto:hanlulong@gmail.com). The copyright holder may also offer the software under other terms and reserves the right to operate paid hosted services, including a future premium service.
+
+Unless a file or third-party notice says otherwise, the public license covers the repository's first-party source code, documentation, prompts, schemas, tests, designs, and bundled first-party materials. Third-party components remain under their respective licenses; see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
+Contributions are welcome, and contributors retain ownership of their work. Before proposing a code or documentation change, read [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+---
+
+If this catches something a referee would have caught, star the repo so other economists find it — and if it gets something wrong, open an issue. Bad comments are bugs here, not opinions.

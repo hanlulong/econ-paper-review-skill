@@ -31,6 +31,7 @@
                 "anchor_id": {"type": ["string", "null"], "pattern": "^ANC-[0-9]{2,}$"},
                 "computation_id": {"type": ["string", "null"], "pattern": "^CMP-[0-9]{2,}$"},
                 "source_record_id": {"type": ["string", "null"], "pattern": "^EXT-[0-9]{2,}$"},
+                "support_record_id": {"type": ["string", "null"], "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"},
                 "notes": {"type": "string"}
               }
             }

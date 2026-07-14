@@ -76,6 +76,34 @@ def payload_v03() -> dict:
     return value
 
 
+def payload_v04() -> dict:
+    value = payload_v03()
+    value["schema_version"] = "0.4"
+    entry = value["entries"][0]
+    entry["user_priority"] = "P0"
+    entry["reviewed"] = True
+    entry["events"].extend([
+        {
+            "event_id": "00000000-0000-4000-8000-000000000005",
+            "type": "priority_changed",
+            "at": "2026-07-12T13:10:00Z",
+            "user_priority": "P0",
+            "parent_event_id": "00000000-0000-4000-8000-000000000004",
+            "origin": "local",
+        },
+        {
+            "event_id": "00000000-0000-4000-8000-000000000006",
+            "type": "reviewed_changed",
+            "at": "2026-07-12T13:20:00Z",
+            "reviewed": True,
+            "parent_event_id": "00000000-0000-4000-8000-000000000005",
+            "origin": "local",
+        },
+    ])
+    entry["updated_at"] = "2026-07-12T13:20:00Z"
+    return value
+
+
 class ReviewActionsValidationTests(unittest.TestCase):
     def run_payload(self, value: dict) -> list[str]:
         with tempfile.TemporaryDirectory() as tmp:
@@ -106,10 +134,22 @@ class ReviewActionsValidationTests(unittest.TestCase):
         value["source_manuscripts"].append({"path": "paper.md", "sha256": None})
         self.assertTrue(any("duplicate source manuscript paths" in error for error in self.run_payload(value)))
 
+    def test_source_paths_cannot_collide_by_case(self) -> None:
+        value = payload()
+        value["source_manuscripts"].append({"path": "PAPER.md", "sha256": None})
+        self.assertTrue(any("collide by case" in error for error in self.run_payload(value)))
+
     def test_history_must_be_chronological(self) -> None:
         value = payload()
         value["entries"][0]["status_history"].reverse()
         self.assertTrue(any("not chronological" in error for error in self.run_payload(value)))
+
+    def test_schema_accepted_noncanonical_datetime_cannot_skip_semantic_checks(self) -> None:
+        value = payload_v03()
+        value["exported_at"] = value["exported_at"].replace("T", "t").replace("Z", "z")
+        errors = self.run_payload(value)
+        self.assertTrue(any("semantic action validation failed" in error for error in errors), errors)
+        self.assertTrue(any("uppercase T and uppercase Z" in error for error in errors), errors)
 
     def test_identity_paths_and_locations_must_be_nonblank_trimmed_text(self) -> None:
         mutations = [
@@ -159,28 +199,100 @@ class ReviewActionsValidationTests(unittest.TestCase):
         value["entries"][0]["response_note"] = "Different note"
         self.assertTrue(any("response_note differs from replayed events" in error for error in self.run_payload(value)))
 
-    def test_v03_parent_must_reference_earlier_event(self) -> None:
+    def test_v03_parent_must_reference_preceding_event(self) -> None:
         value = payload_v03()
-        value["entries"][0]["events"][2]["parent_event_id"] = "00000000-0000-4000-8000-000000000099"
-        self.assertTrue(any("must reference an earlier event" in error for error in self.run_payload(value)))
+        value["entries"][0]["events"][3]["parent_event_id"] = (
+            "00000000-0000-4000-8000-000000000001"
+        )
+        self.assertTrue(any("must reference the preceding event" in error for error in self.run_payload(value)))
+
+    def test_v03_event_ids_are_globally_unique_across_findings(self) -> None:
+        value = payload_v03()
+        second = json.loads(json.dumps(value["entries"][0]))
+        second["finding_id"] = "LOGIC-02"
+        value["entries"].append(second)
+        errors = self.run_payload(value)
+        self.assertTrue(any("globally unique across entries" in error for error in errors), errors)
 
     def test_v03_import_event_is_provenance_only(self) -> None:
         value = payload_v03()
         value["entries"][0]["events"][0]["disposition"] = "open"
         self.assertTrue(any("schema violation" in error for error in self.run_payload(value)))
 
+    def test_v04_personal_priority_and_reviewed_state_pass(self) -> None:
+        self.assertEqual(self.run_payload(payload_v04()), [])
+
+    def test_v04_priority_must_match_replayed_events(self) -> None:
+        value = payload_v04()
+        value["entries"][0]["user_priority"] = "P2"
+        errors = self.run_payload(value)
+        self.assertTrue(any("user_priority differs from replayed events" in error for error in errors), errors)
+
+    def test_v04_reviewed_state_must_match_replayed_events(self) -> None:
+        value = payload_v04()
+        value["entries"][0]["reviewed"] = False
+        errors = self.run_payload(value)
+        self.assertTrue(any("reviewed differs from replayed events" in error for error in errors), errors)
+
+    def test_v04_not_relevant_is_reviewed_and_auditable(self) -> None:
+        value = payload_v04()
+        entry = value["entries"][0]
+        previous = entry["events"][-1]["event_id"]
+        entry["events"].append({
+            "event_id": "00000000-0000-4000-8000-000000000007",
+            "type": "disposition_changed",
+            "at": "2026-07-12T13:30:00Z",
+            "disposition": "not_relevant",
+            "parent_event_id": previous,
+            "origin": "local",
+        })
+        entry["disposition"] = "not_relevant"
+        entry["status_history"].append({
+            "disposition": "not_relevant",
+            "at": "2026-07-12T13:30:00Z",
+        })
+        entry["updated_at"] = "2026-07-12T13:30:00Z"
+        self.assertEqual(self.run_payload(value), [])
+
+        entry["reviewed"] = False
+        errors = self.run_payload(value)
+        self.assertTrue(any("schema violation" in error for error in errors), errors)
+
     def test_source_manuscript_path_must_be_portable(self) -> None:
-        for bad_path in ("/Users/person/private/paper.pdf", "C:/private/paper.pdf", "../paper.pdf", "folder\\paper.pdf"):
+        for bad_path in (
+            "/Users/person/private/paper.pdf",
+            "C:/private/paper.pdf",
+            "../paper.pdf",
+            "folder\\paper.pdf",
+            "folder/name:stream.pdf",
+            "folder/e\u0301.pdf",
+            "folder/trailing.",
+        ):
             with self.subTest(path=bad_path):
                 value = payload()
                 value["source_manuscripts"][0]["path"] = bad_path
-                self.assertTrue(any("schema violation" in error for error in self.run_payload(value)))
+                self.assertTrue(self.run_payload(value))
 
     def test_oversized_handoff_is_rejected_before_parsing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "review-actions.json"
             path.write_bytes(b" " * (MODULE.MAX_ACTIONS_BYTES + 1))
             self.assertTrue(any("exceeds" in error for error in MODULE.validate(path)))
+
+    def test_duplicate_json_keys_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "review-actions.json"
+            rendered = json.dumps(payload())
+            path.write_text(
+                rendered.replace(
+                    '{',
+                    '{"source_review_id":"shadow",',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            errors = MODULE.validate(path)
+            self.assertTrue(any("duplicate JSON key: source_review_id" in error for error in errors), errors)
 
 
 if __name__ == "__main__":

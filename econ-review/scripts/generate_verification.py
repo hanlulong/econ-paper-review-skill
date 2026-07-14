@@ -10,11 +10,11 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from safe_io import atomic_write_text  # noqa: E402
+from safe_io import atomic_write_text, strict_json_load  # noqa: E402
 
 
 def load(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = strict_json_load(path)
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain a JSON object")
     return value

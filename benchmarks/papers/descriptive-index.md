@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This paper describes monthly price pressure across 40 towns. It makes no causal claim. The index averages each town's item-level price changes using that month's expenditure shares. A higher index means that the current basket became more expensive.
+This paper describes monthly price pressure across 40 towns. It makes no causal claim. The index averages each town's item-level price changes using that month's expenditure shares. A higher index means that the current basket became more expensive. We also promise to decompose national movements into changes in observed prices and changes in item or outlet coverage.
 
 ## Data
 
@@ -10,8 +10,8 @@ Shops submit prices voluntarily. The number of reporting shops ranges from 18 to
 
 ## Comparison over time
 
-The national index rises from 100 in January to 107 in June. We interpret the seven-point change as price growth. January and June use their respective monthly expenditure weights and available-item sets. Sampling uncertainty is not reported because the index is descriptive.
+The national index rises from 100 in January to 107 in June. We interpret the seven-point change as price growth. January and June use their respective monthly expenditure weights and available-item sets. The median town index falls from 100 to 99 over the same period, but we state that the national and town results both show a broad-based increase. We do not reconcile the two summaries or present the promised price-versus-coverage decomposition. Sampling uncertainty is not reported because the index is descriptive.
 
 ## Conclusion
 
-The index offers a timely descriptive signal for the participating outlets. It is not intended to estimate a policy effect.
+The index offers a timely descriptive signal for the participating outlets. It is not intended to estimate a policy effect or represent outlets that do not participate.

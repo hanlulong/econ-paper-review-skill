@@ -2,9 +2,22 @@
 
 Use these ledgers in every full review. They are design-agnostic: activate the entries implied by the paper's claims, not by a canned method label. Save the structured result in `evidence/analytical-audit.json` and the readable result in `evidence/analytical-audit.md`.
 
-Each applicable domain declares only the coverage units containing relevant objects—not the entire paper by default. Each entry records its own nonempty coverage-unit subset, one or more source/locator/content records, unique typed checks, status, and finding links. For a `complete` domain, the union of entry coverage must equal the declared domain scope. Entry status and check status must agree, and domain finding links must match the corresponding coverage dimension. These reciprocal constraints prevent a one-line assertion from standing in for a source-derived inventory.
+New or re-finalized full reviews use analytical-audit schema v0.2. Each evidence locator names its coverage unit, evidence representation, and one locator-level `record_ref`. The `record_ref` must also appear directly in the entry's `evidence_refs`; it is the canonical record against which that locator's source, locator, and content are reconciled. Use an anchor or verified finding-evidence ID for source evidence, a computation ID for derived results, or an external-source ID for literature evidence. Source-backed locators must match the canonical anchor's source and locator; verbatim and normalized content must match the canonical record. Reviewer observations remain typed as observations and bound to the inspected anchor or finding-evidence record; author-facing reports render them as unquoted notes without bracket labels. Computed results resolve to `evidence/computations.json` plus the computation ID and recorded result; external claims resolve to `evidence/external-sources.json` plus the external-source ID and one recorded supported proposition. A checked absence requires an absence-scope evidence record or a source-manifest scope anchor and also renders as an unquoted note. Legacy v0.1 ledgers remain readable and validator-compatible under older contracts and immutable v0.4 receipt-schema-v0.1 packages, but audit meta-prose cannot substitute for evidence in either version.
+
+Each applicable domain declares only the coverage units containing relevant objects—not the entire paper by default. Each entry records its own nonempty coverage-unit subset, one or more source/locator/content records, unique typed checks, status, and finding links. For a `complete` domain, the union of entry coverage must equal the declared domain scope. Entry status and check status must agree, and domain finding links must match the corresponding coverage dimension. A bounded v0.2 entry or check makes the domain and its reciprocal coverage dimension bounded; do not hide an unresolved material limit inside a nominally complete domain. These reciprocal constraints prevent a one-line assertion from standing in for a source-derived inventory.
 
 Do not collapse a domain into a generic sentence such as `checked`, `clear`, or `reviewed`. Split materially different paper objects into separate entries and quote or summarize the source-specific evidence for each one. The validator rejects generic evidence and check results, but substantive completeness still requires the reviewer to inventory the paper rather than optimize for schema passage.
+
+## Contents
+
+- [Partitions and regimes](#1-partition-and-regime-ledger)
+- [Measure algebra](#2-measure-algebra-ledger)
+- [Assumption-to-implementation crosswalk](#3-assumption-to-implementation-crosswalk)
+- [Derived numbers](#4-derived-number-ledger)
+- [Comparison harmonization](#5-comparison-harmonization-ledger)
+- [Timing and tests](#6-timing-and-test-ledger)
+- [Availability and exclusivity](#7-availability-and-exclusivity-ledger)
+- [Admission and fairness](#admission-and-fairness-rules)
 
 ## 1. Partition and regime ledger
 
@@ -27,7 +40,9 @@ For every load-bearing rate, share, index, growth rate, elasticity, hazard, norm
 - unit, scale, sign convention, transform domain, base period, and normalization;
 - fixed or changing weights, chaining rule, entry/exit, and composition effects;
 - handling of zeros, missing values, censoring, interpolation, rounding, trimming, and numerical failures;
-- mapping from raw record to person, household, firm, market, model state, or aggregate object.
+- mapping from raw record to person, household, firm, market, model state, or aggregate object;
+- for bounded or discrete outcomes, feasible support, floor or ceiling, and whether a stated marginal effect or counterfactual remains inside that support for the relevant comparison;
+- for extensive/intensive pairs, which margin is measured, reported, and used in the economic interpretation.
 
 Test index-number invariance when normalized levels are aggregated. Changing weights can move an aggregate level even when component growth is unchanged; compare growth rates or use a valid chain when level bases differ. Call a denominator problem an estimand mismatch unless the target and direction of bias are established.
 
@@ -52,9 +67,10 @@ Trace every number not copied directly from a displayed result. Record source ce
 - welfare, incidence, and cost-benefit calculations;
 - calibrated targets and decompositions;
 - counterfactual summaries and theorem examples;
-- literature benchmarks quoted with an exact magnitude.
+- literature benchmarks quoted with an exact magnitude;
+- comparison-specific baselines or denominators, relative-effect translations, cell or case support, and scale benchmarks used to characterize a headline result.
 
-Recompute simple quantities with an auditable tool. For every adverse numerical conclusion, preserve a structured computation record: exact input anchor IDs, tool and version when available, method, tolerance, output artifact, artifact hash, and linked finding IDs. Hand arithmetic can create a candidate but cannot verify a finding. When execution is unavailable, verify algebra and inputs from the paper and label the result bounded rather than calling it wrong.
+Recompute simple quantities with an auditable tool. Preserve exact input anchor IDs, tool and version when available, method, tolerance, output artifact, and artifact hash. An adverse computation links reciprocally to its finding evidence. A clean audit-only computation uses computations schema v0.2 and links reciprocally through `audit_links` to the analytical entry or magnitude assessment that cites it canonically; a free-standing computation is not audit evidence. Hand arithmetic can create a candidate but cannot verify a finding. When execution is unavailable, verify algebra and inputs from the paper and label the result bounded rather than calling it wrong.
 
 ## 5. Comparison-harmonization ledger
 
@@ -63,13 +79,19 @@ Before attributing a difference to a method, model, robustness choice, group, sa
 - outcome and estimand definitions;
 - support, sample window, unit, and missingness;
 - weights, transformations, normalization, and information set;
-- tuning, priors, restrictions, equilibrium selection, and uncertainty summaries.
+- tuning, priors, restrictions, equilibrium selection, and uncertainty summaries;
+- all content, magnitude, specificity, salience, information, timing, implementation, task burden, prompts, questions, routing, and measurement that differ between focal and benchmark conditions;
+- for staged interventions, which differential elements occur before each target outcome and which outcomes they can plausibly affect.
 
 If more than the focal component changes, label the comparison compound and do not attribute the entire difference to one method. Record why the baseline was chosen. If an alternative more closely satisfies the maintained assumptions, make it the baseline or explain the tradeoff and display the headline result under it.
+
+For a randomized or quasi-randomized intervention, reconstruct the full arm-by-stage exposure rather than only the treatment paragraph. A treatment-only prompt, comprehension item, required response, feedback screen, or delay before an outcome is part of that outcome's assigned experience. Treat it as a live co-intervention or reactivity channel only when its content could affect the object measured. Content delivered after an outcome cannot contaminate that earlier outcome.
 
 ## 6. Timing and test ledger
 
 Create a timeline from raw event through matching, aggregation, treatment or shock, outcome, and reporting. Define every date field, information set, lag, boundary period, initial condition, terminal condition, and reconciliation rule. Account for unexplained sample gaps and for timing mismatches that can create seasonality, anticipation, or look-ahead.
+
+For related results used in one mechanism or validation chain, add their populations or domains, comparisons, horizons, estimands, and ordering to the same timeline. Record whether an apparent tension is a real contradiction, a difference between objects, or unresolved. A sign or significance difference alone is not a contradiction.
 
 For every reported test or formal claim, record the null or proposition, restriction matrix or proof statement, unit, degrees of freedom, covariance, multiplicity family, and label. Verify that `pairwise`, `joint`, `system`, `causal`, `necessary`, `sufficient`, and similar terms match the actual calculation. Do not construct a system statistic by aggregating equation-level tests unless the joint covariance and algebra justify it.
 
@@ -88,3 +110,4 @@ Verify load-bearing uses of `unavailable`, `only`, `first`, `cannot`, `no data`,
 - Prefer the smallest decisive repair: exact wording, disclosure, existing-data diagnostic, targeted sensitivity, then new data or redesign.
 - State a computation as a confirmed error only after derivation, execution, or sufficient internal evidence establishes it. Otherwise state the precise unresolved question and what would decide it.
 - Keep reviewer observations, render transcriptions, source quotations, checked absences, external-source claims, and computed results as distinct evidence representations. Never render the first four as an unattributed manuscript quotation.
+- Do not use audit meta-prose—such as “the source material was checked,” “paper-specific review found issues,” or “the linked findings contain the evidence”—as an evidence locator, evidence summary, or check result. Split materially different objects into separate entries with resolvable source content.

@@ -12,15 +12,32 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from safe_io import atomic_write_text  # noqa: E402
+from safe_io import atomic_write_text, strict_json_load  # noqa: E402
 
 
 NAVIGATION_START = "<!-- review-navigation:start -->"
 NAVIGATION_END = "<!-- review-navigation:end -->"
 
+SEVERITY_ORDER = {"critical": 0, "major": 1, "minor": 2, "info": 3}
+DECISION_ROLE_ORDER = {
+    "potentially_dispositive": 0,
+    "posture_material": 1,
+    "revision_value": 2,
+    "polish": 3,
+}
+
+
+def reviewer_order_key(row: dict[str, Any]) -> tuple[int, int, int, str]:
+    return (
+        SEVERITY_ORDER.get(str(row.get("severity")), 99),
+        DECISION_ROLE_ORDER.get(str(row.get("decision_role")), 99),
+        row.get("importance_rank", 10**9),
+        str(row.get("id") or ""),
+    )
+
 
 def load(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = strict_json_load(path)
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain a JSON object")
     return value
@@ -34,7 +51,7 @@ def active_findings(ledger: dict[str, Any]) -> list[dict[str, Any]]:
         row for row in rows
         if isinstance(row, dict)
         and row.get("status") not in {"dismissed", "resolved"}
-        and row.get("severity") != "info"
+        and row.get("severity") in {"critical", "major", "minor", "info"}
     ]
 
 
@@ -50,6 +67,12 @@ def dependency_order(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             raise ValueError(f"{finding_id} has unknown or inactive dependencies: {', '.join(unknown)}")
         if finding_id in dependencies:
             raise ValueError(f"{finding_id} cannot depend on itself")
+        for dependency in dependencies:
+            if SEVERITY_ORDER.get(str(by_id[dependency].get("severity")), 99) > SEVERITY_ORDER.get(str(row.get("severity")), 99):
+                raise ValueError(
+                    f"{finding_id} depends on lower-severity {dependency}; merge the shared root cause "
+                    "or align the severities so the revision plan remains severity-first"
+                )
     pending = set(by_id)
     emitted: list[dict[str, Any]] = []
     while pending:
@@ -63,7 +86,7 @@ def dependency_order(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not ready:  # Preserve deterministic output while exposing a dependency cycle.
             cycle = ", ".join(sorted(pending))
             raise ValueError(f"finding dependency cycle: {cycle}")
-        ready.sort(key=lambda row: (row.get("importance_rank", 10**9), row.get("id", "")))
+        ready.sort(key=reviewer_order_key)
         for row in ready:
             emitted.append(row)
             pending.remove(row.get("id"))
@@ -72,6 +95,8 @@ def dependency_order(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def bucket(row: dict[str, Any]) -> str:
     role = row.get("decision_role")
+    if row.get("severity") == "critical":
+        return "P0"
     if role == "potentially_dispositive":
         return "P0"
     if role == "posture_material":
@@ -160,15 +185,12 @@ def review_navigation(review_dir: Path) -> str:
         "[Start here](README.md)",
         "[Referee report](report.md)",
     ]
-    if (review_dir / "writing-report.md").exists():
-        links.append("[Writing report](writing-report.md)")
-    links.extend([
-        "[Revision plan](fix-plan.md)",
-        "[Audit trail](evidence/verification.md)",
-    ])
+    if (review_dir / "editing-comments.md").exists():
+        links.append("[Editing comments](editing-comments.md)")
+    links.append("[Revision plan](fix-plan.md)")
     return "\n".join([
         NAVIGATION_START,
-        "> **Review package:** " + " · ".join(links),
+        "> **Review files:** " + " · ".join(links),
         NAVIGATION_END,
     ])
 
@@ -192,6 +214,14 @@ def render(review_dir: Path) -> str:
     run = load(review_dir / "run.json")
     rows = active_findings(load(review_dir / "findings.json"))
     for row in rows:
+        if row.get("severity") == "critical" and not (
+            row.get("decision_role") == "potentially_dispositive"
+            and row.get("essential") is True
+        ):
+            raise ValueError(
+                f"{row.get('id')} is critical and must be potentially_dispositive, "
+                "essential, and P0 before submission"
+            )
         reject_generic_plan_text(row)
     closures = [
         re.sub(r"\s+", " ", str(row.get("fix", {}).get("resolved_when", ""))).strip().lower()
@@ -217,15 +247,13 @@ def render(review_dir: Path) -> str:
         "",
         review_navigation(review_dir),
         "",
-        f"Objective: make the paper more publishable for {venue} by resolving the verified concerns below.",
+        f"Objective: improve the paper for {venue} by resolving the verified concerns below.",
         "",
         "## How to use this plan",
         "",
-        "Work from P0 to P2 and tick a box when you believe the stated action is complete. A checked box is an author progress marker, not reviewer verification: a later review must compare the revision with the **Done when** condition.",
+        "Work from P0 to P2. A later review confirms whether each revision resolves the concern by comparing it with the **Done when** condition.",
         "",
         "Unless an item says otherwise, the current design can support the stated repair. Items that need new evidence or claim narrowing say so explicitly.",
-        "",
-        "Report comments remain **Pending** until a later review verifies them. In the optional Review Desk, **Open** means not yet addressed; **Ready for recheck** asks for another review; **Challenged** asks the reviewer to reconsider; and **Deferred** keeps the issue open. Notes are optional. Export `review-actions.json` to carry these actions into the next round.",
         "",
     ]
     labels = {
@@ -234,6 +262,16 @@ def render(review_dir: Path) -> str:
         "P2": "P2 — copyediting and optional polish",
     }
     ordered = dependency_order(rows)
+    display_order = [
+        row
+        for priority in ("P0", "P1", "P2")
+        for row in ordered
+        if bucket(row) == priority
+    ]
+    visible_numbers = {
+        str(row.get("id")): index
+        for index, row in enumerate(display_order, start=1)
+    }
     bucket_priority = {"P0": 0, "P1": 1, "P2": 2}
     by_id = {row.get("id"): row for row in rows}
     for row in rows:
@@ -242,12 +280,14 @@ def render(review_dir: Path) -> str:
                 raise ValueError(
                     f"{row.get('id')} depends on lower-priority {dependency}; promote the prerequisite or revise the dependency"
                 )
+    visible_index = 0
     for key in ("P0", "P1", "P2"):
         selected = [row for row in ordered if bucket(row) == key]
         if not selected:
             continue
         lines.extend([f"## {labels[key]}", ""])
         for row in selected:
+            visible_index += 1
             fix = row.get("fix", {})
             dependencies = fix.get("dependencies") or []
             finding_id = str(row.get("id"))
@@ -255,7 +295,8 @@ def render(review_dir: Path) -> str:
             payoff = without_self_reference(fix.get("publishability"), finding_id)
             closure = without_self_reference(fix.get("resolved_when"), finding_id)
             item_lines = [
-                f"### {finding_id}: {row.get('title') or row.get('issue')}",
+                f"### Comment {visible_index}: {row.get('title') or row.get('issue')}",
+                f"<!-- finding_id: {finding_id} -->",
                 "",
                 f"- **Severity:** {row.get('severity')}",
                 f"- [ ] **Action:** {action}",
@@ -266,7 +307,16 @@ def render(review_dir: Path) -> str:
                 item_lines.append(f"- **Feasibility:** {feasibility_text(fix)}")
             item_lines.extend([
                 f"- **Effort:** {fix.get('effort')}",
-                f"- **Dependencies:** {', '.join(dependencies) if dependencies else 'None'}",
+                "- **Dependencies:** "
+                + (
+                    "; ".join(
+                        f"Comment {visible_numbers[str(dependency)]}: "
+                        f"{by_id[dependency].get('title') or by_id[dependency].get('issue')}"
+                        for dependency in dependencies
+                    )
+                    if dependencies
+                    else "None"
+                ),
                 "",
             ])
             lines.extend(item_lines)

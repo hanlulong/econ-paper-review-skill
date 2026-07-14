@@ -8,6 +8,7 @@ import {
   markdownHeadingSlug,
   resolveReviewDocumentLink,
   resolveReviewDocumentHref,
+  safeExternalReviewDocumentHref,
   sortReviewDocuments,
   validateReviewDocumentManifest,
 } from "../lib/review-documents.ts";
@@ -18,8 +19,12 @@ test("validates arbitrary review documents and rejects ambiguous manifests", asy
   const fixtureManifest = await readFile(new URL("review-manifest.json", FIXTURE), "utf8");
   const parsed = validateReviewDocumentManifest(fixtureManifest);
   assert.equal(parsed.review_id, "synthetic-valid-001");
-  assert.equal(parsed.documents.length, 13);
-  assert.equal(parsed.documents[0].path, "README.md");
+  assert.deepEqual(parsed.documents.map((document) => document.path), [
+    "README.md",
+    "report.md",
+    "editing-comments.md",
+    "fix-plan.md",
+  ]);
 
   const arbitrary = validateReviewDocumentManifest({
     schema_version: "0.1",
@@ -42,7 +47,7 @@ test("validates arbitrary review documents and rejects ambiguous manifests", asy
   }
 });
 
-test("rejects traversal, URLs, platform separators, and non-Markdown paths", () => {
+test("rejects traversal, URLs, platform aliases, and non-Markdown paths", () => {
   for (const path of [
     "report.md",
     "reports/custom-analysis.md",
@@ -61,7 +66,30 @@ test("rejects traversal, URLs, platform separators, and non-Markdown paths", () 
     "reports/report.md?download=1",
     "reports/report.txt",
     " reports/report.md",
+    "audit./report.md",
+    "e\u0301vidence/report.md",
+    "audit/bad\u0000name.md",
+    "audit/CON.md",
   ]) assert.equal(isSafeReviewDocumentPath(path), false, path);
+});
+
+test("rejects document paths that collide on common case-insensitive filesystems", () => {
+  assert.throws(() => validateReviewDocumentManifest({
+    schema_version: "0.1",
+    review_id: "review-001",
+    documents: [
+      { id: "mechanism-note", title: "Mechanism note", group: "reports", path: "reports/mechanism-note.md", order: 70 },
+      { id: "mechanism-copy", title: "Mechanism copy", group: "reports", path: "Reports/mechanism-note.md", order: 71 },
+    ],
+  }), /case-unambiguous/);
+});
+
+test("allows only explicit HTTP(S) links outside declared review documents", () => {
+  assert.equal(safeExternalReviewDocumentHref("https://example.test/paper?q=1"), "https://example.test/paper?q=1");
+  assert.equal(safeExternalReviewDocumentHref("HTTP://example.test/paper"), "http://example.test/paper");
+  for (const unsafe of ["/internal", "../outside.md", "javascript:alert(1)", "data:text/html,x", "file:///private/paper.pdf", " https://example.test"]) {
+    assert.equal(safeExternalReviewDocumentHref(unsafe), null);
+  }
 });
 
 test("sorts documents by stable group, explicit order, title, ID, and path", () => {
@@ -121,7 +149,7 @@ test("heading slugs match generated numbered report anchors", () => {
   assert.equal(markdownHeadingSlug(""), "section");
 });
 
-test("discovers manifest documents and conservative legacy report groups", () => {
+test("discovers manifest documents and conservative standard report groups", () => {
   const manifest = {
     schema_version: "0.1",
     review_id: "arbitrary-review",
@@ -144,29 +172,35 @@ test("discovers manifest documents and conservative legacy report groups", () =>
     /references missing files: overview\/editorial\.md/,
   );
 
-  const legacy = discoverReviewDocuments([
+  const discovered = discoverReviewDocuments([
     "notes.md",
     "README.md",
     "report.md",
+    "editing-comments.md",
     "writing-report.md",
     "fix-plan.md",
     "reports/mechanism-note.md",
     "plan/round-two.md",
     "evidence/custom-proof-audit.md",
   ]);
-  assert.deepEqual(legacy.map((document) => document.path), [
+  assert.deepEqual(discovered.map((document) => document.path), [
     "README.md",
     "report.md",
-    "writing-report.md",
+    "editing-comments.md",
     "reports/mechanism-note.md",
     "fix-plan.md",
     "plan/round-two.md",
     "evidence/custom-proof-audit.md",
   ]);
-  assert.equal(legacy.some((document) => document.path === "notes.md"), false);
+  assert.equal(discovered.some((document) => document.path === "notes.md"), false);
+  assert.equal(discovered.some((document) => document.path === "writing-report.md"), false);
+  assert.deepEqual(
+    discovered.find((document) => document.path === "editing-comments.md"),
+    { id: "editing-comments", title: "Editing comments", group: "reports", path: "editing-comments.md", order: 10 },
+  );
 });
 
-test("the synthetic manifest covers every report and audit Markdown file", async () => {
+test("the synthetic manifest exposes every author-facing document and keeps audit working papers internal", async () => {
   const manifest = validateReviewDocumentManifest(await readFile(new URL("review-manifest.json", FIXTURE), "utf8"));
   const entries = await readdir(FIXTURE, { recursive: true, withFileTypes: true });
   const markdown = entries
@@ -177,7 +211,11 @@ test("the synthetic manifest covers every report and audit Markdown file", async
     })
     .filter((path) => path !== "synthetic-paper.md")
     .sort();
-  assert.deepEqual(manifest.documents.map((document) => document.path).sort(), markdown);
+  const authorFacing = markdown.filter((path) => !path.startsWith("evidence/"));
+  const internalAudits = markdown.filter((path) => path.startsWith("evidence/"));
+  assert.deepEqual(manifest.documents.map((document) => document.path).sort(), authorFacing);
+  assert.ok(internalAudits.length > 0, "the fixture must exercise internal audit working papers");
+  assert.equal(manifest.documents.some((document) => document.path.startsWith("evidence/")), false);
 });
 
 test("every synced manifest reference exists and remains inside its synthetic bundle", async () => {
@@ -186,6 +224,9 @@ test("every synced manifest reference exists and remains inside its synthetic bu
     const base = new URL(`../public/reviews/${entry.slug}/`, import.meta.url);
     const manifest = validateReviewDocumentManifest(await readFile(new URL("review-manifest.json", base), "utf8"));
     const run = JSON.parse(await readFile(new URL("run.json", base), "utf8"));
+    const sourceManifest = JSON.parse(await readFile(new URL("evidence/source-manifest.json", base), "utf8"));
+    const sourceMarkdown = new Set(sourceManifest.sources.flatMap((source) => [source.path, source.extraction?.path])
+      .filter((path) => typeof path === "string" && /\.md$/i.test(path)));
     assert.equal(manifest.review_id, run.review_id);
     for (const document of manifest.documents) {
       assert.equal(isSafeReviewDocumentPath(document.path), true);
@@ -198,7 +239,7 @@ test("every synced manifest reference exists and remains inside its synthetic bu
         const parent = candidate.parentPath.replace(new URL(base).pathname.replace(/\/$/, ""), "").replace(/^\//, "");
         return parent ? `${parent}/${candidate.name}` : candidate.name;
       })
-      .filter((path) => path !== "manuscript.md")
+      .filter((path) => !sourceMarkdown.has(path) && !path.startsWith("evidence/"))
       .sort();
     assert.deepEqual(
       bundledMarkdown,

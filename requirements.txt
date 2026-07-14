@@ -1,4 +1,1 @@
-jsonschema>=4.18,<5
-pdfplumber>=0.11,<1
-pypdf>=6,<7
-Pillow>=10,<12
+-r econ-review/requirements-core.txt

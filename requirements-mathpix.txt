@@ -1,0 +1,1 @@
+-r econ-review/requirements-mathpix.txt

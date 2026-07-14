@@ -1,80 +1,190 @@
-# Literature Frontier Protocol
+# Literature and Contribution Verification
 
-Use live search for every novelty, contribution, citation-support, duplicate-publication, and venue-positioning judgment, subject to the run's confidentiality policy. Never substitute model memory.
+## Contents
 
-Before any outbound query, record `external_search_policy` as `forbidden`, `deidentified`, or `exact_allowed`. Default confidential or unpublished manuscripts to `deidentified`. Exact titles, distinctive phrases, author identities, manuscript identifiers, and unpublished numerical fingerprints require `exact_allowed` permission. Log the exact outbound queries; when the policy forbids a necessary search, mark the affected judgment bounded.
+- [Operating state](#operating-state)
+- [1. Inventory the claims](#1-inventory-the-claims)
+- [2. Search through complementary routes](#2-search-through-complementary-routes)
+- [3. Screen candidates and resolve versions](#3-screen-candidates-and-resolve-versions)
+- [4. Verify sources and author attributions](#4-verify-sources-and-author-attributions)
+- [5. Compare contributions fairly](#5-compare-contributions-fairly)
+- [6. Decide whether a missing paper matters](#6-decide-whether-a-missing-paper-matters)
+- [7. Stop only at documented closure](#7-stop-only-at-documented-closure)
+- [8. Write constructive findings](#8-write-constructive-findings)
 
-## 1. Define the search object
+In a full review, literature and contribution verification is a core stage whenever a confidentiality-safe search is authorized. It covers the manuscript's material novelty, contribution, priority, attribution, and load-bearing citation claims. If permission, search systems, or source access prevents that work, mark the affected claim `bounded`; do not replace live evidence with model memory. A quick review may narrow the claim set to the central contribution, but it must state that boundary.
 
-Extract:
+Before any outbound query, record `search_confidentiality` as `forbidden`, `deidentified`, or `exact_allowed`. Default confidential or unpublished manuscripts to `deidentified`. Exact titles, distinctive phrases, author identities, manuscript identifiers, and unpublished numerical fingerprints require `exact_allowed` permission. Log the literal outbound query, date, system, disclosure class, and retained result IDs. Under `forbidden`, execute no query. When deidentification makes a necessary search uninformative, bound the judgment rather than disclose the manuscript.
 
-- economic question and mechanism;
-- outcome, treatment or shock, setting, population, and period;
-- design, model class, data asset, or theorem;
-- claimed contributions and every “first,” “novel,” “unexplored,” or frontier claim;
-- three to six distinctive phrases for title and duplicate searches.
+## Operating state
 
-## 2. Search in layers
+Current full reviews record the frontier in `external-sources.json` schema v0.4 as:
 
-Search several query families rather than one long query:
+- `complete`: every material claim is mapped to adequate search routes; every plausibly close result has been screened; work versions and chronology are resolved as far as the evidence permits; load-bearing comparisons and attributions are source-verified; and the stopping rule below is satisfied;
+- `bounded`: search was attempted or required, but permission, systems, metadata, chronology, or source access prevents a defensible conclusion; or
+- `not_assessed`: literature verification was outside the authorized scope and no search was attempted.
 
-1. Exact question and closest mechanism.
-2. Same design or model applied to the same outcome.
-3. Same data or institutional setting.
-4. Recent surveys, handbook chapters, and methods papers that define the current standard.
-5. Exact title, headline finding plus sample, and title variants for duplicate or prior-version checks only under `exact_allowed`; otherwise use deidentified economic objects and design terms.
+Both `bounded` and `not_assessed` require a structured boundary naming the affected claims, the consequence for the review, and what would complete the check. Use `bounded`, not `not_assessed`, after a partial search. There is no required paper count: one verified antecedent may defeat an absolute priority claim, while a broad contribution may require many screened candidates. A source list without claim coverage, screening decisions, and search closure is not a complete frontier.
 
-Prioritize economics sources and stable records: journal pages, RePEc/IDEAS, NBER, CEPR, SSRN, institutional working-paper pages, Crossref, and author pages. Use Google Scholar for discovery when available, then verify on a stable primary page.
+The v0.4 join is compact but explicit:
 
-Do not mechanically impose a five-year window. Search older foundational work and recent frontier work; adjust the window to the field's publication cycle.
+- `claim_assessments` links each literature-facing statement to `internal_claim_ids`, exact `manuscript_anchor_ids`, query families, sources under assessment when applicable, an assessment, its reason, a fair restatement, and finding links;
+- `query_families` and `claim_search_coverage` record discovery routes and reciprocal claim coverage;
+- `candidate_screening` records every retained plausible result, including exclusion and version-duplicate decisions, plus any exact insertion anchor and positioning change;
+- `work_families` resolves intellectual works across versions and preserves the earliest public date;
+- `literature_comparisons` permits several claim-specific, dimension-specific comparisons to the same source; and
+- `search_closure` records screened and unresolved candidates, citation chaining, current-frontier coverage, the final expansion rounds, and the stopping basis.
 
-## 3. Build the closest-paper table
+Each external source has one stable `EXT-*` ID. Exact proposition-support records attach substantive statements to a saved UTF-8 support span, access scope, and span hash. A matching span proves what was captured, not that an arbitrary interpretation follows from it. Dates must be chronologically possible, and the assessment date must be updated when the query or source ledger changes.
 
-For each genuinely close paper, record the following in canonical `external-sources.json` and render the readable table from it:
+Every internal claim family explicitly records `literature_facing`. Mark it true for every material contribution, novelty, priority, attribution, coverage, citation-support, contradiction, or replication statement, whether or not it is a headline claim. A false value requires a short exclusion basis. A complete or bounded frontier must map every true claim, and each literature assessment must cite an exact anchor belonging to every internal claim it maps.
 
-| Field | Content |
-|---|---|
-| Citation | Verified authors, year, title, outlet/status |
-| Stable link | DOI or primary URL |
-| Access date | ISO date |
-| Question | What it asks |
-| Design/object | Data, variation, model, theorem, or method |
-| Main result | Only what the source supports |
-| Overlap | Exact overlap with the reviewed paper |
-| Difference | Exact incremental value of the reviewed paper |
-| Confidence | High, medium, or low based on access |
+## 1. Inventory the claims
 
-Prefer two accurately characterized papers to a long unverified list.
+Anchor every material literature-facing statement before searching, including:
 
-## 4. Verify claim support
+- priority or superlative claims such as “first,” “novel,” “only,” “unexplored,” or “most comprehensive”;
+- statements of the gap, closest literature, and incremental contribution;
+- claims that another author establishes, assumes, measures, omits, contradicts, or leaves unresolved;
+- claims about accepted methods, standard findings, replication, contradiction, or the state of evidence; and
+- citations carrying a premise, mechanism, calibration, identification choice, or interpretation needed by the paper's own argument.
 
-For every source named in the report:
+For each claim, record its manuscript anchor, exact scope and qualifiers, claim type, contribution dimensions, search routes, candidate sources, verdict, fair restatement, and any resulting finding. Do not collapse several distinct “first” or attribution claims into one generic novelty judgment.
 
-1. Verify existence and metadata.
-2. Open the abstract or full text from a stable source.
-3. State the precise proposition for which the source is being used.
-4. Classify support as `supported`, `partially_supported`, `in_conflict`, or `inconclusive_from_source`.
-5. Avoid inferring absence of a result from an abstract alone.
+Use a common comparison spine that works across designs:
 
-Do not cite a paper merely because it shares keywords. Do not imply priority, replication, contradiction, or retraction without direct evidence.
+- economic question and object;
+- mechanism, model restriction, or causal/descriptive channel;
+- evidence object: data, variation, experiment, theorem, model, measurement, calibration, or prediction task;
+- main result, sign, magnitude, welfare or equilibrium implication, and uncertainty where relevant;
+- population, market, institution, geography, and period;
+- decision, policy, or scientific relevance.
 
-## 5. Assess contribution
+Add only claim-specific dimensions activated by the paper: estimand and identifying variation for causal work; measurement target and validation for descriptive work; assumptions, equilibrium concept, proposition, and proof domain for theory; moments, identification, fit, counterfactual, and solution method for structural work; dynamics, aggregation, policy rule, and transition path for macro work; target, loss function, split, benchmark, calibration, and transportability for prediction or machine learning; and all applicable dimensions for mixed papers. These are comparison prompts, not fixed checklists.
 
-Separate:
+## 2. Search through complementary routes
 
-- question importance;
-- data or measurement contribution;
-- identification or methodological contribution;
-- theoretical or mechanism contribution;
-- quantitative or policy contribution;
-- external-validity contribution.
+Build a claim-to-search matrix and use several routes that fail differently:
 
-Compare the paper to its closest alternatives along the dimension it actually claims. A new setting is not automatically a weak contribution; ask whether it changes the economic answer, mechanism, measurement, or decision relevance.
+1. The manuscript's bibliography and the papers it presents as closest.
+2. Concept, question, mechanism, result, and economic-object searches using synonyms and field vocabulary.
+3. Design, model, estimand, data, institutional setting, or policy-instrument searches activated by the claim.
+4. Surveys, handbook chapters, review articles, and recent field overviews as maps to terminology and foundational work, not as substitutes for primary sources.
+5. Backward references and forward citations from the closest verified candidates.
+6. Recent journal and working-paper searches appropriate to the field's publication lag.
+7. Author, title, phrase, and version searches for chronology or duplicate checks only when the outbound policy permits them.
 
-## 6. Duplicate-publication check
+Search older foundations and the current frontier; do not impose a mechanical date window, journal list, or database quota. For active policies or institutions, distinguish stated or survey outcomes from realized administrative, market, or behavioral outcomes. The latter may change positioning or suggest validation, but does not automatically invalidate a paper about beliefs, communication, measurement, or another mechanism.
 
-Search exact and near-exact titles, distinctive findings with sample/setting, working-paper series, and author variants when confidentiality permits. Distinguish legitimate earlier drafts, conference versions, companion papers, and true duplication. Treat a match as a private concern until verified.
+For broad contribution, novelty, priority, coverage, contradiction, or replication claims, complete coverage includes the manuscript bibliography, a concept or economic-object route, a mechanism/model/design/evidence route, and a current-frontier route through recent working papers, publications, books, or field syntheses as appropriate. For a named attribution or citation-support claim, complete coverage includes the manuscript bibliography and an author/version route. These are claim-level search burdens, not empirical or theoretical design checklists.
 
-## 7. Degrade honestly
+No particular database or API is mandatory. Route searches according to access and field coverage, then verify substantive claims in the primary paper:
 
-If search, metadata, full text, or permission is unavailable, record the limitation in structured source state; do not complete the claim from memory. Set the affected judgment to `bounded` or `not_assessed` and remove unsupported named references from the report.
+- [EconLit](https://www.aeaweb.org/econlit/) for economics-indexed discovery and subject classification;
+- [IDEAS/RePEc search](https://ideas.repec.org/search.html) and the [RePEc Author Service](https://authors.repec.org/about) for economics working papers, publication records, and author disambiguation;
+- [OpenAlex Works](https://developers.openalex.org/api-reference/works/list-works) for broad concept, citation, related-work, and status discovery;
+- [Crossref REST API](https://www.crossref.org/documentation/retrieve-metadata/rest-api/) for DOI metadata, bibliographic matching, relations, and update records; and
+- [Semantic Scholar APIs](https://api.semanticscholar.org/api-docs/) as an optional discovery and citation-chaining route, subject to its current access terms and licence.
+
+Journal pages, DOI landing pages, established working-paper repositories, and author-hosted manuscripts may be the best primary records. Search indexes and metadata services are discovery aids; they do not by themselves support a substantive characterization.
+
+## 3. Screen candidates and resolve versions
+
+Keep a candidate ledger for every plausibly close result, including candidates later excluded. Record:
+
+- source ID, discovery query or route, and claims screened;
+- relation: `closest`, `material_adjacent`, `method_or_data_precedent`, `context`, `not_close`, or `unresolved`;
+- exact overlap and surviving difference on the activated comparison dimensions;
+- manuscript citation status and any characterization problem;
+- temporal relation to a reasonable manuscript cutoff;
+- work-family ID, screening decision, and concrete inclusion or exclusion reason; and
+- next action: compare directly, add or correct a citation, distinguish the contribution, resolve access/version, or take no action.
+
+Screen at the source-claim level. The same paper may be credited fairly for one proposition and mischaracterized for another, so separate rows when citation status, materiality, disposition, or repair differs. A material row must compare the source with every affected claim and cover every activated comparison dimension, including dimensions on which the reviewed paper remains distinct.
+
+Do not hide excluded candidates or prefer papers that make the manuscript look stronger. An exclusion such as “different setting” is insufficient when the setting is not material to the contribution; state why the difference prevents the source from changing the claim.
+
+Group working paper, preprint, conference, accepted, published, corrected, and retracted records that represent the same work. Distinguish a version from a companion paper and from genuinely distinct work. Record the earliest verifiable public date, the version containing the relevant proposition, the preferred current citation, and unresolved chronology. Priority turns on the earliest documented public version that contains the overlapping contribution, not automatically the journal publication year. Use correction or retraction notices when they alter source status. A legitimate earlier draft or companion paper is not duplicate publication.
+
+For each genuinely close work, retain verified citation, stable link, access date, question, evidence/design object, main result, overlap, incremental difference, temporal relation, and confidence. Prefer accurate characterization to a long decorative list.
+
+## 4. Verify sources and author attributions
+
+Use the strongest lawful source available:
+
+1. Full primary paper plus any correction, retraction, appendix, or version needed for the proposition.
+2. An official journal or established working-paper version when full text is lawfully accessible.
+3. Abstract or executive summary for a narrow proposition it actually states.
+4. Authoritative metadata records for authors, title, dates, DOI, version relations, and publication status only.
+5. Surveys or secondary accounts for synthesis, with the underlying primary paper checked when a claim is disputed or load-bearing.
+
+For every source named in an author-facing finding:
+
+1. Verify authors, title, date/version, outlet or status, and stable identifier.
+2. State the exact proposition for which the source is used.
+3. Record access scope and classify support as `supported`, `partial`, `conflict`, or `inconclusive`.
+4. Check the proposition's subject, action, object, direction, magnitude, conditions, population, period, and certainty against the manuscript's wording.
+5. Separate “the source does not establish this” from “the manuscript characterizes the source unfairly.”
+
+Bind ordered authors, title, identifiers, source type, venue, publication and first-public dates, metadata provenance, and record status to an exact hashed metadata support span. The span is a canonical JSON projection of those fields, deep-compared with the structured ledger; one projection may support every field. Work-family membership is a derived relation and requires support from every member record. Generate names in comparisons from the bound source metadata, not free-form citation prose.
+
+Metadata cannot support a substantive result. An abstract can support only a proposition that it states at the same scope; do not infer that a full paper omits a result from its abstract. A critical or major novelty, contradiction, replication, or mischaracterization finding requires the relevant full text and defensible chronology. If access is insufficient, bound the claim.
+
+Capture only the metadata and shortest exact support span needed for auditability, with its provenance and hash. Respect copyright, licences, repository terms, robots rules, and access controls; do not bypass a paywall or redistribute a full copyrighted work merely to preserve evidence.
+
+## 5. Compare contributions fairly
+
+Assess each manuscript claim separately. Possible verdicts are:
+
+- supported within the documented scope;
+- supported if narrowed;
+- literature positioning is incomplete but the contribution survives;
+- materially overstated;
+- contradicted by a verified antecedent; or
+- bounded by search, access, or chronology.
+
+Compare the paper to the closest alternatives on the dimensions it actually claims. A new setting is not automatically weak: ask whether it changes the economic answer, mechanism, measurement, external validity, equilibrium, or decision relevance. Likewise, shared data, method, or setting alone does not establish that two papers make the same contribution.
+
+Audit credit generously but exactly. Preserve the prior paper's qualifiers and distinguish what it establishes, suggests, assumes, measures, or leaves open. Also state the reviewed paper's genuine surviving difference. Never turn overlap on one dimension into a global “not novel” verdict.
+
+One verified antecedent can falsify an absolute “first” claim. No finite search can prove universal priority. The strongest defensible positive conclusion is: “No closer antecedent was found within the documented search scope as of [date].”
+
+## 6. Decide whether a missing paper matters
+
+A not-cited work becomes an author-facing concern only when all of the following hold:
+
+- it is distinct from a version already cited;
+- it predates a reasonable manuscript literature cutoff, or the manuscript has otherwise undertaken to cover that period;
+- verified overlap bears on a central novelty, contribution, credit, method, or interpretation claim; and
+- adding or discussing it would materially change the claim, comparison, or reader's understanding.
+
+Classify a post-cutoff source as a frontier update, not an author omission. Treat genuinely contemporaneous independent work neutrally as parallel work unless evidence supports a priority statement. Material adjacent work may merit a suggested citation; context-only work is optional. Do not manufacture a “missing literature” comment from keyword similarity, prestige, or a desire to lengthen the bibliography.
+
+When citation is warranted, name the precise proposition it supports, the manuscript claim it changes, and the best insertion point. Adding a citation without narrowing or distinguishing an overstated claim is not a sufficient fix.
+
+## 7. Stop only at documented closure
+
+Search may stop without a fixed paper count only when all of these conditions hold:
+
+1. Every material claim in the inventory has completed or explicitly bounded search coverage.
+2. Complementary concept/object and design/model/evidence routes have been run, with backward and forward chaining from salient candidates when available.
+3. Every plausibly close result retained from those routes is screened and every exclusion has a concrete reason.
+4. Work families, public dates, and material chronology are resolved or explicitly bounded.
+5. Current-frontier coverage is complete through claim-appropriate working-paper, publication, book, or synthesis routes, and two successive reasonable expansion rounds—new synonyms, citation chains, surveys, authors, or repositories as appropriate—use distinct logged searches and produce no new `closest` or `material_adjacent` work.
+6. No unresolved candidate could reasonably change a novelty, attribution, or missing-citation verdict.
+
+Record the route coverage, expansion rounds, unresolved items, stopping basis, and assessment date. A paper count, time limit, or one empty query is not closure. If a condition cannot be met, preserve completed work and set the affected claims and frontier state to `bounded`.
+
+## 8. Write constructive findings
+
+Report a literature concern only after the relevant manuscript claim, external proposition, chronology, and overlap have been verified. In the standard detailed-comment structure:
+
+- **Issue** names the claim-specific problem and consequence without a generic instruction to “engage more literature.”
+- **Relevant text** quotes the manuscript claim; add a compact source-supported comparison when needed, clearly labeled as external evidence rather than manuscript text.
+- **Concern** explains the exact overlap, why it affects novelty, credit, or interpretation, and what contribution remains.
+- **Suggestions** gives the minimum proportionate repair: narrow a sentence, correct an attribution, add and place a comparison, explain a difference, or resolve an uncertain version. Separate required corrections from optional context.
+- **Status** appears last.
+
+Use fair temporal language, avoid allegations of intent, and state what evidence would change the assessment. If search found no material problem, preserve the checked-clean claim coverage in canonical evidence; do not invent a comment to display the work.
+
+When one or more verified public comparators materially change the contribution assessment, surface them in the referee report's contribution discussion. Name the work, link the stable public record, state the source contribution and exact overlap, and preserve the reviewed paper's surviving difference. Do not replace this with “deidentified checks found prior work”: deidentification governs outbound queries, not disclosure of verified public results to the author. Keep partial, conflicting, or inconclusive comparisons bounded and out of affirmative prose.

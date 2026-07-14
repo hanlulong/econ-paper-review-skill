@@ -12,6 +12,9 @@
   "properties": {
     "schema_version": {"enum": ["0.1", "0.2", "0.3", "0.4"]},
     "review_id": {"type": "string", "minLength": 1},
+    "paper_title": {"type": "string", "minLength": 1, "maxLength": 240},
+    "assessment_date": {"type": "string", "format": "date"},
+    "prior_round": {"$ref": "#/$defs/prior_round"},
     "status": {"enum": ["draft", "awaiting_checkpoint", "blocked", "verification_failed", "complete"]},
     "mode": {"enum": ["quick", "full"]},
     "target": {
@@ -23,8 +26,18 @@
         "tier": {"enum": ["top-general", "leading-field", "standard-field", "regional-specialized", "unspecified"]}
       }
     },
-    "paper_family": {"enum": ["empirical", "descriptive", "structural-quantitative", "macro", "theory", "hybrid", "unclassified"]},
+    "paper_family": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,79}$",
+      "description": "Coarse descriptive routing metadata only. Source-derived extensions are allowed and never activate or suppress an audit burden."
+    },
     "designs": {"type": "array", "items": {"type": "string"}},
+    "requested_addons": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"enum": ["journal_fit"]},
+      "description": "Author-facing optional analyses explicitly requested for this run. Current full reviews record an empty array when none were requested."
+    },
     "identity_handling": {"enum": ["identity_minimized", "blinded", "not_applied"]},
     "assessment_boundary": {
       "type": "object",
@@ -38,6 +51,7 @@
             "additionalProperties": false,
             "required": ["path", "status", "notes"],
             "properties": {
+              "source_id": {"type": ["string", "null"], "pattern": "^SRC-[0-9]{2,}$"},
               "path": {"type": "string", "minLength": 1},
               "status": {"enum": ["fully_read", "partially_read", "unreadable", "not_opened"]},
               "notes": {"type": "string"},
@@ -57,7 +71,10 @@
       "required": ["live_literature_search", "replication_code"],
       "properties": {
         "live_literature_search": {"type": "boolean"},
-        "replication_code": {"enum": ["not_supplied", "not_permitted", "static_only", "executed"]}
+        "replication_code": {
+          "enum": ["not_supplied", "not_permitted", "static_only", "executed"],
+          "description": "Observed replication-material boundary: not_supplied means no code was supplied; not_permitted means code was supplied but review was not authorized; static_only means supplied code was inspected without execution; executed means at least one authorized execution was performed."
+        }
       }
     },
     "comment_policy": {
@@ -66,7 +83,21 @@
       "required": ["minimum_target", "maximum", "exhaustive"],
       "properties": {
         "minimum_target": {"type": "integer", "minimum": 0},
-        "maximum": {"type": ["integer", "null"], "minimum": 1},
+        "maximum": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Legacy aggregate comment cap. New full reviews set this to null and use the two channel capacities below."
+        },
+        "substance_maximum": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Author-facing Detailed Comments capacity. This is not a discovery stopping rule or target."
+        },
+        "writing_maximum": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Author-facing Detailed Editing Comments capacity. This is not a discovery stopping rule or target."
+        },
         "exhaustive": {"type": "boolean"}
       }
     },
@@ -106,7 +137,7 @@
     },
     "telemetry": {
       "type": "object",
-      "description": "Observed execution metadata for completed v0.2/v0.3 reviews. Do not estimate unavailable timing or token counts.",
+      "description": "Observed execution metadata for completed v0.2+ reviews. Do not estimate unavailable timing or token counts.",
       "additionalProperties": false,
       "required": ["passes", "agents_spawned", "wall_clock_seconds", "input_tokens", "output_tokens"],
       "properties": {
@@ -139,6 +170,38 @@
     }
   },
   "$defs": {
+    "package_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))\\S(?:[^\\r\\n]*\\S)?$"
+    },
+    "prior_snapshot_path": {
+      "allOf": [
+        {"$ref": "#/$defs/package_path"},
+        {"pattern": "^evidence/prior-round/[A-Za-z0-9][A-Za-z0-9._-]*\\.json$"}
+      ]
+    },
+    "prior_round": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prior_findings_path", "review_actions_path", "revision_tasks_path",
+        "agent_response_path"
+      ],
+      "properties": {
+        "prior_findings_path": {"$ref": "#/$defs/prior_snapshot_path"},
+        "review_actions_path": {"$ref": "#/$defs/prior_snapshot_path"},
+        "revision_tasks_path": {"$ref": "#/$defs/prior_snapshot_path"},
+        "agent_response_path": {
+          "oneOf": [
+            {"$ref": "#/$defs/prior_snapshot_path"},
+            {"type": "null"}
+          ]
+        }
+      },
+      "description": "Activates next-round adjudication from immutable prior-round snapshots stored inside this review package."
+    },
     "stage": {"enum": ["pending", "in_progress", "passed", "bounded", "failed", "not_applicable"]},
     "burden": {
       "type": "object",
@@ -146,7 +209,30 @@
       "required": ["id", "object_type", "status", "activation_basis", "triggers", "nonactivation_reason"],
       "properties": {
         "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]{2,79}$"},
-        "object_type": {"enum": ["claim", "design", "measurement", "inference", "theory", "computation", "literature", "writing", "exhibit", "reproducibility", "other"]},
+        "parent_id": {
+          "type": ["string", "null"],
+          "enum": [
+            "logical_validity",
+            "technical_validity",
+            "methodological_validity",
+            "measurement_validity",
+            "identification_validity",
+            "uncertainty_and_inference",
+            "formal_validity",
+            "computational_validity",
+            "validation_and_fit",
+            "counterfactual_validity",
+            "scope_and_transport",
+            "source_support",
+            "reproducibility",
+            "research_integrity_and_governance",
+            "communication_integrity",
+            "exhibit_integrity",
+            null
+          ],
+          "description": "Stable conceptual parent used for cross-paper coverage. Current strict v0.4 rows require a non-null value; null is retained only for legacy-package compatibility."
+        },
+        "object_type": {"enum": ["claim", "design", "measurement", "inference", "theory", "computation", "literature", "writing", "exhibit", "reproducibility", "research_integrity", "other"]},
         "status": {"enum": ["active", "not_applicable"]},
         "activation_basis": {"enum": ["observed", "missing_required", "mixed", "not_applicable"]},
         "triggers": {
@@ -178,8 +264,31 @@
   },
   "allOf": [
     {
+      "if": {
+        "properties": {"schema_version": {"enum": ["0.1", "0.2", "0.3"]}},
+        "required": ["schema_version"]
+      },
+      "then": {"not": {"required": ["prior_round"]}}
+    },
+    {
       "if": {"properties": {"schema_version": {"const": "0.4"}}, "required": ["schema_version"]},
       "then": {"required": ["activated_burdens"]}
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {"const": "0.4"},
+          "mode": {"const": "full"}
+        },
+        "required": ["schema_version", "mode"]
+      },
+      "then": {
+        "properties": {
+          "comment_policy": {
+            "properties": {"maximum": {"type": "null"}}
+          }
+        }
+      }
     }
   ]
 }

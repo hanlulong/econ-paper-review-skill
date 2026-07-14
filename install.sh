@@ -20,12 +20,23 @@ Install econ-review for Claude Code and/or Codex.
 
 Usage:
   ./install.sh [--global | --local [directory]] [--all | --claude | --codex] [--dry-run]
+  ./install.sh --setup [managed-setup options]
 
 Examples:
   ./install.sh
   ./install.sh --global --codex
   ./install.sh --local /path/to/project --all
   ./install.sh --local . --dry-run
+  ./install.sh --setup --global --all --with-review-desk
+
+The default command preserves the lightweight copy-only installer. --setup
+delegates to the cross-platform Python installer, which creates or reuses a
+managed core runtime and checks Poppler. Native Windows users should run:
+  py -3 scripts/install_econ_review.py --global --all --with-review-desk
+
+The explicit --with-review-desk option installs a verified prebuilt viewer and
+loopback-only Python launcher. It does not require Node.js or npm. Omit that
+option to preserve skill-only managed setup.
 
 Local checkouts install directly. Remote installation is disabled unless both
 ECON_REVIEW_ARCHIVE_URL (HTTPS) and ECON_REVIEW_ARCHIVE_SHA256 (64 hex digits)
@@ -42,6 +53,22 @@ fail() {
 require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "$1 is required"
 }
+
+SETUP_REQUESTED=0
+SETUP_ARGS=()
+for argument in "$@"; do
+  if [ "$argument" = "--setup" ]; then
+    SETUP_REQUESTED=1
+  else
+    SETUP_ARGS+=("$argument")
+  fi
+done
+if [ "$SETUP_REQUESTED" -eq 1 ]; then
+  require_command python3
+  [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/scripts/install_econ_review.py" ] \
+    || fail "--setup requires a complete local checkout; run scripts/install_econ_review.py from the repository"
+  exec python3 "$SCRIPT_DIR/scripts/install_econ_review.py" "${SETUP_ARGS[@]}"
+fi
 
 set_mode() {
   [ -z "$MODE_SEEN" ] || [ "$MODE_SEEN" = "$1" ] || fail "choose only one of --global and --local"
@@ -139,11 +166,26 @@ except UnicodeDecodeError as exc:
     raise SystemExit(f"SKILL.md is not UTF-8: {exc}")
 if "\nname: econ-review\n" not in f"\n{text}":
     raise SystemExit("SKILL.md has the wrong name")
+license_path = root / "LICENSE"
+if not license_path.is_file() or license_path.is_symlink():
+    raise SystemExit("source econ-review tree is missing a safe LICENSE")
+try:
+    license_text = license_path.read_text(encoding="utf-8")
+except UnicodeDecodeError as exc:
+    raise SystemExit(f"LICENSE is not UTF-8: {exc}")
+if not license_text.strip():
+    raise SystemExit("LICENSE must not be empty")
 for current, directories, files in os.walk(root, followlinks=False):
     for name in [*directories, *files]:
         path = Path(current, name)
         if path.is_symlink():
             raise SystemExit(f"source tree contains a symbolic link: {path.relative_to(root)}")
+        if (
+            name == ".env"
+            or (name.startswith(".env.") and name != ".env.example")
+            or path.suffix.casefold() in {".key", ".pem", ".p12"}
+        ):
+            raise SystemExit(f"source tree contains a credential-bearing file: {path.relative_to(root)}")
 PY
 }
 
@@ -157,6 +199,7 @@ import json
 import re
 import stat
 import sys
+import unicodedata
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -171,11 +214,34 @@ actual_sha = hashlib.sha256(archive_path.read_bytes()).hexdigest()
 if actual_sha != expected_sha:
     raise SystemExit(f"archive SHA-256 mismatch: expected {expected_sha}, got {actual_sha}")
 
+WINDOWS_RESERVED_BASENAMES = frozenset(
+    {"con", "prn", "aux", "nul", "clock$"}
+    | {f"com{number}" for number in range(1, 10)}
+    | {f"lpt{number}" for number in range(1, 10)}
+)
+
 def safe_name(raw):
-    if not raw or "\\" in raw or raw.startswith("/") or any(ord(character) < 32 or ord(character) == 127 for character in raw):
+    if (
+        not raw
+        or "\\" in raw
+        or ":" in raw
+        or raw.startswith("/")
+        or raw != unicodedata.normalize("NFC", raw)
+        or any(ord(character) < 32 or ord(character) == 127 for character in raw)
+    ):
         raise SystemExit(f"unsafe archive path: {raw!r}")
     path = PurePosixPath(raw)
-    if path.is_absolute() or ".." in path.parts or any(part in {"", "."} for part in path.parts):
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or any(
+            part in {"", "."}
+            or part != part.strip()
+            or part.endswith(".")
+            or part.split(".", 1)[0].casefold() in WINDOWS_RESERVED_BASENAMES
+            for part in path.parts
+        )
+    ):
         raise SystemExit(f"unsafe archive path: {raw!r}")
     if raw != path.as_posix():
         raise SystemExit(f"non-canonical archive path: {raw!r}")
@@ -203,7 +269,7 @@ with zipfile.ZipFile(archive_path) as archive:
         kind = stat.S_IFMT(mode)
         if kind not in {0, stat.S_IFREG}:
             raise SystemExit(f"non-regular archive entry is not allowed: {info.filename}")
-        folded_name = path.as_posix().casefold()
+        folded_name = unicodedata.normalize("NFC", path.as_posix()).casefold()
         if folded_name in folded:
             raise SystemExit(f"duplicate or case-colliding archive entry: {info.filename}")
         folded.add(folded_name)
@@ -221,8 +287,14 @@ with zipfile.ZipFile(archive_path) as archive:
                 raise ValueError(f"duplicate JSON key: {key}")
             value[key] = item
         return value
+    def reject_json_constant(value):
+        raise ValueError(f"non-standard JSON numeric constant: {value}")
     try:
-        manifest = json.loads(archive.read(manifest_name), object_pairs_hook=reject_duplicate_pairs)
+        manifest = json.loads(
+            archive.read(manifest_name),
+            object_pairs_hook=reject_duplicate_pairs,
+            parse_constant=reject_json_constant,
+        )
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise SystemExit(f"invalid release manifest: {exc}")
     if (
@@ -269,6 +341,8 @@ with zipfile.ZipFile(archive_path) as archive:
         raise SystemExit(f"archive entries differ from manifest; unexpected={unexpected}, missing={missing}")
     if "econ-paper-review-skill/econ-review/SKILL.md" not in records:
         raise SystemExit("release manifest does not contain econ-review/SKILL.md")
+    if "econ-paper-review-skill/econ-review/LICENSE" not in records:
+        raise SystemExit("release manifest does not contain econ-review/LICENSE")
     contract_name = "econ-paper-review-skill/scripts/public-release-files.json"
     if contract_name not in records or records[contract_name]["sha256"] != contract_digest:
         raise SystemExit("release manifest file-contract hash does not match its file record")
@@ -308,7 +382,9 @@ find_source() {
     *) fail "remote archive URL must use HTTPS" ;;
   esac
   TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/econ-review.XXXXXX")"
-  curl -fL --retry 2 --connect-timeout 15 "${curl_protocols[@]}" "$archive_url" -o "$TEMP_DIR/release.zip" || fail "failed to download release archive"
+  curl -fL --retry 2 --connect-timeout 15 --max-time 900 --max-filesize 104857600 \
+    "${curl_protocols[@]}" "$archive_url" -o "$TEMP_DIR/release.zip" \
+    || fail "failed to download release archive"
   verify_and_extract_archive "$TEMP_DIR/release.zip" "$archive_sha" "$TEMP_DIR/source" || fail "release archive verification failed"
   validate_skill_tree "$TEMP_DIR/source/econ-review" || fail "extracted skill validation failed"
   SOURCE_DIR="$TEMP_DIR/source/econ-review"
@@ -327,7 +403,23 @@ install_one() {
   parent="$(dirname "$destination")"
   mkdir -p "$parent"
   ACTIVE_STAGE="$(mktemp -d "$parent/.econ-review.stage.XXXXXX")"
-  cp -R "$source_dir/." "$ACTIVE_STAGE/"
+  python3 - "$source_dir" "$ACTIVE_STAGE" <<'PY'
+import shutil
+import sys
+from pathlib import Path
+
+source, stage = map(Path, sys.argv[1:])
+shutil.copytree(
+    source,
+    stage,
+    dirs_exist_ok=True,
+    symlinks=True,
+    ignore=shutil.ignore_patterns(
+        ".DS_Store", "__pycache__", "*.pyc", "*.pyo",
+        ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    ),
+)
+PY
   validate_skill_tree "$ACTIVE_STAGE" || fail "staged package validation failed"
 
   ACTIVE_BACKUP=""
@@ -355,7 +447,6 @@ install_one() {
 
 require_command python3
 require_command mktemp
-require_command cp
 require_command mv
 python3 - <<'PY' || fail "Python 3.10 or newer is required"
 import sys
@@ -376,7 +467,8 @@ if [ "$MODE" = "global" ]; then
   fi
 else
   TARGET="${TARGET:-.}"
-  TARGET="$(CDPATH= cd -- "$TARGET" && pwd)"
+  [ -d "$TARGET" ] || fail "local target directory does not exist: $TARGET"
+  TARGET="$(CDPATH= cd -- "$TARGET" && pwd)" || fail "cannot resolve local target directory: $TARGET"
   if [ "$PLATFORM" = "all" ] || [ "$PLATFORM" = "claude" ]; then
     install_one "$SOURCE_DIR" "$TARGET/.claude/skills/econ-review" "Claude Code (project)"
   fi
@@ -385,4 +477,9 @@ else
   fi
 fi
 
-echo "econ-review installation complete."
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "econ-review dry run complete; no files changed."
+else
+  echo "econ-review installation complete."
+fi
+echo "Restart or reload Codex and Claude Code sessions so they discover the installed skill."
