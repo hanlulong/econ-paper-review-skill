@@ -51,7 +51,10 @@ test("authorized sync stages and validates before replacing published assets", a
   assert.match(source, /exhibitPaths/);
   assert.match(source, /source-manifest\.json/);
   assert.match(source, /computations\.json/);
+  assert.match(source, /analytical-audit\.json/);
+  assert.match(source, /claims\.json/);
   assert.match(source, /finalization\.json/);
+  assert.match(source, /validateReviewPackageWithPython/);
   assert.match(source, /verifyReviewFinalization/);
   assert.match(source, /Object\.keys\(receipt\.artifacts\)\.map/);
   assert.match(source, /validateReviewComputationLinks/);
@@ -60,6 +63,7 @@ test("authorized sync stages and validates before replacing published assets", a
   assert.match(source, /rename\(stageRoot, publicRoot\)/);
   assert.doesNotMatch(source, /rm\(publicRoot/);
   assert.ok(source.indexOf("const prepared = await Promise.all") < source.indexOf("rename(publicRoot, backupRoot)"));
+  assert.ok(source.indexOf("validateReviewPackageWithPython") < source.indexOf("rename(publicRoot, backupRoot)"));
 });
 
 test("test preservation and cleanup cannot leave a copied backup bundle in the build", async () => {

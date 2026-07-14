@@ -83,10 +83,30 @@ def capture_spec() -> dict:
     }
 
 
+def initialize_review(
+    review: Path,
+    *,
+    run_id: str = "capture-test-001",
+    findings_id: str | None = None,
+) -> None:
+    """Create the minimum identity-bearing package artifacts for helper tests."""
+
+    findings_id = run_id if findings_id is None else findings_id
+    (review / "run.json").write_text(
+        json.dumps({"review_id": run_id}) + "\n",
+        encoding="utf-8",
+    )
+    (review / "findings.json").write_text(
+        json.dumps({"review_id": findings_id, "findings": []}) + "\n",
+        encoding="utf-8",
+    )
+
+
 class CaptureExternalSourceTests(unittest.TestCase):
     def test_dry_run_is_non_destructive_and_fragment_is_contract_valid(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             review = Path(temporary)
+            initialize_review(review)
             fragment = MODULE.build_fragment(review, capture_spec())
             snapshot = review / "evidence/external/EXT-01.txt"
             self.assertFalse(snapshot.exists())
@@ -97,6 +117,7 @@ class CaptureExternalSourceTests(unittest.TestCase):
     def test_write_uses_lf_utf8_and_binds_actual_character_spans(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             review = Path(temporary)
+            initialize_review(review)
             fragment = MODULE.write_capture(
                 review,
                 capture_spec(),
@@ -127,7 +148,9 @@ class CaptureExternalSourceTests(unittest.TestCase):
 
     def test_metadata_projection_is_canonical_and_deep_bound(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            fragment = MODULE.build_fragment(Path(temporary), capture_spec())
+            review = Path(temporary)
+            initialize_review(review)
+            fragment = MODULE.build_fragment(review, capture_spec())
             source = fragment["sources"][0]
             metadata_record = source["support_records"][1]
             projection = json.loads(metadata_record["snapshot_excerpt"])
@@ -156,6 +179,7 @@ class CaptureExternalSourceTests(unittest.TestCase):
     def test_existing_destinations_are_refused_without_explicit_replace(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             review = Path(temporary)
+            initialize_review(review)
             spec = capture_spec()
             MODULE.write_capture(review, spec)
             snapshot = review / "evidence/external/EXT-01.txt"
@@ -169,6 +193,7 @@ class CaptureExternalSourceTests(unittest.TestCase):
     def test_sidecar_failure_rolls_back_new_snapshot_and_directories(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             review = Path(temporary)
+            initialize_review(review)
             original_write = MODULE.atomic_write_bytes
             failed = False
 
@@ -200,6 +225,7 @@ class CaptureExternalSourceTests(unittest.TestCase):
     def test_sidecar_failure_restores_explicit_replacements_exactly(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             review = Path(temporary)
+            initialize_review(review)
             external = review / "evidence/external"
             external.mkdir(parents=True)
             snapshot = external / "EXT-01.txt"
@@ -237,6 +263,7 @@ class CaptureExternalSourceTests(unittest.TestCase):
     def test_invalid_source_evidence_fails_before_package_write(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             review = Path(temporary)
+            initialize_review(review)
             spec = capture_spec()
             spec["source"]["snapshot_kind"] = "reviewer_note"
             with self.assertRaisesRegex(ValueError, "source_capture or official_metadata"):
@@ -245,7 +272,9 @@ class CaptureExternalSourceTests(unittest.TestCase):
 
     def test_immediate_contract_validation_rejects_tampered_span(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            fragment = MODULE.build_fragment(Path(temporary), capture_spec())
+            review = Path(temporary)
+            initialize_review(review)
+            fragment = MODULE.build_fragment(review, capture_spec())
             source = fragment["sources"][0]
             raw = MODULE._snapshot_bytes(MODULE._prepare(capture_spec())[2])
             source["support_records"][0]["snapshot_start"] += 1
@@ -259,6 +288,7 @@ class CaptureExternalSourceTests(unittest.TestCase):
     def test_cli_dry_run_prints_utf8_fragment_without_writing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             review = Path(temporary)
+            initialize_review(review)
             spec_path = review / "capture-spec.json"
             spec_path.write_text(
                 json.dumps(capture_spec(), ensure_ascii=False), encoding="utf-8"
@@ -272,6 +302,88 @@ class CaptureExternalSourceTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8"))
             payload = json.loads(result.stdout.decode("utf-8"))
             self.assertEqual(payload["sources"][0]["title"], "A β-Convergence Result")
+            self.assertFalse((review / "evidence").exists())
+
+    def test_review_id_mismatch_is_rejected_before_build_or_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            review = Path(temporary)
+            initialize_review(review, run_id="different-review")
+            with mock.patch.object(MODULE, "_prepare") as prepare:
+                with self.assertRaisesRegex(ValueError, "does not match target review"):
+                    MODULE.build_fragment(review, capture_spec())
+                prepare.assert_not_called()
+            with self.assertRaisesRegex(ValueError, "does not match target review"):
+                MODULE.write_capture(review, capture_spec())
+            self.assertFalse((review / "evidence").exists())
+
+    def test_conflicting_target_review_ids_are_rejected_before_build(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            review = Path(temporary)
+            initialize_review(
+                review,
+                run_id="capture-test-001",
+                findings_id="different-review",
+            )
+            with mock.patch.object(MODULE, "_prepare") as prepare:
+                with self.assertRaisesRegex(
+                    ValueError, "target review identity artifacts conflict"
+                ):
+                    MODULE.build_fragment(review, capture_spec())
+                prepare.assert_not_called()
+            self.assertFalse((review / "evidence").exists())
+
+    def test_empty_target_requires_explicit_standalone_fragment_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            review = Path(temporary)
+            with self.assertRaisesRegex(ValueError, "no run.json or findings.json"):
+                MODULE.build_fragment(review, capture_spec())
+            fragment = MODULE.build_fragment(
+                review,
+                capture_spec(),
+                standalone=True,
+            )
+            self.assertEqual(fragment["review_id"], "capture-test-001")
+            self.assertFalse((review / "evidence").exists())
+
+    def test_cli_standalone_dry_run_is_explicit_and_cannot_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            review = Path(temporary)
+            spec_path = review / "capture-spec.json"
+            spec_path.write_text(
+                json.dumps(capture_spec(), ensure_ascii=False), encoding="utf-8"
+            )
+            dry_run = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    str(review),
+                    str(spec_path),
+                    "--standalone",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertEqual(dry_run.returncode, 0, dry_run.stderr.decode("utf-8"))
+            self.assertFalse((review / "evidence").exists())
+            write = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    str(review),
+                    str(spec_path),
+                    "--standalone",
+                    "--write",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            self.assertNotEqual(write.returncode, 0)
+            self.assertIn(
+                "--standalone cannot be combined with --write",
+                write.stderr.decode("utf-8"),
+            )
             self.assertFalse((review / "evidence").exists())
 
 

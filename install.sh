@@ -32,7 +32,7 @@ Examples:
 The default command preserves the lightweight copy-only installer. --setup
 delegates to the cross-platform Python installer, which creates or reuses a
 managed core runtime and checks Poppler. Native Windows users should run:
-  py -3 scripts/install_econ_review.py --global --all --with-review-desk
+  python scripts\install_econ_review.py --global --all --with-review-desk
 
 The explicit --with-review-desk option installs a verified prebuilt viewer and
 loopback-only Python launcher. It does not require Node.js or npm. Omit that

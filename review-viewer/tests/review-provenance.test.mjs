@@ -54,6 +54,35 @@ const sourceManifest = {
   anchors: [{ id: "ANC-01" }, { id: "ANC-02" }],
 };
 
+function computationAuditLedgers({ analyticalComputation = null, magnitudeComputation = null } = {}) {
+  return {
+    analyticalAudit: {
+      review_id: "synthetic-valid-001",
+      domains: [{
+        entries: [{
+          id: "ANA-ALGEBRA-01",
+          evidence_refs: analyticalComputation ? [{ kind: "computation", id: analyticalComputation }] : [],
+          evidence_locators: analyticalComputation
+            ? [{ record_ref: { kind: "computation", id: analyticalComputation } }]
+            : [],
+        }],
+      }],
+    },
+    claimsAudit: {
+      review_id: "synthetic-valid-001",
+      argument_audit: {
+        magnitude_assessments: {
+          entries: [{
+            id: "MAG-01",
+            computation_id: magnitudeComputation,
+            evidence_refs: magnitudeComputation ? [{ kind: "computation", id: magnitudeComputation }] : [],
+          }],
+        },
+      },
+    },
+  };
+}
+
 test("validates and indexes canonical computation provenance without opening its artifact", () => {
   const checked = validateReviewComputations({
     schema_version: "0.1",
@@ -74,6 +103,8 @@ test("rejects duplicate computation IDs and malformed provenance metadata", () =
   assert.throws(() => validateReviewComputations({ ...base, computations: [{ ...computation, input_anchor_ids: ["ANC-01", "ANC-01"] }] }), /duplicate input anchors/);
   assert.throws(() => validateReviewComputations({ ...base, computations: [{ ...computation, artifact_sha256: "not-a-hash" }] }), /invalid provenance/);
   assert.throws(() => validateReviewComputations({ ...base, computations: [{ ...computation, artifact_path: "../result.json" }] }), /invalid provenance/);
+  assert.throws(() => validateReviewComputations({ ...base, unexpected: true }), /required review_id and computations array/);
+  assert.throws(() => validateReviewComputations({ ...base, computations: [{ ...computation, unexpected: true }] }), /invalid or duplicate computation/);
 });
 
 test("accepts schema 0.2 finding-linked and audit-only computations", () => {
@@ -85,7 +116,13 @@ test("accepts schema 0.2 finding-linked and audit-only computations", () => {
       audit_links: [{ kind: "analytical_entry", id: "ANA-ALGEBRA-01" }],
     }],
   });
-  assert.doesNotThrow(() => validateReviewComputationLinks(linkedLedger, findingLinked, sourceManifest));
+  assert.doesNotThrow(() => validateReviewComputationLinks(
+    linkedLedger,
+    findingLinked,
+    sourceManifest,
+    computationAuditLedgers({ analyticalComputation: "CMP-01" }),
+    "full",
+  ));
 
   const auditOnly = validateReviewComputations({
     schema_version: "0.2",
@@ -100,6 +137,49 @@ test("accepts schema 0.2 finding-linked and audit-only computations", () => {
     { ...linkedLedger, findings: [{ id: "LOGIC-01", evidence: [] }] },
     auditOnly,
     sourceManifest,
+    computationAuditLedgers({ magnitudeComputation: "CMP-01" }),
+    "full",
+  ));
+
+  assert.throws(() => validateReviewComputationLinks(
+    { ...linkedLedger, findings: [{ id: "LOGIC-01", evidence: [] }] },
+    auditOnly,
+    sourceManifest,
+    null,
+    "full",
+  ), /complete Python-validated review package/);
+  assert.throws(() => validateReviewComputationLinks(
+    { ...linkedLedger, findings: [{ id: "LOGIC-01", evidence: [] }] },
+    auditOnly,
+    sourceManifest,
+    computationAuditLedgers(),
+    "full",
+  ), /not reciprocal/);
+  assert.throws(() => validateReviewComputationLinks(
+    { ...linkedLedger, findings: [{ id: "LOGIC-01", evidence: [] }] },
+    auditOnly,
+    sourceManifest,
+    {
+      ...computationAuditLedgers({ magnitudeComputation: "CMP-01" }),
+      claimsAudit: {
+        ...computationAuditLedgers({ magnitudeComputation: "CMP-01" }).claimsAudit,
+        review_id: "another-review",
+      },
+    },
+    "full",
+  ), /different review ID/);
+
+  const quickFindingLinked = validateReviewComputations({
+    schema_version: "0.2",
+    review_id: "synthetic-valid-001",
+    computations: [{ ...computation, audit_links: [] }],
+  });
+  assert.doesNotThrow(() => validateReviewComputationLinks(
+    linkedLedger,
+    quickFindingLinked,
+    sourceManifest,
+    null,
+    "quick",
   ));
 
   assert.throws(() => validateReviewComputations({

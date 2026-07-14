@@ -166,11 +166,13 @@ Use `scripts/capture_external_source.py` to build a source record instead of cal
 }
 ```
 
-Run the command without write flags first. It stages LF-only UTF-8 bytes, re-reads the staged file, derives character spans and hashes from those bytes, validates the source definition plus trust-spine support joins, prints the v0.4 fragment, and changes no package file:
+Run the command without write flags first. The helper requires `spec.review_id` to match the target review identity in `run.json` and/or `findings.json`; if both files exist, their identities must also agree. It then stages LF-only UTF-8 bytes, re-reads the staged file, derives character spans and hashes from those bytes, validates the source definition plus trust-spine support joins, prints the v0.4 fragment, and changes no package file:
 
 ```text
 REVIEW_PYTHON scripts/capture_external_source.py REVIEW_DIR capture-spec.json
 ```
+
+For deliberate fragment construction before a review directory exists, use `--standalone`. This exception is explicit, dry-run only, and cannot be combined with `--write`; once a target review exists, its identity is still enforced.
 
 After inspecting the fragment, add `--write` to atomically create the snapshot. Add `--fragment-path evidence/external/EXT-01.source.json` to retain the validated fragment as a sidecar. Existing destinations are refused unless `--replace-existing` is also explicit. The helper does not silently merge `external-sources.json`; merge the emitted source deliberately, complete work-family/frontier links, and run full package validation.
 
