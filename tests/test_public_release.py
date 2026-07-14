@@ -24,6 +24,10 @@ SPEC.loader.exec_module(MODULE)
 
 
 class PublicReleaseTests(unittest.TestCase):
+    WINDOWS_MANAGED_INSTALL = (
+        r"python scripts\install_econ_review.py --global --all --with-review-desk"
+    )
+
     def test_exact_contract_excludes_private_and_generated_material(self) -> None:
         paths = {path.as_posix() for path in MODULE.public_files(ROOT)}
         self.assertIn("CONTRIBUTING.md", paths)
@@ -33,17 +37,35 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertIn("econ-review/SKILL.md", paths)
         self.assertIn("review-viewer/LICENSE", paths)
         self.assertIn("review-viewer/package.json", paths)
+        self.assertIn("review-viewer/public/favicon.svg", paths)
         self.assertIn("review-viewer/release/review-desk.zip", paths)
         self.assertIn("review-viewer/scripts/launch_review_desk.py", paths)
         self.assertIn("docs/images/review-desk.gif", paths)
+        self.assertIn("docs/images/review-desk-flow.png", paths)
         self.assertIn("docs/sample-review/demo-paper.pdf", paths)
         self.assertIn("docs/sample-review/paper-review.pdf", paths)
         self.assertIn("tests/fixtures/valid-review/report.md", paths)
         self.assertIn("scripts/public-release-files.json", paths)
         for private in ("DESIGN.md", "HANDOFF.md", "PROJECT-REVIEW.md", "research", "test_paper2"):
             self.assertFalse(any(path == private or path.startswith(private + "/") for path in paths))
-        self.assertFalse(any("node_modules" in path or "/dist/" in path or "/public/" in path for path in paths))
+        self.assertFalse(any("node_modules" in path or "/dist/" in path for path in paths))
+        self.assertEqual(
+            {path for path in paths if "/public/" in path},
+            {"review-viewer/public/favicon.svg"},
+        )
         self.assertFalse(any(path.startswith("benchmarks/reviews/") for path in paths))
+
+    def test_native_windows_install_command_is_consistent(self) -> None:
+        for relative in ("README.md", "docs/INSTALL.md", "install.sh"):
+            with self.subTest(path=relative):
+                content = (ROOT / relative).read_text(encoding="utf-8")
+                self.assertIn(self.WINDOWS_MANAGED_INSTALL, content)
+                self.assertNotIn("py -3 scripts", content)
+
+    def test_local_evaluation_handoffs_are_root_ignored(self) -> None:
+        patterns = set((ROOT / ".gitignore").read_text(encoding="utf-8").splitlines())
+        self.assertIn("/RUN_ISSUES.md", patterns)
+        self.assertIn("/WINDOWS_OPTIMIZATION_HANDOFF.md", patterns)
 
     def test_unknown_nested_file_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

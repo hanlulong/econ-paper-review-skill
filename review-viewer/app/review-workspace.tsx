@@ -973,9 +973,11 @@ export function ReviewWorkspace() {
       optionalManifest(`${entry.base_path}/review-manifest.json`),
       optionalJson(`${entry.base_path}/evidence/source-manifest.json`),
       optionalJson(`${entry.base_path}/evidence/computations.json`),
+      optionalJson(`${entry.base_path}/evidence/analytical-audit.json`),
+      optionalJson(`${entry.base_path}/evidence/claims.json`),
       optionalText(`${entry.base_path}/finalization.json`, MAX_JSON_BYTES),
     ])
-      .then(async ([nextLedgerText, nextRun, nextSynthesis, nextTables, nextFigures, manifestValue, sourceManifestValue, computationsValue, finalizationText]) => {
+      .then(async ([nextLedgerText, nextRun, nextSynthesis, nextTables, nextFigures, manifestValue, sourceManifestValue, computationsValue, analyticalAuditValue, claimsAuditValue, finalizationText]) => {
         if (cancelled || sequence !== localLoadSequence.current) return;
         const checkedLedger = validateLedger(parseJsonFile("findings.json", nextLedgerText as string));
         const nextLedgerFingerprint = sha256Hex(nextLedgerText as string);
@@ -986,7 +988,10 @@ export function ReviewWorkspace() {
         const checkedTables = validateExhibitManifest(nextTables, "tables", checkedLedger.review_id) as ExhibitManifest | null;
         const checkedFigures = validateExhibitManifest(nextFigures, "figures", checkedLedger.review_id) as ExhibitManifest | null;
         validateLedgerAnchors(checkedLedger, checkedSourceManifest);
-        validateReviewComputationLinks(checkedLedger, checkedComputations, checkedSourceManifest);
+        validateReviewComputationLinks(checkedLedger, checkedComputations, checkedSourceManifest, {
+          analyticalAudit: analyticalAuditValue,
+          claimsAudit: claimsAuditValue,
+        }, checkedRun.mode || null);
         if (checkedLedger.review_id !== checkedRun.review_id) throw new Error("Bundled review IDs do not match");
         if (checkedLedger.schema_version !== checkedRun.schema_version) throw new Error("Bundled review schema versions do not match");
         if (checkedSynthesis && checkedSynthesis.review_id !== checkedLedger.review_id) throw new Error("Bundled synthesis ID does not match findings.json");
@@ -1757,9 +1762,11 @@ export function ReviewWorkspace() {
       const manifestFile = canonicalFile("review-manifest.json");
       const sourceManifestFile = canonicalFile("evidence/source-manifest.json", false, ["source-manifest.json"]);
       const computationsFile = canonicalFile("evidence/computations.json", false, ["computations.json"]);
+      const analyticalAuditFile = canonicalFile("evidence/analytical-audit.json", false, ["analytical-audit.json"]);
+      const claimsAuditFile = canonicalFile("evidence/claims.json", false, ["claims.json"]);
       const tablesFile = canonicalFile("evidence/tables.json", false, ["tables.json"]);
       const figuresFile = canonicalFile("evidence/figures.json", false, ["figures.json"]);
-      const [findingsText, runText, synthesisText, finalizationText, manifestText, sourceManifestText, computationsText, tablesText, figuresText] = await Promise.all([
+      const [findingsText, runText, synthesisText, finalizationText, manifestText, sourceManifestText, computationsText, analyticalAuditText, claimsAuditText, tablesText, figuresText] = await Promise.all([
         readText(findingsFile, MAX_JSON_BYTES),
         readText(runFile, MAX_JSON_BYTES),
         synthesisFile ? readText(synthesisFile, MAX_JSON_BYTES) : Promise.resolve(null),
@@ -1767,6 +1774,8 @@ export function ReviewWorkspace() {
         manifestFile ? readText(manifestFile, MAX_JSON_BYTES) : Promise.resolve(null),
         sourceManifestFile ? readText(sourceManifestFile, MAX_JSON_BYTES) : Promise.resolve(null),
         computationsFile ? readText(computationsFile, MAX_JSON_BYTES) : Promise.resolve(null),
+        analyticalAuditFile ? readText(analyticalAuditFile, MAX_JSON_BYTES) : Promise.resolve(null),
+        claimsAuditFile ? readText(claimsAuditFile, MAX_JSON_BYTES) : Promise.resolve(null),
         tablesFile ? readText(tablesFile, MAX_JSON_BYTES) : Promise.resolve(null),
         figuresFile ? readText(figuresFile, MAX_JSON_BYTES) : Promise.resolve(null),
       ]);
@@ -1796,8 +1805,13 @@ export function ReviewWorkspace() {
       const nextManifest = manifestText === null ? undefined : validateReviewDocumentManifest(manifestText);
       const nextSourceManifest = sourceManifestText === null ? null : validateSourceManifest(parseJsonFile("source-manifest.json", sourceManifestText));
       const nextComputations = computationsText === null ? null : validateReviewComputations(parseJsonFile("computations.json", computationsText));
+      const nextAnalyticalAudit = analyticalAuditText === null ? null : parseJsonFile("analytical-audit.json", analyticalAuditText);
+      const nextClaimsAudit = claimsAuditText === null ? null : parseJsonFile("claims.json", claimsAuditText);
       validateLedgerAnchors(nextLedger, nextSourceManifest);
-      validateReviewComputationLinks(nextLedger, nextComputations, nextSourceManifest);
+      validateReviewComputationLinks(nextLedger, nextComputations, nextSourceManifest, {
+        analyticalAudit: nextAnalyticalAudit,
+        claimsAudit: nextClaimsAudit,
+      }, nextRun.mode || null);
       const nextTables = validateExhibitManifest(
         tablesText === null ? null : parseJsonFile("tables.json", tablesText),
         "tables",

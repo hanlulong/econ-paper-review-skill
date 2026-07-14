@@ -308,9 +308,57 @@ def _active_finding_ids(review_dir: Path) -> set[str]:
     }
 
 
-def build_fragment(review_dir: Path, spec: dict[str, Any]) -> dict[str, Any]:
+def _bind_target_review(
+    review_dir: Path,
+    spec: dict[str, Any],
+    *,
+    standalone: bool,
+) -> str:
+    spec_review_id = spec.get("review_id")
+    if not isinstance(spec_review_id, str) or not spec_review_id:
+        raise ValueError("spec.review_id must be a nonempty string")
+    observed: dict[str, str] = {}
+    for relative in ("run.json", "findings.json"):
+        try:
+            raw = safe_read_bytes(review_dir, relative)
+        except FileNotFoundError:
+            continue
+        payload = strict_json_loads(raw)
+        if not isinstance(payload, dict):
+            raise ValueError(f"{relative} must contain a JSON object")
+        review_id = payload.get("review_id")
+        if not isinstance(review_id, str) or not review_id:
+            raise ValueError(f"{relative}.review_id must be a nonempty string")
+        observed[relative] = review_id
+    if not observed:
+        if standalone:
+            return spec_review_id
+        raise ValueError(
+            "target review has no run.json or findings.json identity; "
+            "use standalone mode only for non-writing fragment construction"
+        )
+    distinct = set(observed.values())
+    if len(distinct) != 1:
+        detail = ", ".join(f"{path}={value}" for path, value in observed.items())
+        raise ValueError(f"target review identity artifacts conflict: {detail}")
+    target_review_id = next(iter(distinct))
+    if target_review_id != spec_review_id:
+        raise ValueError(
+            f"spec.review_id {spec_review_id!r} does not match target review "
+            f"{target_review_id!r}"
+        )
+    return spec_review_id
+
+
+def build_fragment(
+    review_dir: Path,
+    spec: dict[str, Any],
+    *,
+    standalone: bool = False,
+) -> dict[str, Any]:
     """Stage a snapshot, then bind and validate the bytes actually written."""
 
+    _bind_target_review(review_dir, spec, standalone=standalone)
     expected = _snapshot_bytes(_prepare(spec)[2])
     with tempfile.TemporaryDirectory(prefix="econ-review-external-") as temporary:
         stage = Path(temporary)
@@ -504,11 +552,18 @@ def main() -> int:
         action="store_true",
         help="allow explicit atomic replacement of existing snapshot/fragment files",
     )
+    parser.add_argument(
+        "--standalone",
+        action="store_true",
+        help="allow dry-run fragment construction when no target review identity exists",
+    )
     args = parser.parse_args()
     if args.fragment_path and not args.write:
         parser.error("--fragment-path requires --write")
     if args.replace_existing and not args.write:
         parser.error("--replace-existing requires --write")
+    if args.standalone and args.write:
+        parser.error("--standalone cannot be combined with --write")
     try:
         spec = load_spec(args.spec)
         fragment = (
@@ -519,7 +574,7 @@ def main() -> int:
                 replace_existing=args.replace_existing,
             )
             if args.write
-            else build_fragment(args.review_dir, spec)
+            else build_fragment(args.review_dir, spec, standalone=args.standalone)
         )
     except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
         parser.exit(1, f"external source capture failed: {exc}\n")

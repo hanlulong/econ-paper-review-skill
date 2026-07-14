@@ -16,6 +16,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC_ROOT = ROOT / "static-dist"
+FAVICON_SOURCE = ROOT / "public" / "favicon.svg"
+FAVICON = "app/favicon.svg"
 LAUNCHER = ROOT / "scripts" / "launch_review_desk.py"
 INSTALLED_LAUNCHER = ROOT / "scripts" / "launch_installed_review_desk.py"
 OUTPUT = ROOT / "release" / "review-desk.zip"
@@ -57,6 +59,8 @@ def source_files() -> list[tuple[str, Path]]:
         raise ValueError("static-dist is missing; run the static Vite build first")
     if not FIRST_PARTY_LICENSE_SOURCE.is_file() or FIRST_PARTY_LICENSE_SOURCE.is_symlink():
         raise ValueError("Review Desk first-party LICENSE is missing or unsafe")
+    if not FAVICON_SOURCE.is_file() or FAVICON_SOURCE.is_symlink():
+        raise ValueError("Review Desk favicon is missing or unsafe")
     try:
         license_text = FIRST_PARTY_LICENSE_SOURCE.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
@@ -68,6 +72,7 @@ def source_files() -> list[tuple[str, Path]]:
             raise ValueError(f"a Review Desk launcher is missing or unsafe: {launcher.name}")
     files: list[tuple[str, Path]] = [
         (FIRST_PARTY_LICENSE, FIRST_PARTY_LICENSE_SOURCE),
+        (FAVICON, FAVICON_SOURCE),
         ("launch_installed_review_desk.py", INSTALLED_LAUNCHER),
         ("launch_review_desk.py", LAUNCHER),
     ]
@@ -342,6 +347,7 @@ def verify_bundle_bytes(data: bytes) -> None:
         if set(names) != expected:
             raise ValueError("release bundle entries differ from its manifest")
         if not {
+            FAVICON,
             "app/index.html",
             "launch_installed_review_desk.py",
             "launch_review_desk.py",

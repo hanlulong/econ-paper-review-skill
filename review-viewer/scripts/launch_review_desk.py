@@ -22,6 +22,7 @@ from pathlib import Path, PurePosixPath
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 48127
+MANIFEST_DIGEST_HEADER = "X-Review-Desk-Manifest-SHA256"
 SECURITY_HEADERS = {
     "Content-Security-Policy": "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self' data:; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'",
     "Permissions-Policy": "camera=(), geolocation=(), microphone=()",
@@ -146,6 +147,10 @@ class ReviewDeskHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(404)
             return
         data = path.read_bytes()
+        expected_size, expected_digest = self.server.inventory[relative]  # type: ignore[attr-defined]
+        if len(data) != expected_size or hashlib.sha256(data).hexdigest() != expected_digest:
+            self.send_error(500, "Review Desk asset failed integrity verification")
+            return
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         if path.suffix == ".js":
             content_type = "text/javascript"
@@ -161,6 +166,9 @@ class ReviewDeskHandler(http.server.BaseHTTPRequestHandler):
     def _security_headers(self) -> None:
         for name, value in SECURITY_HEADERS.items():
             self.send_header(name, value)
+        manifest_digest = getattr(self.server, "manifest_digest", "")
+        if manifest_digest:
+            self.send_header(MANIFEST_DIGEST_HEADER, manifest_digest)
 
     def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
         short, long = self.responses.get(code, ("Error", "Request failed"))
@@ -187,8 +195,9 @@ class LoopbackServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 def verified_server_is_running(
     port: int,
     inventory: dict[str, tuple[int, str]],
+    manifest_digest: str,
 ) -> bool:
-    """Return true only when the occupied port serves this Review Desk shape."""
+    """Return true only when the occupied port serves this exact Review Desk release."""
 
     expected_size, expected_digest = inventory.get("index.html", (-1, ""))
     connection = http.client.HTTPConnection(HOST, port, timeout=1.5)
@@ -201,6 +210,7 @@ def verified_server_is_running(
             and response.getheader("Content-Length") == str(expected_size)
             and len(body) == expected_size
             and hashlib.sha256(body).hexdigest() == expected_digest
+            and response.getheader(MANIFEST_DIGEST_HEADER) == manifest_digest
             and response.getheader("X-Content-Type-Options") == "nosniff"
             and response.getheader("Cross-Origin-Opener-Policy") == "same-origin"
             and (response.getheader("Server") or "").startswith("ReviewDesk/1")
@@ -282,7 +292,7 @@ def main() -> int:
         server = LoopbackServer((HOST, args.port), ReviewDeskHandler)
     except OSError as exc:
         url = f"http://{HOST}:{args.port}/"
-        if verified_server_is_running(args.port, inventory):
+        if verified_server_is_running(args.port, inventory, root.name):
             print(f"Review Desk is already verified and running at {url}")
             if not args.no_browser:
                 open_review_desk(url)
@@ -295,6 +305,7 @@ def main() -> int:
         ) from exc
     server.inventory = inventory  # type: ignore[attr-defined]
     server.app_root = app_root  # type: ignore[attr-defined]
+    server.manifest_digest = root.name  # type: ignore[attr-defined]
     server.quiet = args.quiet  # type: ignore[attr-defined]
     url = f"http://{HOST}:{args.port}/"
     print(f"Review Desk verified and available at {url}")

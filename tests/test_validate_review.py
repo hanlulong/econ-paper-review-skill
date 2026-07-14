@@ -2424,7 +2424,7 @@ class ValidateReviewTests(unittest.TestCase):
             receipt["schema_version"] = "0.2"
             receipt["gates"] = [
                 gate for gate in receipt["gates"]
-                if gate not in {"structured_audit_v02", "burden_coverage_v02"}
+                if gate != "burden_coverage_v02"
             ]
             receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
 
@@ -2444,7 +2444,7 @@ class ValidateReviewTests(unittest.TestCase):
 
             refresh_finalization_receipt(target)
             errors = MODULE.validate_review(target)
-            self.assertFalse(any("current run.json requires" in error for error in errors), errors)
+            self.assertEqual(errors, [])
 
     def test_current_receipt_gate_removal_does_not_bypass_v02_audits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

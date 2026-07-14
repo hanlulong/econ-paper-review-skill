@@ -30,6 +30,7 @@ SCAN_ROOTS = (
     Path("tests"),
 )
 EXCLUDED_RELATIVE_PREFIXES = {Path("benchmarks/reviews")}
+EXPLICIT_EXCLUDED_TREE_FILES = {Path("review-viewer/public/favicon.svg")}
 ROOT_FILES = {
     Path(".gitattributes"),
     Path(".gitignore"),
@@ -85,6 +86,7 @@ TEXT_SUFFIXES = {
     ".ts",
     ".tsx",
     ".txt",
+    ".svg",
     ".yaml",
     ".yml",
 }
@@ -224,7 +226,10 @@ def _discover_release_candidates(root: Path) -> set[Path]:
             relative = path.relative_to(root)
             if any(relative == prefix or prefix in relative.parents for prefix in EXCLUDED_RELATIVE_PREFIXES):
                 continue
-            if any(part in EXCLUDED_DIRECTORY_NAMES for part in relative.parts[:-1]):
+            if (
+                any(part in EXCLUDED_DIRECTORY_NAMES for part in relative.parts[:-1])
+                and relative not in EXPLICIT_EXCLUDED_TREE_FILES
+            ):
                 continue
             if path.name in EXCLUDED_FILE_NAMES or path.suffix in {".pyc", ".pyo"}:
                 continue

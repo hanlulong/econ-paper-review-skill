@@ -19,6 +19,7 @@ import {
   verifyReviewFinalization,
 } from "../lib/review-finalization.ts";
 import { validateReviewRegistry } from "../lib/review-registry.ts";
+import { validateReviewPackageWithPython } from "./validate-review-package.mjs";
 
 const arguments_ = process.argv.slice(2);
 const cliAuthorized = arguments_.length === 1 && arguments_[0] === "--allow-publish";
@@ -116,7 +117,8 @@ async function finalizedArtifactBytes(reviewRoot, receipt) {
 }
 
 async function prepareBundle(bundle) {
-  const [manifestText, run, findings, synthesis, figures, tables, sourceManifest, computations, finalization] = await Promise.all([
+  validateReviewPackageWithPython({ repositoryRoot: root, reviewRoot: bundle.reviewRoot });
+  const [manifestText, run, findings, synthesis, figures, tables, sourceManifest, computations, analyticalAudit, claimsAudit, finalization] = await Promise.all([
     readFile(resolve(bundle.reviewRoot, "review-manifest.json"), "utf8"),
     parseObject(resolve(bundle.reviewRoot, "run.json"), `${bundle.slug} run.json`),
     parseObject(resolve(bundle.reviewRoot, "findings.json"), `${bundle.slug} findings.json`),
@@ -125,6 +127,8 @@ async function prepareBundle(bundle) {
     parseObject(resolve(bundle.reviewRoot, "evidence/tables.json"), `${bundle.slug} tables.json`),
     parseObject(resolve(bundle.reviewRoot, "evidence/source-manifest.json"), `${bundle.slug} source-manifest.json`),
     parseObject(resolve(bundle.reviewRoot, "evidence/computations.json"), `${bundle.slug} computations.json`),
+    parseObject(resolve(bundle.reviewRoot, "evidence/analytical-audit.json"), `${bundle.slug} analytical-audit.json`),
+    parseObject(resolve(bundle.reviewRoot, "evidence/claims.json"), `${bundle.slug} claims.json`),
     parseObject(resolve(bundle.reviewRoot, "finalization.json"), `${bundle.slug} finalization.json`),
   ]);
   const manifest = validateReviewDocumentManifest(manifestText);
@@ -132,7 +136,10 @@ async function prepareBundle(bundle) {
   const checkedComputations = validateReviewComputations(computations);
   const checkedFigures = validateExhibitManifest(figures, "figures", run.review_id);
   const checkedTables = validateExhibitManifest(tables, "tables", run.review_id);
-  validateReviewComputationLinks(checkedFindings, checkedComputations, sourceManifest);
+  validateReviewComputationLinks(checkedFindings, checkedComputations, sourceManifest, {
+    analyticalAudit,
+    claimsAudit,
+  }, run.mode);
   if (!run.review_id || manifest.review_id !== run.review_id || findings.review_id !== run.review_id || synthesis.review_id !== run.review_id || sourceManifest.review_id !== run.review_id) {
     throw new Error(`Review IDs do not match across the canonical package for ${bundle.slug}`);
   }
@@ -180,6 +187,7 @@ async function prepareBundle(bundle) {
   for (const requiredPath of [
     "findings.json", "run.json", "synthesis.json", "review-manifest.json",
     "evidence/figures.json", "evidence/tables.json", "evidence/source-manifest.json", "evidence/computations.json",
+    "evidence/analytical-audit.json", "evidence/claims.json",
     ...manifest.documents.map((document) => document.path), ...exhibitPaths,
   ]) {
     if (!receipt.artifacts[requiredPath]) throw new Error(`Finalization receipt omits required bundled artifact for ${bundle.slug}: ${requiredPath}`);
@@ -189,12 +197,14 @@ async function prepareBundle(bundle) {
 
 async function verifyStagedBundle(bundle, manifest, exhibitPaths, receipt) {
   const destination = resolve(stageRoot, bundle.slug);
-  const [stagedManifestText, stagedRun, stagedFindings, stagedComputations, stagedSourceManifest, stagedFigures, stagedTables, stagedFinalization] = await Promise.all([
+  const [stagedManifestText, stagedRun, stagedFindings, stagedComputations, stagedSourceManifest, stagedAnalyticalAudit, stagedClaimsAudit, stagedFigures, stagedTables, stagedFinalization] = await Promise.all([
     readFile(resolve(destination, "review-manifest.json"), "utf8"),
     parseObject(resolve(destination, "run.json"), `${bundle.slug} staged run.json`),
     parseObject(resolve(destination, "findings.json"), `${bundle.slug} staged findings.json`),
     parseObject(resolve(destination, "evidence/computations.json"), `${bundle.slug} staged computations.json`),
     parseObject(resolve(destination, "evidence/source-manifest.json"), `${bundle.slug} staged source-manifest.json`),
+    parseObject(resolve(destination, "evidence/analytical-audit.json"), `${bundle.slug} staged analytical-audit.json`),
+    parseObject(resolve(destination, "evidence/claims.json"), `${bundle.slug} staged claims.json`),
     parseObject(resolve(destination, "evidence/figures.json"), `${bundle.slug} staged figures.json`),
     parseObject(resolve(destination, "evidence/tables.json"), `${bundle.slug} staged tables.json`),
     parseObject(resolve(destination, "finalization.json"), `${bundle.slug} staged finalization.json`),
@@ -207,6 +217,8 @@ async function verifyStagedBundle(bundle, manifest, exhibitPaths, receipt) {
     validateReviewLedger(stagedFindings),
     validateReviewComputations(stagedComputations),
     stagedSourceManifest,
+    { analyticalAudit: stagedAnalyticalAudit, claimsAudit: stagedClaimsAudit },
+    stagedRun.mode,
   );
   const checkedFigures = validateExhibitManifest(stagedFigures, "figures", stagedRun.review_id);
   const checkedTables = validateExhibitManifest(stagedTables, "tables", stagedRun.review_id);
@@ -235,6 +247,7 @@ async function verifyStagedBundle(bundle, manifest, exhibitPaths, receipt) {
   }
   await Promise.all([
     "synthesis.json", "finalization.json", "evidence/figures.json", "evidence/tables.json", "evidence/source-manifest.json", "evidence/computations.json",
+    "evidence/analytical-audit.json", "evidence/claims.json",
     ...manifest.documents.map((document) => document.path), ...exhibitPaths,
   ].map(async (relativePath) => {
     const info = await lstat(resolveInside(destination, relativePath));
