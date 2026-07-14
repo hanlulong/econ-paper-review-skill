@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -102,7 +103,17 @@ def compatible_pdf_runtime() -> bool:
     return all(shutil.which(command) for command in ("pdfinfo", "pdftotext", "pdftoppm"))
 
 
+def pdf_cli_command(*arguments: str) -> list[str]:
+    return [sys.executable, str(SCRIPT), *arguments]
+
+
 class PdfCommandDiscoveryTests(unittest.TestCase):
+    def test_pdf_cli_uses_current_python_environment(self) -> None:
+        self.assertEqual(
+            pdf_cli_command("doctor"),
+            [sys.executable, str(SCRIPT), "doctor"],
+        )
+
     def test_windows_python_console_script_is_found_beside_interpreter(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             scripts = Path(tmp) / "Scripts"
@@ -350,12 +361,12 @@ class PdfIngestionTests(unittest.TestCase):
         environment = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
         if cwd is not None:
             return subprocess.run(
-                ["python3", str(SCRIPT), *arguments], text=True, capture_output=True,
+                pdf_cli_command(*arguments), text=True, capture_output=True,
                 check=check, cwd=cwd, env=environment,
             )
         with tempfile.TemporaryDirectory() as execution_directory:
             return subprocess.run(
-                ["python3", str(SCRIPT), *arguments], text=True, capture_output=True,
+                pdf_cli_command(*arguments), text=True, capture_output=True,
                 check=check, cwd=execution_directory, env=environment,
             )
 
