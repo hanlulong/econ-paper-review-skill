@@ -10,6 +10,8 @@
 
 *Built for economics. Also works well for finance, accounting, political economy, and other social science papers that rest on data, causal inference, or formal models.*
 
+**[Read a sample referee report →](docs/sample-review/paper-review.pdf)**
+
 ## What you get
 
 A finished review lands in a clean `review/` folder next to your paper:
@@ -116,16 +118,16 @@ It won't write your paper, estimate your acceptance odds, or invent citations. W
 
 ## The Review Desk (optional)
 
-![Review Desk walkthrough: read the referee report, jump to a comment, decide it, and hand off the revision plan](docs/images/review-desk.gif)
-
 A local web viewer that turns a long review into a decided, trackable revision plan:
+
+![Review workflow: your paper becomes a referee report, you decide each comment in Review Desk, your agents revise from the to-do list, and the next round rechecks every decision](docs/images/review-desk-flow.png)
 
 1. **Read the report first.** The Desk opens on the referee report, and every concern links straight to its detailed comment.
 2. **Decide each comment.** Read it beside its manuscript evidence, add your instruction or disagreement, set your own P0/P1/P2 priority, and make one clear decision — keep it **Open**, mark it **Ready for review** after a change or reasoned response, or **Set aside**.
 3. **Hand off the plan.** The Desk assembles your decisions into a prioritized to-do list and a structured response template for your agents.
 4. **Close the loop.** The next review round checks every carried decision and runs a fresh full-paper sweep for new problems.
 
-![Review workflow: your paper becomes a referee report, you decide each comment in Review Desk, your agents revise from the to-do list, and the next round rechecks every decision](docs/images/review-desk-flow.png)
+![Review Desk walkthrough: read the referee report, jump to a comment, decide it, and hand off the revision plan](docs/images/review-desk.gif)
 
 Everything stays on your machine — no uploads or accounts.
 
