@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 from unittest import mock
 
@@ -127,6 +127,45 @@ class PdfCommandDiscoveryTests(unittest.TestCase):
                     mock.patch.object(MODULE.sys, "executable", str(python)):
                 self.assertEqual(MODULE.command_path("markitdown", "Windows"), str(markitdown))
 
+    def test_successful_renderer_stderr_is_deduplicated_into_warnings(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / "renders"
+
+            def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[bytes]:
+                prefix = Path(command[-1])
+                (prefix.parent / f"{prefix.name}-1.png").write_bytes(b"synthetic png")
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    b"",
+                    b"Syntax Warning: malformed font\nSyntax Warning: malformed font\n\n",
+                )
+
+            warnings: list[str] = []
+            with mock.patch.object(MODULE, "run", side_effect=fake_run):
+                rendered = MODULE.render_pages(
+                    Path("paper.pdf"), destination, 150, 1, warnings=warnings
+                )
+        self.assertEqual([path.name for path in rendered], ["page-0001.png"])
+        self.assertEqual(
+            warnings,
+            ["pdftoppm renderer: Syntax Warning: malformed font"],
+        )
+
+    def test_text_subprocess_boundaries_decode_explicit_utf8(self) -> None:
+        completed = subprocess.CompletedProcess(["pdfinfo"], 0, "Pages: 1\n", "")
+        with mock.patch.object(MODULE.subprocess, "run", return_value=completed) as runner:
+            MODULE.run(["pdfinfo", "paper.pdf"], text=True)
+        self.assertEqual(runner.call_args.kwargs["encoding"], "utf-8")
+        self.assertEqual(runner.call_args.kwargs["errors"], "replace")
+
+        version = subprocess.CompletedProcess(["pdfinfo", "-v"], 0, "pdfinfo 1.0\n", "")
+        with mock.patch.object(MODULE, "command_path", return_value="/bin/pdfinfo"), \
+                mock.patch.object(MODULE.subprocess, "run", return_value=version) as runner:
+            self.assertEqual(MODULE.command_version("pdfinfo", ["-v"]), "pdfinfo 1.0")
+        self.assertEqual(runner.call_args.kwargs["encoding"], "utf-8")
+        self.assertEqual(runner.call_args.kwargs["errors"], "replace")
+
 
 class PdfXmlSanitizationTests(unittest.TestCase):
     def test_xml_forbidden_control_is_removed_only_from_parser_input_and_recorded(self) -> None:
@@ -155,6 +194,10 @@ class PdfXmlSanitizationTests(unittest.TestCase):
 
     def test_portable_paths_and_logical_block_order_fail_closed(self) -> None:
         self.assertEqual(MODULE.safe_relative("evidence/pdf-ingestion/SRC-01"), "evidence/pdf-ingestion/SRC-01")
+        self.assertEqual(
+            MODULE.safe_relative(PureWindowsPath("evidence/pdf-ingestion/SRC-01")),
+            "evidence/pdf-ingestion/SRC-01",
+        )
         for unsafe in (
             "/absolute/path", "../escape", "evidence\\windows", "C:/drive/path",
             "evidence//double", "evidence/./dot", "evidence/\x00control",
@@ -249,6 +292,33 @@ class PdfCandidateClassificationTests(unittest.TestCase):
         for equation in ("p = 2\nq = 6", "y = a + b x   (1)"):
             with self.subTest(equation=equation):
                 self.assertEqual(self.classify(equation)[0], "equation_candidate")
+
+    def test_math_fragments_are_not_promoted_to_outline_headings(self) -> None:
+        for fragment in (
+            "E t Λ t,t+1",
+            "y w,t",
+            "i t+s−1",
+        ):
+            with self.subTest(fragment=fragment):
+                self.assertNotEqual(self.classify(fragment)[0], "heading")
+        self.assertEqual(self.classify("A Introduction")[0], "heading")
+        self.assertFalse(MODULE.math_dominated_heading_text("Section α"))
+        self.assertFalse(MODULE.math_dominated_heading_text("Risk-sharing"))
+        self.assertFalse(MODULE.math_dominated_heading_text("β convergence"))
+        self.assertFalse(MODULE.math_dominated_heading_text("IV estimation"))
+        self.assertFalse(MODULE.math_dominated_heading_text("α model 2"))
+        self.assertFalse(MODULE.math_dominated_heading_text("(a) Baseline results"))
+        self.assertFalse(MODULE.math_dominated_heading_text("(b) Robustness checks"))
+        self.assertFalse(MODULE.math_dominated_heading_text("(i) Introduction"))
+
+    def test_categorical_figure_legend_is_not_an_equation_candidate(self) -> None:
+        legend = (
+            "Perfect Banking Competition (N =\n"
+            "Oligopoly (N = 3)\n"
+            "Monopoly (N = 1)"
+        )
+        self.assertEqual(self.classify(legend)[0], "paragraph")
+        self.assertEqual(self.classify("N = 3\nM = 1")[0], "equation_candidate")
 
     def test_detector_contract_changes_current_but_not_legacy_fingerprints(self) -> None:
         configuration = {"source_id": "SRC-01", "source_role": "manuscript"}

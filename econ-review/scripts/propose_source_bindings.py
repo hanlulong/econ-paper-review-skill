@@ -210,4 +210,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from cli_io import configure_utf8_stdio
+
+    configure_utf8_stdio()
     raise SystemExit(main())

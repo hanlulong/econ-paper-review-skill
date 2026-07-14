@@ -27,6 +27,7 @@ from safe_io import (  # noqa: E402
 )
 from trust_spine import pdf_sources, validate_pdf_ingestions  # noqa: E402
 from validate_review import validate_review  # noqa: E402
+from review_timing import STATE_NAME as TIMING_STATE_NAME, finish_delivery_for_finalizer  # noqa: E402
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -39,6 +40,21 @@ GENERATORS = (
     SCRIPT_DIR / "generate_fix_plan.py",
     SCRIPT_DIR / "generate_pdf_report.py",
 )
+REPORT_RENDERERS = ("auto", "reportlab", "latexmk-lualatex", "lualatex", "tectonic")
+
+
+def copy_or_link(source: str, destination: str) -> str:
+    """Hard-link immutable staging inputs when possible, with a Windows-safe copy fallback.
+
+    Every generated artifact is replaced atomically inside the staging tree, so
+    linking the initial bytes cannot mutate the canonical package.
+    """
+
+    try:
+        os.link(source, destination)
+    except OSError:
+        return shutil.copy2(source, destination)
+    return destination
 
 
 def load_object(path: Path) -> dict[str, Any]:
@@ -61,7 +77,7 @@ def reject_symlinks(root: Path) -> None:
                 )
 
 
-def run_generators(review_dir: Path, *, check: bool) -> None:
+def run_generators(review_dir: Path, *, check: bool, renderer: str = "auto") -> None:
     run = load_object(review_dir / "run.json")
     for script in GENERATORS:
         if script.name == "generate_coverage.py" and run.get("mode") != "full":
@@ -74,9 +90,16 @@ def run_generators(review_dir: Path, *, check: bool) -> None:
                 command.append("--write")
         else:
             command = [sys.executable, str(script), str(review_dir)]
+            if script.name == "generate_pdf_report.py":
+                command.extend(["--renderer", renderer])
             if check:
                 command.append("--check")
-        result = subprocess.run(command, capture_output=True, text=True)
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+        )
         if result.returncode:
             detail = result.stderr.strip() or result.stdout.strip()
             raise ValueError(f"{script.name} failed: {detail}")
@@ -144,6 +167,7 @@ def receipt(review_dir: Path, run: dict[str, Any]) -> dict[str, Any]:
     source_manifest = load_object(review_dir / "evidence" / "source-manifest.json")
     if pdf_sources(source_manifest):
         gates.insert(1, "source_ingestion")
+    selected_renderer = selected_report_renderer(review_dir)
     return {
         # Receipt v0.3 specifically certifies the full-review burden-coverage
         # guarantee. Quick reviews retain v0.2 because they do not carry that
@@ -151,9 +175,48 @@ def receipt(review_dir: Path, run: dict[str, Any]) -> dict[str, Any]:
         "schema_version": "0.3" if run.get("mode") == "full" else "0.2",
         "review_id": run["review_id"],
         "contract_version": "0.4",
+        "report_renderer": selected_renderer,
         "artifacts": artifact_hashes(review_dir),
         "gates": gates,
     }
+
+
+def selected_report_renderer(review_dir: Path) -> str:
+    """Read the renderer actually selected for the canonical report PDF."""
+
+    profile_path = review_dir / "evidence" / "pdf-render-profile.json"
+    if profile_path.is_file():
+        profile = load_object(profile_path)
+        selected_renderer = profile.get("renderer")
+        if selected_renderer not in REPORT_RENDERERS[2:]:
+            raise ValueError("PDF render profile names an unsupported renderer")
+        return str(selected_renderer)
+    return "reportlab"
+
+
+def synchronize_renderer_provenance(review_dir: Path) -> dict[str, Any]:
+    """Persist the selected backend in run provenance before receipt hashing."""
+
+    run = load_object(review_dir / "run.json")
+    provenance = run.get("provenance")
+    if not isinstance(provenance, dict):
+        raise ValueError("run.json.provenance must be an object before finalization")
+    provenance["renderer"] = selected_report_renderer(review_dir)
+    atomic_write_json(review_dir, "run.json", run)
+    return run
+
+
+def recorded_renderer(review_dir: Path) -> str | None:
+    """Return a finalized package's renderer for deterministic auto replay."""
+
+    finalization_path = review_dir / "finalization.json"
+    if not finalization_path.is_file():
+        return None
+    try:
+        renderer = load_object(finalization_path).get("report_renderer")
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+        return None
+    return str(renderer) if renderer in REPORT_RENDERERS[1:] else None
 
 
 def readiness_errors(review_dir: Path, run: dict[str, Any], ledger: dict[str, Any]) -> list[str]:
@@ -205,6 +268,7 @@ def readiness_errors(review_dir: Path, run: dict[str, Any], ledger: dict[str, An
                     "v0.4 full finalization requires comment_policy.writing_maximum 30"
                 )
         required_component_versions = {
+            "evidence/candidates.json": "0.1",
             "evidence/claims.json": "0.2",
             "evidence/analytical-audit.json": "0.2",
             "evidence/external-sources.json": "0.4",
@@ -271,36 +335,64 @@ def readiness_errors(review_dir: Path, run: dict[str, Any], ledger: dict[str, An
     return errors
 
 
-def check(review_dir: Path) -> list[str]:
+def check(review_dir: Path, *, renderer: str = "auto") -> list[str]:
     try:
         reject_symlinks(review_dir)
         run = load_object(review_dir / "run.json")
         if uses_current_generators(review_dir, run):
-            run_generators(review_dir, check=True)
+            if renderer == "auto":
+                renderer = recorded_renderer(review_dir) or renderer
+            run_generators(review_dir, check=True, renderer=renderer)
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         return [str(exc)]
     return validate_review(review_dir)
 
 
-def finalize(review_dir: Path) -> None:
+def completion_preflight(review_dir: Path) -> list[str]:
+    """Run completion semantics before mutating status or generating reports.
+
+    Drift in a deterministic Markdown projection is generator-resolvable and is
+    checked independently after generation. Structured/schema/completion errors
+    are never filtered here.
+    """
+
+    try:
+        reject_symlinks(review_dir)
+        run = load_object(review_dir / "run.json")
+        ledger = load_object(review_dir / "findings.json")
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        return [str(exc)]
+    combined = readiness_errors(review_dir, run, ledger)
+    combined.extend(
+        error
+        for error in validate_review(review_dir, strict_complete=True)
+        if " is not synchronized" not in error
+    )
+    return list(dict.fromkeys(combined))
+
+
+def finalize(review_dir: Path, *, renderer: str = "auto") -> None:
     review_dir = review_dir.expanduser().absolute()
     reject_symlinks(review_dir)
     review_dir = review_dir.resolve(strict=True)
     run = load_object(review_dir / "run.json")
-    ledger = load_object(review_dir / "findings.json")
-    if errors := readiness_errors(review_dir, run, ledger):
-        raise ValueError("; ".join(errors))
+    if errors := completion_preflight(review_dir):
+        raise ValueError("completion preflight failed:\n- " + "\n- ".join(errors))
     with tempfile.TemporaryDirectory(prefix="econ-review-finalize-") as temporary:
         staged = Path(temporary) / "review"
-        shutil.copytree(review_dir, staged)
+        shutil.copytree(review_dir, staged, copy_function=copy_or_link)
         staged_run = load_object(staged / "run.json")
         staged_run["status"] = "complete"
         atomic_write_json(staged, "run.json", staged_run)
         finalization_path = staged / "finalization.json"
         if finalization_path.exists():
             finalization_path.unlink()
-        run_generators(staged, check=False)
-        run_generators(staged, check=True)
+        run_generators(staged, check=False, renderer=renderer)
+        run_generators(staged, check=True, renderer=renderer)
+        staged_run = synchronize_renderer_provenance(staged)
+        timing_completed = finish_delivery_for_finalizer(staged)
+        if timing_completed:
+            staged_run = load_object(staged / "run.json")
         atomic_write_json(staged, "finalization.json", receipt(staged, staged_run))
         errors = validate_review(staged)
         if errors:
@@ -322,7 +414,9 @@ def finalize(review_dir: Path) -> None:
         if (staged / profile_relative).exists():
             binary_commit_paths.append(profile_relative)
         rollback_paths = list(dict.fromkeys(
-            text_commit_paths + binary_commit_paths + [profile_relative, "finalization.json"]
+            text_commit_paths
+            + binary_commit_paths
+            + [profile_relative, "finalization.json", TIMING_STATE_NAME]
         ))
         previous = {
             relative: safe_read_bytes(review_dir, relative)
@@ -338,8 +432,15 @@ def finalize(review_dir: Path) -> None:
                 stale_profile = review_dir / profile_relative
                 if stale_profile.exists() and not stale_profile.is_symlink():
                     stale_profile.unlink()
+            timing_state = review_dir / TIMING_STATE_NAME
+            if timing_completed and timing_state.exists():
+                timing_state.unlink()
             atomic_write_json(review_dir, "finalization.json", load_object(staged / "finalization.json"))
-            errors = check(review_dir)
+            # The staged package already passed a full independent generator
+            # replay. After committing those exact bytes, revalidate hashes,
+            # source bindings, semantics, and receipt closure without compiling
+            # the PDF a third time.
+            errors = validate_review(review_dir)
             if errors:
                 raise ValueError("committed package failed final check:\n- " + "\n- ".join(errors))
         except Exception as exc:
@@ -361,6 +462,20 @@ def main() -> int:
     parser.add_argument("review_dir", type=Path)
     parser.add_argument("--check", action="store_true", help="Check an existing finalized package without writing")
     parser.add_argument(
+        "--preflight",
+        action="store_true",
+        help="Apply strict completion checks without changing status or generating reports",
+    )
+    parser.add_argument(
+        "--renderer",
+        choices=REPORT_RENDERERS,
+        default="auto",
+        help=(
+            "Report backend for finalization (default: health-checked TeX, then ReportLab); "
+            "use reportlab for an explicit portable override"
+        ),
+    )
+    parser.add_argument(
         "--delivery-dir",
         type=Path,
         help=(
@@ -370,26 +485,43 @@ def main() -> int:
     )
     args = parser.parse_args()
     try:
+        if args.check and args.preflight:
+            raise ValueError("--check and --preflight are mutually exclusive")
         if args.check:
             if args.delivery_dir is not None:
                 raise ValueError("--delivery-dir cannot be combined with --check")
-            errors = check(args.review_dir.expanduser().absolute())
+            errors = check(args.review_dir.expanduser().absolute(), renderer=args.renderer)
+            if errors:
+                raise ValueError("\n- ".join(errors))
+        elif args.preflight:
+            if args.delivery_dir is not None:
+                raise ValueError("--delivery-dir cannot be combined with --preflight")
+            errors = completion_preflight(args.review_dir.expanduser().absolute())
             if errors:
                 raise ValueError("\n- ".join(errors))
         else:
-            finalize(args.review_dir)
+            finalize(args.review_dir, renderer=args.renderer)
             delivery_dir = args.delivery_dir
             if delivery_dir is None and args.review_dir.name == "supporting":
                 delivery_dir = args.review_dir.parent
             if delivery_dir is not None:
                 from create_delivery import create_delivery
 
-                create_delivery(args.review_dir, delivery_dir, replace=True)
+                create_delivery(
+                    args.review_dir,
+                    delivery_dir,
+                    replace=True,
+                    prevalidated=True,
+                )
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         parser.exit(1, f"finalization failed: {exc}\n")
-    print(f"econ-review finalization passed: {args.review_dir}")
+    action = "completion preflight" if args.preflight else "finalization"
+    print(f"econ-review {action} passed: {args.review_dir}")
     return 0
 
 
 if __name__ == "__main__":
+    from cli_io import configure_utf8_stdio
+
+    configure_utf8_stdio()
     raise SystemExit(main())

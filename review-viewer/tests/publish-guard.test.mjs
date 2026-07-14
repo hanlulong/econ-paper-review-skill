@@ -39,7 +39,9 @@ test("viewer npm scripts use native-Windows-compatible environment handling", as
   assert.match(packageJson.scripts["dev:bundled"], /--allow-publish/);
   assert.match(packageJson.scripts["build:bundled"], /--allow-publish/);
   const harness = await readFile(new URL("../scripts/test-viewer.mjs", import.meta.url), "utf8");
-  assert.match(harness, /process\.platform === "win32" \? "npm\.cmd" : "npm"/);
+  assert.match(harness, /process\.env\.npm_execpath/);
+  assert.match(harness, /process\.env\.ComSpec \|\| "cmd\.exe"/);
+  assert.match(harness, /process\.execPath/);
 });
 
 test("authorized sync stages and validates before replacing published assets", async () => {

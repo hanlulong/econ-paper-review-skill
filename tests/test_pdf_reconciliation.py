@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -67,7 +68,12 @@ class ProposalIndexPathTests(unittest.TestCase):
 
             inside = root / "evidence/pdf-ingestion/SRC-01/proposals/tool/normalized.json"
             inside.parent.mkdir(parents=True)
-            inside.symlink_to(outside)
+            try:
+                inside.symlink_to(outside)
+            except OSError:
+                if os.name == "nt":
+                    self.skipTest("symlink creation requires Windows Developer Mode or elevated privileges")
+                raise
             self.assertEqual(
                 MODULE.load_proposal_page_index(
                     root,

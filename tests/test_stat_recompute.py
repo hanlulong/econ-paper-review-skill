@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -71,6 +75,34 @@ class StatRecomputeTests(unittest.TestCase):
             MODULE.run({"checks": [
                 {"id": "grim", "type": "grim_mean", "mean": "2.00", "n": 10, "reported": 0},
             ]})
+
+    def test_cli_output_uses_atomic_lf_only_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "input.json"
+            output = root / "result.json"
+            source.write_text(
+                json.dumps({"checks": [{"id": "n", "type": "sum", "values": [1, 2]}]}),
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(
+                    sys,
+                    "argv",
+                    [str(SCRIPT), str(source), "--output", str(output)],
+                ),
+                mock.patch.object(
+                    Path,
+                    "write_text",
+                    side_effect=AssertionError("canonical output must not use text mode"),
+                ),
+            ):
+                self.assertEqual(MODULE.main(), 0)
+            raw = output.read_bytes()
+            self.assertNotIn(b"\r", raw)
+            self.assertEqual(json.loads(raw), MODULE.run({
+                "checks": [{"id": "n", "type": "sum", "values": [1, 2]}]
+            }))
 
 
 if __name__ == "__main__":

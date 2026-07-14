@@ -135,6 +135,7 @@ class SkillPackageValidationTests(unittest.TestCase):
             errors = MODULE.validate_skill_package(target)
             self.assertTrue(any("runtime references missing schema" in error and "coverage.schema.json" in error for error in errors), errors)
 
+    @unittest.skipIf(os.name == "nt", "symlink creation is privilege-dependent on Windows")
     @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
     def test_symlinked_package_root_is_rejected_before_resolution(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -144,6 +145,7 @@ class SkillPackageValidationTests(unittest.TestCase):
             errors = MODULE.validate_skill_package(linked)
             self.assertTrue(any("skill directory must not be a symbolic link" in error for error in errors), errors)
 
+    @unittest.skipIf(os.name == "nt", "symlink creation is privilege-dependent on Windows")
     @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
     def test_symlinked_asset_tree_fails_before_external_schema_is_read(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

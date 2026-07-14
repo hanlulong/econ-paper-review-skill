@@ -6,7 +6,16 @@ import { withPreservedReviewBundle } from "./preserve-review-bundle.mjs";
 
 const viewerRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const reviewsRoot = resolve(viewerRoot, "public/reviews");
-const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+
+function npmInvocation(args) {
+  if (process.env.npm_execpath) {
+    return [process.execPath, [process.env.npm_execpath, ...args]];
+  }
+  if (process.platform === "win32") {
+    return [process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", "npm.cmd", ...args]];
+  }
+  return ["npm", args];
+}
 
 function run(command, args, extraEnv = {}) {
   return new Promise((resolveRun, rejectRun) => {
@@ -25,7 +34,8 @@ function run(command, args, extraEnv = {}) {
 
 await withPreservedReviewBundle(reviewsRoot, async () => {
   try {
-    await run(npmCommand, ["run", "build"], { ALLOW_PUBLISH: "1" });
+    const [npmCommand, npmArguments] = npmInvocation(["run", "build"]);
+    await run(npmCommand, npmArguments, { ALLOW_PUBLISH: "1" });
     const tests = (await readdir(resolve(viewerRoot, "tests")))
       .filter((name) => name.endsWith(".test.mjs"))
       .sort()

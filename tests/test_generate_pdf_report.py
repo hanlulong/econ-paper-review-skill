@@ -41,6 +41,50 @@ class GeneratePdfReportTests(unittest.TestCase):
         shutil.copytree(FIXTURE, target)
         return target
 
+    def test_auto_renderer_uses_reportlab_when_tex_health_checks_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.copy_fixture(temporary)
+            output = Path(temporary) / "paper-review.pdf"
+            sentinel = b"%PDF-1.4\nhealth-fallback"
+            with mock.patch.object(
+                MODULE,
+                "select_healthy_renderer",
+                return_value=(None, ("latexmk-lualatex: minimal compile failed (1)",)),
+            ), mock.patch.object(MODULE, "build_pdf", return_value=sentinel) as reportlab_build, \
+                    mock.patch.object(MODULE, "render_review_pdf") as latex_build:
+                data, profile = MODULE.build_professional_pdf(
+                    target,
+                    output,
+                    page_size="letter",
+                    font_dir=None,
+                    renderer="auto",
+                )
+            self.assertEqual(data, sentinel)
+            self.assertIsNone(profile)
+            reportlab_build.assert_called_once()
+            latex_build.assert_not_called()
+
+    def test_auto_renderer_passes_health_selected_backend_to_full_render(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.copy_fixture(temporary)
+            output = Path(temporary) / "paper-review.pdf"
+            rendered = mock.Mock(pdf_bytes=b"%PDF-1.4\nselected", profile=mock.Mock())
+            with mock.patch.object(
+                MODULE,
+                "select_healthy_renderer",
+                return_value=("lualatex", ("lualatex: healthy",)),
+            ), mock.patch.object(MODULE, "render_review_pdf", return_value=rendered) as latex_build:
+                data, profile = MODULE.build_professional_pdf(
+                    target,
+                    output,
+                    page_size="letter",
+                    font_dir=None,
+                    renderer="auto",
+                )
+            self.assertEqual(data, rendered.pdf_bytes)
+            self.assertIs(profile, rendered.profile)
+            self.assertEqual(latex_build.call_args.kwargs["renderer"], "lualatex")
+
     def test_pdf_is_deterministic_and_contains_every_reader_output(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             target = self.copy_fixture(temporary)
@@ -523,6 +567,7 @@ class GeneratePdfReportTests(unittest.TestCase):
             receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
             receipt["artifacts"].pop("paper-review.pdf")
             receipt["artifacts"].pop("evidence/pdf-render-profile.json", None)
+            receipt.pop("report_renderer", None)
             receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
             (target / "paper-review.pdf").unlink()
             profile_path = target / "evidence" / "pdf-render-profile.json"
@@ -573,6 +618,11 @@ class GeneratePdfReportTests(unittest.TestCase):
             run_path = target / "run.json"
             run = json.loads(run_path.read_text(encoding="utf-8"))
             run["mode"] = "quick"
+            run["requested_mode"] = "quick"
+            run["delivered_mode"] = "quick"
+            run["mode_transition"] = "none"
+            run["transition_reason"] = None
+            run["transition_source_review_id"] = None
             run["comment_policy"]["exhaustive"] = False
             run_path.write_text(json.dumps(run, indent=2) + "\n", encoding="utf-8")
             (target / "evidence" / "coverage.json").unlink()
@@ -596,6 +646,7 @@ class GeneratePdfReportTests(unittest.TestCase):
             self.assertEqual(receipt["schema_version"], "0.2")
             receipt["artifacts"].pop("paper-review.pdf")
             receipt["artifacts"].pop("evidence/pdf-render-profile.json", None)
+            receipt.pop("report_renderer", None)
             receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
             (target / "paper-review.pdf").unlink()
             profile_path = target / "evidence" / "pdf-render-profile.json"

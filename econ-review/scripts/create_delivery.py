@@ -213,15 +213,17 @@ def create_delivery(
     *,
     replace: bool,
     assessment_date: date | None = None,
+    prevalidated: bool = False,
 ) -> None:
     review_dir = review_dir.expanduser().absolute()
     delivery_dir = delivery_dir.expanduser().absolute()
     reject_symlinks(review_dir)
     review_dir = review_dir.resolve(strict=True)
     delivery_resolved = delivery_dir.resolve(strict=False)
-    errors = validate_review(review_dir)
-    if errors:
-        raise ValueError("canonical review package is not valid:\n- " + "\n- ".join(errors))
+    if not prevalidated:
+        errors = validate_review(review_dir)
+        if errors:
+            raise ValueError("canonical review package is not valid:\n- " + "\n- ".join(errors))
     pdf_path = review_dir / PDF_NAME
     if pdf_path.exists():
         if is_link_or_junction(pdf_path) or not pdf_path.is_file():
@@ -353,4 +355,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from cli_io import configure_utf8_stdio
+
+    configure_utf8_stdio()
     raise SystemExit(main())

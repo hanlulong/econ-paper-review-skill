@@ -10,12 +10,15 @@
 
 *Built for economics. Also works well for finance, accounting, political economy, and other social science papers that rest on data, causal inference, or formal models.*
 
+![Review Desk opening a referee report: recommendation, report, and the comment queue](docs/images/review-desk-overview.png)
+*The optional Review Desk viewer opening a finished review — here, the [sample demonstration review](docs/sample-review/paper-review.pdf).*
+
 ## What you get
 
 A finished review lands in a clean `review/` folder next to your paper:
 
 - **`paper-review.pdf`** — the primary report: a professionally typeset, bookmarked PDF with the referee report, every detailed comment, editing comments, and the revision plan.
-- **`reports/`** — the same reports as Markdown, ready for editing or for your agents.
+- **`reports/`** — the same reports as Markdown. The revision plan is a prioritized to-do list written to be handed straight to your agents.
 - **`README.md`** — a one-page summary that tells you what to read first.
 - **`supporting/`** — working files used by the Review Desk and later review rounds; most authors never open them.
 
@@ -31,10 +34,10 @@ Every comment quotes the relevant manuscript text — or, when the issue comes f
 > **Concern**: At equality both actions maximize payoff, so the model supports a set-valued prediction. The proposition and comparative-static summary currently state a stronger global conclusion. No tie-breaking rule or boundary restriction appears in the supplied manuscript.
 >
 > **Suggestions**: Add a tie-breaking rule or state a set-valued equilibrium at the boundary. Align Proposition 1, its proof, and the comparative static.
->
-> **Status**: [Pending]
 
 *(From the bundled example. Full reviews keep every issue that survives verification — up to 100 substantive comments and 30 editing comments.)*
+
+**[Read a full sample review (PDF)](docs/sample-review/paper-review.pdf)** — a complete 25-comment referee report on a [demonstration manuscript](docs/sample-review/demo-paper.pdf) written with intentional errors and reviewed cold with default settings.
 
 ## Install
 
@@ -63,7 +66,7 @@ python3 scripts/install_econ_review.py --dry-run --global --all --with-review-de
 python3 scripts/install_econ_review.py --global --all --with-review-desk
 ```
 
-On native Windows, replace `python3` with `py -3` and use PowerShell path syntax. If compatible LuaLaTeX or Tectonic is already installed, the report uses the professional LaTeX renderer; otherwise it uses the maintained built-in PDF renderer. A LaTeX compilation error stops the build instead of silently changing renderers. Review Desk is prebuilt and needs no Node.js or npm. See [docs/INSTALL.md](docs/INSTALL.md) for skill-only, Claude-only, Codex-only, and project-local installs.
+On native Windows, replace `python3` with the machine's working Python 3.10+ command (normally `python`) and use PowerShell path syntax; the optional `py` launcher is not required. If a compatible, working LuaLaTeX or Tectonic renderer is available, the report uses it; otherwise it uses the maintained built-in PDF renderer. Review Desk is prebuilt and needs no Node.js or npm. See [docs/INSTALL.md](docs/INSTALL.md) for skill-only, Claude-only, Codex-only, and project-local installs.
 
 </details>
 
@@ -78,6 +81,18 @@ Use the econ-review skill to reconstruct the theory and empirical design before 
 ```
 
 `quick` gives you the biggest risks fast. `full` goes through every section, table, figure, equation, footnote, and appendix. When it finishes, open `review/paper-review.pdf`; use `review/README.md` for the file map and next-round workflow.
+
+> [!IMPORTANT]
+> **A full review takes 20 minutes to an hour**, depending on the paper's length and complexity. Let it run to the end — the verification passes that keep the comments trustworthy happen late in the run. `quick` mode finishes in a few minutes.
+
+Then hand the to-do list to your agent — the revision plan is written for exactly that:
+
+```text
+Implement the P0 items in review/reports/revision-plan.md. Follow each instruction,
+never invent results or citations, and report what changed where.
+```
+
+You decide, your agent revises, and the next review round checks every change.
 
 ## Why you can trust the comments
 
@@ -104,9 +119,28 @@ It won't write your paper, estimate your acceptance odds, or invent citations. W
 
 ## The Review Desk (optional)
 
-A local web viewer for working through a long review. It opens on the referee report, then walks you through the comments one by one: for each, add your instruction or disagreement, choose P0/P1/P2, and make one clear decision — keep it **Open**, mark it **Ready for review** after a change or reasoned response, or **Set aside**. Review Desk then builds a prioritized task plan and a structured response template for your implementation agents. The next review round checks every carried concern and runs a fresh full-paper sweep for new problems. Everything stays on your machine — no uploads or accounts.
+![Review Desk walkthrough: read the referee report, jump to a comment, decide it, and hand off the revision plan](docs/images/review-desk.gif)
 
-The recommended installer includes a verified, prebuilt copy with `--with-review-desk`; it prints one stable Python launch command and opens `http://127.0.0.1:48127/`. Node.js is required only to modify or rebuild the viewer; see [review-viewer/README.md](review-viewer/README.md).
+A local web viewer that turns a long review into a decided, trackable revision plan:
+
+1. **Read the report first.** The Desk opens on the referee report, and every concern links straight to its detailed comment.
+2. **Decide each comment.** Read it beside its manuscript evidence, add your instruction or disagreement, set your own P0/P1/P2 priority, and make one clear decision — keep it **Open**, mark it **Ready for review** after a change or reasoned response, or **Set aside**.
+3. **Hand off the plan.** The Desk assembles your decisions into a prioritized to-do list and a structured response template for your agents.
+4. **Close the loop.** The next review round checks every carried decision and runs a fresh full-paper sweep for new problems.
+
+```mermaid
+flowchart LR
+    P([Your paper]) --> R[Referee report<br/>+ comments]
+    R --> W[Review Desk<br/>you decide each comment]
+    W -->|to-do list| A[Your agents<br/>revise the paper]
+    A -->|next review round| R
+```
+
+![Working through one comment in Review Desk: evidence, suggestions, and the decision bar](docs/images/review-desk-comment.png)
+
+Everything stays on your machine — no uploads or accounts.
+
+The recommended installer includes a verified, prebuilt copy with `--with-review-desk`; it prints one stable launch command and opens `http://127.0.0.1:48127/`. Launching it again reuses the verified local server; `--port PORT` selects another loopback port. Node.js is required only to modify or rebuild the viewer; see [review-viewer/README.md](review-viewer/README.md).
 
 ## Roadmap
 

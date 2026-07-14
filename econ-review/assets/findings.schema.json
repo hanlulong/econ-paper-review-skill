@@ -181,6 +181,13 @@
           "uniqueItems": true,
           "items": {"type": "string", "minLength": 1}
         },
+        "candidate_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^CND-[0-9]{3,}$"},
+          "description": "Compact discovery candidates admitted or merged into this verified finding. Required for current full reviews."
+        },
         "importance_rank": {"type": "integer", "minimum": 1},
         "dimension": {"type": "string", "minLength": 1},
         "critique_basis": {

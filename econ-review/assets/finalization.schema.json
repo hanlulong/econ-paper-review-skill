@@ -9,6 +9,9 @@
     "schema_version": {"enum": ["0.1", "0.2", "0.3"]},
     "review_id": {"type": "string", "minLength": 1},
     "contract_version": {"const": "0.4"},
+    "report_renderer": {
+      "enum": ["reportlab", "latexmk-lualatex", "lualatex", "tectonic"]
+    },
     "artifacts": {
       "type": "object",
       "minProperties": 1,

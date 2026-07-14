@@ -7,6 +7,7 @@ import argparse
 import json
 import re
 import sys
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -24,15 +25,78 @@ def next_number(values: list[Any], pattern: re.Pattern[str]) -> int:
     return max(numbers, default=0) + 1
 
 
+def optional_coverage(review_dir: Path) -> dict[str, Any] | None:
+    """Load coverage when it exists without making it an intake prerequisite."""
+
+    try:
+        raw = safe_read_bytes(review_dir, "evidence/coverage.json")
+    except FileNotFoundError:
+        return None
+    value = strict_json_loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError("coverage ledger must be a JSON object")
+    return value
+
+
+def math_dominated_heading(item: dict[str, Any]) -> bool:
+    """Identify PDF-extraction headings that are actually display-math fragments.
+
+    PDF ingestion emits provisional Markdown headings.  A short label composed
+    almost entirely of variables, indices, Greek letters, and operators should
+    remain in the canonical inventory, but it is not a paper-outline heading.
+    """
+
+    if item.get("object_type") != "outline_heading":
+        return False
+    locator = item.get("locator")
+    if not isinstance(locator, str):
+        return False
+    _prefix, separator, label = locator.partition(": ")
+    if not separator:
+        return False
+    label = label.strip()
+    tokens = re.findall(r"[^\W\d_]+", label, flags=re.UNICODE)
+    long_words = [token for token in tokens if len(token) >= 3]
+    variable_tokens = [token for token in tokens if len(token) <= 2]
+    mathematical = sum(
+        1
+        for character in label
+        if unicodedata.category(character) == "Sm"
+        or character in "=<>+-*/^_"
+        or "GREEK" in unicodedata.name(character, "")
+    )
+    indexed_notation = (
+        len(tokens) >= 3
+        and not long_words
+        and any(character in label for character in ",()[]{}")
+    )
+    lone_math_symbol = len(label) == 1 and (
+        unicodedata.category(label) == "Sm"
+        or "GREEK" in unicodedata.name(label, "")
+    )
+    malformed_fragment = (
+        label == "(untitled heading)"
+        or bool(re.fullmatch(r"[=+\-*/^_<>]+", label))
+        or lone_math_symbol
+    )
+    math_dominated = (
+        not long_words
+        and (mathematical > 0 or indexed_notation)
+    ) or (
+        mathematical >= 2
+        and len(variable_tokens) >= 2
+        and len(long_words) <= 1
+    )
+    return malformed_fragment or math_dominated or indexed_notation
+
+
 def propose(review_dir: Path, source_id: str, coverage_unit_id: str) -> dict[str, Any]:
     manifest = strict_json_loads(
         safe_read_bytes(review_dir, "evidence/source-manifest.json")
     )
-    coverage = strict_json_loads(
-        safe_read_bytes(review_dir, "evidence/coverage.json")
-    )
-    if not isinstance(manifest, dict) or not isinstance(coverage, dict):
-        raise ValueError("source manifest and coverage ledger must be JSON objects")
+    coverage = optional_coverage(review_dir)
+    if not isinstance(manifest, dict):
+        raise ValueError("source manifest must be a JSON object")
     sources = {
         row.get("id"): row
         for row in manifest.get("sources", [])
@@ -43,11 +107,13 @@ def propose(review_dir: Path, source_id: str, coverage_unit_id: str) -> dict[str
         raise ValueError(f"unknown source ID: {source_id}")
     units = {
         row.get("id"): row
-        for row in coverage.get("units", [])
+        for row in (coverage.get("units", []) if isinstance(coverage, dict) else [])
         if isinstance(row, dict) and isinstance(row.get("id"), str)
     }
-    unit = units.get(coverage_unit_id)
-    if not isinstance(unit, dict) or unit.get("source_id") != source_id:
+    unit = units.get(coverage_unit_id) if isinstance(coverage, dict) else None
+    if isinstance(coverage, dict) and (
+        not isinstance(unit, dict) or unit.get("source_id") != source_id
+    ):
         raise ValueError("coverage unit must exist and belong to the selected source")
 
     extraction = source.get("extraction")
@@ -64,7 +130,11 @@ def propose(review_dir: Path, source_id: str, coverage_unit_id: str) -> dict[str
     )
     anchors = [row for row in manifest.get("anchors", []) if isinstance(row, dict)]
     existing_inventory = [
-        row for row in coverage.get("source_inventory", []) if isinstance(row, dict)
+        row
+        for row in (
+            coverage.get("source_inventory", []) if isinstance(coverage, dict) else []
+        )
+        if isinstance(row, dict)
     ]
     anchor_number = next_number(
         [row.get("id") for row in anchors], re.compile(r"ANC-(\d+)")
@@ -74,6 +144,13 @@ def propose(review_dir: Path, source_id: str, coverage_unit_id: str) -> dict[str
     )
     anchors_to_add: list[dict[str, Any]] = []
     rows_to_add: list[dict[str, Any]] = []
+    coverage_anchor_ids = {
+        row["id"]
+        for row in anchors
+        if row.get("source_id") == source_id
+        and row.get("kind") == "scope"
+        and isinstance(row.get("id"), str)
+    }
 
     def anchor_for(item: dict[str, Any], kind: str) -> dict[str, Any] | None:
         nonlocal anchor_number
@@ -119,6 +196,10 @@ def propose(review_dir: Path, source_id: str, coverage_unit_id: str) -> dict[str
         )
         if already:
             return
+        bound = state in {"covered", "bounded"}
+        anchor_ids = [anchor["id"]] if bound and isinstance(anchor, dict) else []
+        coverage_unit_ids = [coverage_unit_id] if bound else []
+        coverage_anchor_ids.update(anchor_ids)
         rows_to_add.append({
             "id": f"INV-{inventory_number:03d}",
             "source_id": source_id,
@@ -126,16 +207,32 @@ def propose(review_dir: Path, source_id: str, coverage_unit_id: str) -> dict[str
             "object_id": item["object_id"],
             "locator": item["locator"],
             "state": state,
-            "anchor_ids": [anchor["id"]] if isinstance(anchor, dict) else [],
-            "coverage_unit_ids": [coverage_unit_id],
+            "anchor_ids": anchor_ids,
+            "coverage_unit_ids": coverage_unit_ids,
             "audit_record_id": None,
             "duplicate_of": None,
             "reason": reason,
         })
         inventory_number += 1
 
+    source_is_pdf = (
+        str(source.get("media_type", "")).casefold() == "application/pdf"
+        or Path(str(source.get("path", ""))).suffix.casefold() == ".pdf"
+    )
     for item in outline:
         uncertain = item.get("parser_uncertain") is True
+        math_heading = source_is_pdf and math_dominated_heading(item)
+        if math_heading:
+            add_inventory_row(
+                item,
+                state="excluded",
+                anchor=None,
+                reason=(
+                    "The PDF extraction rendered a math-dominated display fragment as a Markdown "
+                    "heading; retain the canonical object decision, but do not treat it as paper outline."
+                ),
+            )
+            continue
         add_inventory_row(
             item,
             state="bounded" if uncertain else "covered",
@@ -214,15 +311,25 @@ def propose(review_dir: Path, source_id: str, coverage_unit_id: str) -> dict[str
                 }, state="bounded", anchor=None, reason=(
                     "Detector output is a candidate, not a verified exhibit. Inspect the canonical render, then choose covered with a typed unit and audit mapping, duplicate, false_positive, or bounded."
                 ))
+    existing_unit_anchor_ids = {
+        anchor_id
+        for anchor_id in (unit.get("anchor_ids", []) if isinstance(unit, dict) else [])
+        if isinstance(anchor_id, str)
+    }
     return {
         "source_id": source_id,
         "coverage_unit_id": coverage_unit_id,
+        "coverage_unit_status": "existing" if isinstance(coverage, dict) else "planned",
         "read_only": True,
         "anchors_to_add": anchors_to_add,
+        "coverage_unit_anchor_ids_to_add": sorted(
+            coverage_anchor_ids - existing_unit_anchor_ids
+        ),
         "source_inventory_rows_to_add": rows_to_add,
         "instructions": (
             "Review every candidate against the source, merge accepted anchors and rows "
-            "manually, add proposed anchor IDs to the named coverage unit, and adjudicate "
+            "manually, add every coverage_unit_anchor_ids_to_add value to the named coverage "
+            "unit (creating that source-bound unit when its status is planned), and adjudicate "
             "every bounded PDF candidate from the canonical render. Covered tables and figures "
             "need typed coverage units and reciprocal rendered-audit IDs. This command writes nothing."
         ),
@@ -244,4 +351,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from cli_io import configure_utf8_stdio
+
+    configure_utf8_stdio()
     raise SystemExit(main())

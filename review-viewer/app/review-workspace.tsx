@@ -1002,9 +1002,14 @@ export function ReviewWorkspace() {
           throw new Error("Bundled review manifest ID does not match findings.json");
         }
         const manuscriptSources = checkedSourceManifest?.sources?.filter((source) => source.role === "manuscript") || [];
-        if (manuscriptSources.length > 1) throw new Error("Bundled source manifest declares multiple manuscript reading surfaces");
-        const manuscriptSource = manuscriptSources[0];
-        const manuscriptPath = manuscriptSource?.extraction?.path || manuscriptSource?.path;
+        // A package may declare several manuscript-role sources (for example a
+        // PDF plus its LaTeX source). Read the extracted text surface when one
+        // exists; otherwise fall back to a directly readable text source.
+        const manuscriptSource = manuscriptSources.find((source) => source.extraction?.path)
+          || manuscriptSources.find((source) => /^text\/|markdown|tex$/i.test(source.media_type || ""))
+          || manuscriptSources[0];
+        const manuscriptPath = manuscriptSource?.extraction?.path
+          || (/^text\/|markdown|tex$/i.test(manuscriptSource?.media_type || "") ? manuscriptSource?.path : undefined);
         const nextManuscript = manuscriptPath
           ? await requiredText(`${entry.base_path}/${normalizePackagePath(manuscriptPath)}`)
           : "";
@@ -2204,18 +2209,34 @@ export function ReviewWorkspace() {
   const activeDocument = documents.find((document) => document.id === reportView) || documents[0];
   const activeReport = activeDocument?.content || "";
   const refereeReport = documents.find((document) => document.path === "report.md");
-  /** Turn generator "Linked findings" lines into buttons that open the matching detailed comments. */
-  const withCommentJumpLinks = (markdown: string) => markdown.split("\n").map((line) => {
-    if (!line.startsWith("Linked findings:")) return line;
-    const body = line.slice("Linked findings:".length);
-    const idList = body.match(/^\s*(?:`[^`]+`[,\s]*)+\.?/)?.[0] || "";
-    const ids = Array.from(idList.matchAll(/`([^`]+)`/g), (token) => token[1])
-      .filter((id) => findings.some((finding) => finding.id === id));
-    if (!ids.length) return line;
-    const buttons = ids.map((id) => `[Go to comment ${findings.findIndex((finding) => finding.id === id) + 1} →](#finding=${id})`).join(" ");
-    const remainder = body.slice(idList.length).trim();
-    return remainder ? `${buttons}\n\n*${remainder}*` : buttons;
-  }).join("\n");
+  /** Turn generator finding-link markers into buttons that open the matching detailed comments. */
+  const withCommentJumpLinks = (markdown: string) => {
+    const jumpButtons = (ids: string[]) => ids
+      .filter((id) => findings.some((finding) => finding.id === id))
+      .map((id) => `[Go to comment ${findings.findIndex((finding) => finding.id === id) + 1} →](#finding=${id})`)
+      .join(" ");
+    return markdown.split("\n").map((line) => {
+      // Current generator format: machine-readable markers in HTML comments.
+      const linkedMarker = line.match(/^<!--\s*linked_finding_ids:\s*([^>]*?)\s*-->\s*$/);
+      if (linkedMarker) {
+        const buttons = jumpButtons(linkedMarker[1].split(/[,\s]+/).filter(Boolean));
+        return buttons || line;
+      }
+      const singleMarker = line.match(/^<!--\s*finding_id:\s*([A-Za-z0-9-]+)\s*-->\s*$/);
+      if (singleMarker) {
+        const buttons = jumpButtons([singleMarker[1]]);
+        return buttons || line;
+      }
+      // Older format: a visible "Linked findings: `ID`, `ID`." line.
+      if (!line.startsWith("Linked findings:")) return line;
+      const body = line.slice("Linked findings:".length);
+      const idList = body.match(/^\s*(?:`[^`]+`[,\s]*)+\.?/)?.[0] || "";
+      const buttons = jumpButtons(Array.from(idList.matchAll(/`([^`]+)`/g), (token) => token[1]));
+      if (!buttons) return line;
+      const remainder = body.slice(idList.length).trim();
+      return remainder ? `${buttons}\n\n*${remainder}*` : buttons;
+    }).join("\n");
+  };
   const reportComponentsFor = (sourceDocument: ReviewDocument | undefined): MarkdownComponents => ({
     img: ({ alt }) => <span className="blocked-report-image">[Image omitted from report view{alt ? `: ${alt}` : ""}]</span>,
     a: ({ children, href }) => {

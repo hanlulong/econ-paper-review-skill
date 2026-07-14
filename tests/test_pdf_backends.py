@@ -250,6 +250,7 @@ class PdfBackendTests(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.BackendError, "only regular files"):
                 MODULE._safe_artifacts(root, "evidence/pdf-ingestion/SRC-01")
 
+    @unittest.skipIf(os.name == "nt", "symlink creation is privilege-dependent on Windows")
     @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
     def test_private_write_refuses_symlink_destination(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -262,6 +263,7 @@ class PdfBackendTests(unittest.TestCase):
                 MODULE._private_write(linked, b"overwritten\n")
             self.assertEqual(outside.read_text(encoding="utf-8"), "preserve me\n")
 
+    @unittest.skipIf(os.name == "nt", "symlink creation is privilege-dependent on Windows")
     @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
     def test_docling_rejects_symlink_output_before_rewriting(self) -> None:
         outside: Path | None = None

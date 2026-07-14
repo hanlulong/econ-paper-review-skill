@@ -1158,11 +1158,353 @@ def validate_source_inventory_closure(
                 )
 
 
+def validate_candidate_discovery(
+    review_dir: Path,
+    run: dict[str, Any],
+    coverage: dict[str, Any],
+    active_findings: list[dict[str, Any]],
+    errors: list[str],
+) -> None:
+    """Validate discovery recall, candidate closure, and the saturation stop rule."""
+
+    ledger = load_json(review_dir / "evidence/candidates.json", errors)
+    if not isinstance(ledger, dict):
+        return
+    validate_schema(
+        ledger,
+        "candidates.schema.json",
+        "evidence/candidates.json",
+        errors,
+    )
+    if ledger.get("review_id") != run.get("review_id"):
+        errors.append("candidate ledger review_id differs from run.json")
+
+    units = {
+        row.get("id"): row
+        for row in coverage.get("units", [])
+        if isinstance(row, dict) and isinstance(row.get("id"), str)
+    }
+    in_scope_unit_ids = {
+        unit_id for unit_id, row in units.items()
+        if row.get("status") != "not_applicable"
+    }
+    burdens = {
+        row.get("id"): row
+        for row in run.get("activated_burdens", [])
+        if isinstance(row, dict) and isinstance(row.get("id"), str)
+    }
+    active_burden_ids = {
+        burden_id for burden_id, row in burdens.items()
+        if row.get("status") == "active"
+    }
+    active_finding_ids = {
+        row.get("id") for row in active_findings
+        if isinstance(row.get("id"), str)
+    }
+    finding_by_id = {
+        str(row.get("id")): row for row in active_findings
+        if isinstance(row.get("id"), str)
+    }
+
+    pass_rows = [row for row in ledger.get("passes", []) if isinstance(row, dict)]
+    pass_ids = [row.get("id") for row in pass_rows if isinstance(row.get("id"), str)]
+    duplicate_pass_ids = sorted(
+        value for value, count in Counter(pass_ids).items() if count > 1
+    )
+    if duplicate_pass_ids:
+        errors.append("candidate ledger repeats pass IDs: " + ", ".join(duplicate_pass_ids))
+    pass_by_id = {
+        str(row.get("id")): row for row in pass_rows
+        if isinstance(row.get("id"), str)
+    }
+    completed_passes = [row for row in pass_rows if row.get("status") == "completed"]
+    completed_kinds = {row.get("kind") for row in completed_passes}
+    for required_kind in ("source_order", "cross_unit"):
+        if required_kind not in completed_kinds:
+            errors.append(
+                f"candidate discovery requires a completed {required_kind} pass"
+            )
+    discovered_unit_ids: set[str] = set()
+    discovered_burden_ids: set[str] = set()
+    for row in pass_rows:
+        pass_id = row.get("id")
+        row_units = set(row.get("coverage_unit_ids", []))
+        row_burdens = set(row.get("burden_ids", []))
+        unknown_units = sorted(row_units - set(units))
+        unknown_burdens = sorted(row_burdens - set(burdens))
+        if unknown_units:
+            errors.append(
+                f"candidate pass {pass_id} references unknown coverage units: "
+                + ", ".join(unknown_units)
+            )
+        if unknown_burdens:
+            errors.append(
+                f"candidate pass {pass_id} references unknown burdens: "
+                + ", ".join(unknown_burdens)
+            )
+        if row.get("status") == "completed" and row.get("kind") != "saturation":
+            discovered_unit_ids.update(row_units)
+            discovered_burden_ids.update(row_burdens)
+    missing_units = sorted(in_scope_unit_ids - discovered_unit_ids)
+    missing_burdens = sorted(active_burden_ids - discovered_burden_ids)
+    if missing_units:
+        errors.append(
+            "completed discovery passes omit in-scope coverage units: "
+            + ", ".join(missing_units)
+        )
+    if missing_burdens:
+        errors.append(
+            "completed discovery passes omit active burdens: "
+            + ", ".join(missing_burdens)
+        )
+    substantive_count = sum(
+        row.get("report_channel", "substance") == "substance"
+        for row in active_findings
+    )
+    if substantive_count < 30:
+        recovery_passes = [
+            row for row in completed_passes
+            if row.get("kind") == "low_count_recovery"
+        ]
+        if not recovery_passes:
+            errors.append(
+                "a full review with fewer than 30 substantive findings requires a completed low-count recovery pass"
+            )
+        elif not any(
+            set(row.get("coverage_unit_ids", [])) == in_scope_unit_ids
+            and set(row.get("burden_ids", [])) == active_burden_ids
+            for row in recovery_passes
+        ):
+            errors.append(
+                "the low-count recovery pass must cover every in-scope unit and active burden"
+            )
+
+    candidate_rows = [
+        row for row in ledger.get("candidates", []) if isinstance(row, dict)
+    ]
+    candidate_ids = [
+        row.get("id") for row in candidate_rows if isinstance(row.get("id"), str)
+    ]
+    duplicate_candidate_ids = sorted(
+        value for value, count in Counter(candidate_ids).items() if count > 1
+    )
+    if duplicate_candidate_ids:
+        errors.append(
+            "candidate ledger repeats candidate IDs: "
+            + ", ".join(duplicate_candidate_ids)
+        )
+    candidate_by_id = {
+        str(row.get("id")): row for row in candidate_rows
+        if isinstance(row.get("id"), str)
+    }
+    candidate_ids_by_finding: dict[str, set[str]] = {}
+    retained_dispositions = {"admitted", "weakened", "merged"}
+    for row in candidate_rows:
+        candidate_id = row.get("id")
+        pass_id = row.get("pass_id")
+        discovery_pass = pass_by_id.get(pass_id)
+        if not isinstance(discovery_pass, dict):
+            errors.append(
+                f"candidate {candidate_id} references unknown discovery pass {pass_id}"
+            )
+            continue
+        row_units = set(row.get("coverage_unit_ids", []))
+        row_burdens = set(row.get("burden_ids", []))
+        unknown_units = sorted(row_units - set(units))
+        unknown_burdens = sorted(row_burdens - set(burdens))
+        if unknown_units:
+            errors.append(
+                f"candidate {candidate_id} references unknown coverage units: "
+                + ", ".join(unknown_units)
+            )
+        if unknown_burdens:
+            errors.append(
+                f"candidate {candidate_id} references unknown burdens: "
+                + ", ".join(unknown_burdens)
+            )
+        pass_units = set(discovery_pass.get("coverage_unit_ids", []))
+        pass_burdens = set(discovery_pass.get("burden_ids", []))
+        outside_pass_units = sorted(row_units - pass_units)
+        outside_pass_burdens = sorted(row_burdens - pass_burdens)
+        if outside_pass_units:
+            errors.append(
+                f"candidate {candidate_id} uses units outside pass {pass_id}: "
+                + ", ".join(outside_pass_units)
+            )
+        if outside_pass_burdens:
+            errors.append(
+                f"candidate {candidate_id} uses burdens outside pass {pass_id}: "
+                + ", ".join(outside_pass_burdens)
+            )
+        disposition = row.get("disposition")
+        finding_id = row.get("finding_id")
+        if disposition in retained_dispositions:
+            if finding_id not in active_finding_ids:
+                errors.append(
+                    f"retained candidate {candidate_id} maps to unknown or inactive finding {finding_id}"
+                )
+            elif isinstance(candidate_id, str):
+                candidate_ids_by_finding.setdefault(str(finding_id), set()).add(candidate_id)
+        target_id = row.get("merged_into_candidate_id")
+        if disposition == "merged":
+            target = candidate_by_id.get(target_id)
+            if target_id == candidate_id or not isinstance(target, dict):
+                errors.append(
+                    f"merged candidate {candidate_id} has invalid target {target_id}"
+                )
+            elif target.get("disposition") == "merged":
+                errors.append(
+                    f"merged candidate {candidate_id} may not form a merge chain"
+                )
+            elif target.get("finding_id") != finding_id:
+                errors.append(
+                    f"merged candidate {candidate_id} and target {target_id} must map to the same finding"
+                )
+
+    declared_candidate_ids: set[str] = set()
+    for finding_id, finding in finding_by_id.items():
+        declared = finding.get("candidate_ids")
+        if not isinstance(declared, list) or not declared:
+            errors.append(
+                f"current full finding {finding_id} requires at least one candidate_id"
+            )
+            continue
+        declared_set = {value for value in declared if isinstance(value, str)}
+        declared_candidate_ids.update(declared_set)
+        unknown = sorted(declared_set - set(candidate_by_id))
+        if unknown:
+            errors.append(
+                f"finding {finding_id} references unknown candidate IDs: "
+                + ", ".join(unknown)
+            )
+        expected = candidate_ids_by_finding.get(finding_id, set())
+        if declared_set != expected:
+            errors.append(
+                f"finding {finding_id} candidate_ids do not exactly match retained candidates"
+            )
+    retained_candidate_ids = {
+        str(row.get("id")) for row in candidate_rows
+        if row.get("disposition") in retained_dispositions
+        and isinstance(row.get("id"), str)
+    }
+    omitted_retained = sorted(retained_candidate_ids - declared_candidate_ids)
+    if omitted_retained:
+        errors.append(
+            "retained candidates omitted from active findings: "
+            + ", ".join(omitted_retained)
+        )
+
+    sweep = coverage.get("second_sweep")
+    if not isinstance(sweep, dict):
+        errors.append("candidate discovery requires a structured saturation sweep")
+        return
+    if sweep.get("required") is not True or sweep.get("completed") is not True:
+        errors.append("candidate discovery requires a completed saturation sweep")
+    if sweep.get("saturation_reached") is not True:
+        errors.append("candidate discovery cannot stop before saturation_reached=true")
+    rounds = [row for row in sweep.get("rounds", []) if isinstance(row, dict)]
+    if not rounds:
+        errors.append("candidate discovery requires at least one saturation round")
+        return
+    round_ids = [row.get("id") for row in rounds if isinstance(row.get("id"), str)]
+    if len(round_ids) != len(set(round_ids)):
+        errors.append("candidate discovery repeats saturation round IDs")
+    sweep_pass_ids: set[str] = set()
+    round_new_finding_ids: set[str] = set()
+    repeated_round_finding_ids: set[str] = set()
+    for row in rounds:
+        round_id = row.get("id")
+        pass_id = row.get("pass_id")
+        sweep_pass_ids.add(str(pass_id))
+        discovery_pass = pass_by_id.get(pass_id)
+        if not isinstance(discovery_pass, dict):
+            errors.append(
+                f"saturation round {round_id} references unknown pass {pass_id}"
+            )
+        elif discovery_pass.get("kind") != "saturation" or discovery_pass.get("status") != "completed":
+            errors.append(
+                f"saturation round {round_id} requires a completed saturation pass"
+            )
+        round_units = set(row.get("coverage_unit_ids", []))
+        unknown_round_units = sorted(round_units - set(units))
+        if unknown_round_units:
+            errors.append(
+                f"saturation round {round_id} references unknown units: "
+                + ", ".join(unknown_round_units)
+            )
+        new_ids = set(row.get("new_finding_ids", []))
+        repeated_round_finding_ids.update(
+            str(value) for value in new_ids if value in round_new_finding_ids
+        )
+        round_new_finding_ids.update(str(value) for value in new_ids)
+        unknown_findings = sorted(new_ids - active_finding_ids)
+        if unknown_findings:
+            errors.append(
+                f"saturation round {round_id} references unknown active findings: "
+                + ", ".join(unknown_findings)
+            )
+        for finding_id in new_ids & active_finding_ids:
+            originating_passes = {
+                candidate_by_id[candidate_id].get("pass_id")
+                for candidate_id in candidate_ids_by_finding.get(str(finding_id), set())
+                if candidate_id in candidate_by_id
+            }
+            if pass_id not in originating_passes:
+                errors.append(
+                    f"saturation round {round_id} finding {finding_id} lacks a retained candidate from pass {pass_id}"
+                )
+    if len(sweep_pass_ids) != len(rounds):
+        errors.append("each saturation round requires a distinct discovery pass")
+    if repeated_round_finding_ids:
+        errors.append(
+            "findings may be new in only one saturation round: "
+            + ", ".join(sorted(repeated_round_finding_ids))
+        )
+    aggregate_new_ids = set(sweep.get("new_finding_ids", []))
+    if aggregate_new_ids != round_new_finding_ids:
+        errors.append(
+            "second_sweep.new_finding_ids must equal the union of saturation-round findings"
+        )
+    sweep_candidates = [
+        row for row in candidate_rows if row.get("pass_id") in sweep_pass_ids
+    ]
+    rejected_count = sum(row.get("disposition") == "refuted" for row in sweep_candidates)
+    bounded_count = sum(row.get("disposition") == "bounded" for row in sweep_candidates)
+    merged_count = sum(row.get("disposition") == "merged" for row in sweep_candidates)
+    if sweep.get("rejected_candidate_count") != rejected_count:
+        errors.append(
+            "second_sweep.rejected_candidate_count differs from the candidate ledger"
+        )
+    if sweep.get("bounded_candidate_count") != bounded_count:
+        errors.append(
+            "second_sweep.bounded_candidate_count differs from the candidate ledger"
+        )
+    if sweep.get("merged_candidate_count") != merged_count:
+        errors.append(
+            "second_sweep.merged_candidate_count differs from the candidate ledger"
+        )
+    final_round = rounds[-1]
+    if final_round.get("new_finding_ids"):
+        errors.append(
+            "the final saturation round must add zero surviving findings"
+        )
+    if set(final_round.get("coverage_unit_ids", [])) != in_scope_unit_ids:
+        errors.append(
+            "the final saturation round must revisit every in-scope coverage unit"
+        )
+    final_pass = pass_by_id.get(final_round.get("pass_id"), {})
+    if set(final_pass.get("burden_ids", [])) != active_burden_ids:
+        errors.append(
+            "the final saturation pass must revisit every active burden"
+        )
+
+
 def validate_finalization_receipt(
     review_dir: Path,
     review_id: Any,
     errors: list[str],
     run_mode: Any = None,
+    provenance_renderer: Any = None,
 ) -> None:
     receipt = load_json(review_dir / "finalization.json", errors)
     if not isinstance(receipt, dict):
@@ -1209,6 +1551,26 @@ def validate_finalization_receipt(
     artifacts = receipt.get("artifacts")
     if not isinstance(artifacts, dict):
         return
+    receipt_renderer = receipt.get("report_renderer")
+    if receipt_renderer is not None:
+        profile_path = review_dir / "evidence" / "pdf-render-profile.json"
+        if profile_path.is_file():
+            profile_for_renderer = load_json(profile_path, errors)
+            actual_renderer = (
+                profile_for_renderer.get("renderer")
+                if isinstance(profile_for_renderer, dict)
+                else None
+            )
+        else:
+            actual_renderer = "reportlab"
+        if receipt_renderer != actual_renderer:
+            errors.append(
+                "finalization.json.report_renderer differs from the selected PDF renderer"
+            )
+        if isinstance(provenance_renderer, str) and provenance_renderer != receipt_renderer:
+            errors.append(
+                "run.json.provenance.renderer differs from finalization.json.report_renderer"
+            )
     excluded_root = {"finalization.json", "review-actions.json"}
     artifact_paths: set[str] = set()
     folded_paths: dict[str, str] = {}
@@ -2451,7 +2813,248 @@ def validate_comment_section_v3(
     return set(detail_ids)
 
 
-def validate_review(review_dir: Path) -> list[str]:
+def validate_run_execution_contract(
+    review_dir: Path,
+    run: dict[str, Any],
+    errors: list[str],
+    *,
+    required_current: bool,
+) -> None:
+    """Validate mode history and reproducibility metadata for current runs."""
+
+    fields = (
+        "requested_mode", "delivered_mode", "mode_transition",
+        "transition_reason", "transition_source_review_id",
+        "finding_granularity", "provenance",
+    )
+    present = any(field in run for field in fields)
+    if required_current:
+        require(run, set(fields), "current run.json execution contract", errors)
+    if not (required_current or present):
+        return
+
+    requested = run.get("requested_mode")
+    delivered = run.get("delivered_mode")
+    transition = run.get("mode_transition")
+    reason = run.get("transition_reason")
+    source_review_id = run.get("transition_source_review_id")
+    if run.get("mode") != delivered:
+        errors.append("run.json.mode must match delivered_mode")
+    if transition == "none":
+        if requested != delivered:
+            errors.append(
+                "mode_transition=none requires requested_mode and delivered_mode to match"
+            )
+        if reason is not None or source_review_id is not None:
+            errors.append(
+                "mode_transition=none requires null transition_reason and transition_source_review_id"
+            )
+    elif transition == "separate_quick_after_failed_full":
+        if requested != "full" or delivered != "quick":
+            errors.append(
+                "separate_quick_after_failed_full requires requested_mode=full and delivered_mode=quick"
+            )
+        if not isinstance(reason, str) or not reason.strip():
+            errors.append(
+                "separate_quick_after_failed_full requires a non-empty transition_reason"
+            )
+        if not isinstance(source_review_id, str) or not source_review_id.strip():
+            errors.append(
+                "separate_quick_after_failed_full requires transition_source_review_id"
+            )
+        elif source_review_id == run.get("review_id"):
+            errors.append(
+                "a quick replacement for a failed full review must use a new review_id"
+            )
+    elif transition is not None:
+        errors.append(f"run.json.mode_transition is invalid: {transition!r}")
+
+    provenance = run.get("provenance")
+    if isinstance(provenance, dict):
+        command = provenance.get("command")
+        if not isinstance(command, list) or not command or any(
+            not isinstance(value, str) or not value.strip() for value in command
+        ):
+            errors.append("run.json.provenance.command must preserve the exact non-empty invocation")
+        profile_path = review_dir / "evidence" / "pdf-render-profile.json"
+        declared_renderer = provenance.get("renderer")
+        if profile_path.exists() and isinstance(declared_renderer, str):
+            profile = load_json(profile_path, errors)
+            if isinstance(profile, dict) and profile.get("renderer") != declared_renderer:
+                errors.append(
+                    "run.json.provenance.renderer differs from evidence/pdf-render-profile.json"
+                )
+
+
+def validate_finding_granularity(
+    run: dict[str, Any],
+    active_findings: list[dict[str, Any]],
+    errors: list[str],
+    *,
+    required_current: bool,
+) -> None:
+    """Reconcile declared defect, occurrence, and evidence counts."""
+
+    granularity = run.get("finding_granularity")
+    if not isinstance(granularity, dict):
+        if required_current:
+            errors.append("current run.json requires finding_granularity")
+        return
+    policy = granularity.get("policy")
+    named_policy = granularity.get("consolidation_policy")
+    if policy == "named_consolidation":
+        if not isinstance(named_policy, str) or not named_policy.strip():
+            errors.append("named_consolidation requires a non-empty consolidation_policy")
+    elif named_policy is not None:
+        errors.append(
+            "finding_granularity.consolidation_policy must be null unless policy is named_consolidation"
+        )
+
+    occurrence_count = 0
+    evidence_count = 0
+    for finding in active_findings:
+        locations = finding.get("related_locations")
+        if not isinstance(locations, list) or not locations or any(
+            not isinstance(value, str) or not value.strip() for value in locations
+        ):
+            errors.append(
+                f"active finding {finding.get('id')} must preserve every checked occurrence in related_locations"
+            )
+            continue
+        occurrence_count += len(locations)
+        evidence = finding.get("evidence")
+        if isinstance(evidence, list):
+            evidence_count += len(evidence)
+    expected = {
+        "unique_defect_count": len(active_findings),
+        "occurrence_count": occurrence_count,
+        "evidence_record_count": evidence_count,
+    }
+    for field, value in expected.items():
+        if granularity.get(field) != value:
+            errors.append(
+                f"finding_granularity.{field} differs from the active findings ledger: "
+                f"{granularity.get(field)!r} != {value}"
+            )
+
+
+def validate_quick_exhibit_boundaries(
+    review_dir: Path,
+    run: dict[str, Any],
+    errors: list[str],
+) -> None:
+    """Apply Review Desk's bounded-exhibit boundary invariant in quick mode."""
+
+    if run.get("mode") != "quick":
+        return
+    for collection in ("figures", "tables"):
+        path = review_dir / "evidence" / f"{collection}.json"
+        if not path.exists():
+            continue
+        manifest = load_json(path, errors)
+        if not isinstance(manifest, dict):
+            continue
+        validate_schema(
+            manifest,
+            f"{collection}.schema.json",
+            f"evidence/{collection}.json",
+            errors,
+        )
+        if manifest.get("review_id") != run.get("review_id"):
+            errors.append(f"{collection} review_id differs from run.json")
+        if manifest.get("schema_version") != "0.2":
+            continue
+        for row in manifest.get(collection, []):
+            if not isinstance(row, dict):
+                continue
+            identity_bounded = any(
+                isinstance(asset, dict)
+                and isinstance(asset.get("visible_identity"), dict)
+                and asset["visible_identity"].get("status") == "bounded"
+                for asset in row.get("rendered_assets", [])
+            )
+            fields = (
+                ("visual_status", "caption_text_status", "claim_correspondence_status")
+                if collection == "figures"
+                else (
+                    "render_status", "extraction_status", "visual_status",
+                    "claim_correspondence_status",
+                )
+            )
+            bounded = identity_bounded or any(row.get(field) == "bounded" for field in fields)
+            if collection == "tables" and isinstance(row.get("checks"), dict):
+                bounded = bounded or any(
+                    isinstance(check, dict) and check.get("status") == "bounded"
+                    for check in row["checks"].values()
+                )
+            boundary = row.get("assessment_boundary")
+            label = collection[:-1]
+            if bounded and not isinstance(boundary, dict):
+                errors.append(
+                    f"bounded {label} {row.get('id')} requires a structured assessment_boundary"
+                )
+            if not bounded and boundary is not None:
+                errors.append(
+                    f"unbounded {label} {row.get('id')} must set assessment_boundary to null"
+                )
+
+
+def validate_canonical_text_artifacts(
+    review_dir: Path,
+    errors: list[str],
+    *,
+    include_receipt: bool,
+) -> None:
+    """Reject non-UTF-8 or CR-bearing canonical text, excluding supplied sources."""
+
+    source_paths: set[str] = set()
+    manifest_path = review_dir / "evidence" / "source-manifest.json"
+    if manifest_path.exists():
+        try:
+            manifest = strict_json_load(manifest_path)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+            manifest = None
+        if isinstance(manifest, dict):
+            source_paths = {
+                row.get("path")
+                for row in manifest.get("sources", [])
+                if isinstance(row, dict) and isinstance(row.get("path"), str)
+            }
+
+    root_names = {
+        "run.json", "findings.json", "synthesis.json", "review-manifest.json",
+        "README.md", "report.md", "editing-comments.md", "writing-report.md",
+        "fix-plan.md", "revision-tasks.json", "agent-response.json",
+    }
+    if include_receipt:
+        root_names.add("finalization.json")
+    paths = {
+        review_dir / name for name in root_names if (review_dir / name).is_file()
+    }
+    evidence_dir = review_dir / "evidence"
+    if evidence_dir.is_dir():
+        paths.update(
+            path
+            for path in evidence_dir.rglob("*")
+            if path.is_file() and path.suffix.lower() in {".json", ".md"}
+        )
+    for path in sorted(paths):
+        relative = path.relative_to(review_dir).as_posix()
+        if relative in source_paths:
+            continue
+        try:
+            raw = safe_read_bytes(review_dir, relative)
+            raw.decode("utf-8")
+        except (OSError, UnicodeError, ValueError) as exc:
+            errors.append(f"canonical text artifact is not readable UTF-8: {relative}: {exc}")
+            continue
+        if b"\r" in raw:
+            errors.append(
+                f"canonical text artifact must use LF-only line endings: {relative}"
+            )
+
+
+def validate_review(review_dir: Path, *, strict_complete: bool = False) -> list[str]:
     errors: list[str] = []
     run = load_json(review_dir / "run.json", errors)
     ledger = load_json(review_dir / "findings.json", errors)
@@ -2507,9 +3110,17 @@ def validate_review(review_dir: Path) -> list[str]:
             strict_v4_audits = True
             strict_burden_coverage = True
         else:
+            legacy_full_receipt_v02 = (
+                isinstance(finalized_contract, dict)
+                and finalized_contract.get("schema_version") == "0.2"
+                and run.get("mode") == "full"
+            )
             strict_v4_audits = not (
                 isinstance(finalized_contract, dict)
-                and finalized_contract.get("schema_version") == "0.1"
+                and (
+                    finalized_contract.get("schema_version") == "0.1"
+                    or legacy_full_receipt_v02
+                )
             )
             strict_burden_coverage = not (
                 isinstance(finalized_contract, dict)
@@ -2518,6 +3129,13 @@ def validate_review(review_dir: Path) -> list[str]:
     strict_replication_contract = strict_burden_coverage or (
         v4 and run.get("mode") == "quick" and strict_v4_audits
     )
+    completion_requested = run.get("status") == "complete" or strict_complete
+    validate_run_execution_contract(
+        review_dir,
+        run,
+        errors,
+        required_current=v4 and strict_v4_audits,
+    )
     requested_addons = run.get("requested_addons")
     if strict_burden_coverage and run.get("mode") == "full" and not isinstance(requested_addons, list):
         errors.append("current v0.4 full review requires run.json.requested_addons (use [] when none were requested)")
@@ -2525,9 +3143,9 @@ def validate_review(review_dir: Path) -> list[str]:
     if run.get("review_id") != ledger.get("review_id"):
         errors.append("review_id differs between run.json and findings.json")
     manifest_path = review_dir / "review-manifest.json"
-    if current_contract and not manifest_path.exists():
+    if current_contract and not strict_complete and not manifest_path.exists():
         errors.append("review-manifest.json is required for contract v0.3+")
-    if manifest_path.exists():
+    if manifest_path.exists() and not strict_complete:
         manifest = load_json(manifest_path, errors)
         if isinstance(manifest, dict):
             validate_schema(manifest, "review-manifest.schema.json", "review-manifest.json", errors)
@@ -2684,6 +3302,13 @@ def validate_review(review_dir: Path) -> list[str]:
         item for item in active
         if split_contract and item.get("report_channel", "substance") == "writing"
     ]
+    validate_finding_granularity(
+        run,
+        active,
+        errors,
+        required_current=v4 and strict_v4_audits,
+    )
+    validate_quick_exhibit_boundaries(review_dir, run, errors)
     if run.get("prior_round") is not None:
         errors.extend(validate_round_reconciliation(review_dir, run, ledger))
     if split_contract:
@@ -2920,10 +3545,11 @@ def validate_review(review_dir: Path) -> list[str]:
         required_output_paths.append(writing_report_path)
     if current_contract:
         required_output_paths.append(synthesis_path)
-    for path in required_output_paths:
-        if not path.exists():
-            errors.append(f"missing required file: {path}")
-    if strict_burden_coverage and run.get("mode") == "full":
+    if not strict_complete:
+        for path in required_output_paths:
+            if not path.exists():
+                errors.append(f"missing required file: {path}")
+    if not strict_complete and strict_burden_coverage and run.get("mode") == "full":
         for path in (report_path, writing_report_path):
             if path.exists() and ASSESSMENT_BOUNDARY_HEADING.search(
                 path.read_text(encoding="utf-8")
@@ -3223,7 +3849,7 @@ def validate_review(review_dir: Path) -> list[str]:
                 missing_support = sorted(set(expected_support) - seen_support, key=str)
                 if missing_support:
                     errors.append("synthesis statements missing structured support: " + ", ".join(map(str, missing_support)))
-    if report_path.exists() and not split_contract:
+    if report_path.exists() and not strict_complete and not split_contract:
         report = report_path.read_text(encoding="utf-8")
         if run.get("mode") == "full":
             for heading in (
@@ -3359,7 +3985,7 @@ def validate_review(review_dir: Path) -> list[str]:
         for item in active:
             if item.get("id") not in report_id_tokens:
                 errors.append(f"active finding {item.get('id')} is not referenced in report.md")
-    if report_path.exists() and v2:
+    if report_path.exists() and not strict_complete and v2:
         report = report_path.read_text(encoding="utf-8")
         if run.get("mode") == "full":
             check_required_sections(
@@ -3389,7 +4015,7 @@ def validate_review(review_dir: Path) -> list[str]:
             if item.get("id") in report_ids:
                 errors.append(f"writing-channel finding {item.get('id')} must not appear in report.md")
 
-    if report_path.exists() and current_contract:
+    if report_path.exists() and not strict_complete and current_contract:
         report = report_path.read_text(encoding="utf-8")
         required_headings = (
             "## Overall assessment",
@@ -3472,7 +4098,7 @@ def validate_review(review_dir: Path) -> list[str]:
             if item.get("id") in report_ids:
                 errors.append(f"writing-channel finding {item.get('id')} must not appear in report.md")
 
-    if writing_report_path.exists() and v2:
+    if writing_report_path.exists() and not strict_complete and v2:
         writing_report = writing_report_path.read_text(encoding="utf-8")
         if run.get("mode") == "full":
             check_required_sections(
@@ -3501,7 +4127,7 @@ def validate_review(review_dir: Path) -> list[str]:
         for item in substance_active:
             if item.get("id") in writing_ids:
                 errors.append(f"substance-channel finding {item.get('id')} must not appear in editing-comments.md")
-    if writing_report_path.exists() and current_contract:
+    if writing_report_path.exists() and not strict_complete and current_contract:
         writing_report = writing_report_path.read_text(encoding="utf-8")
         if run.get("mode") == "full":
             current_sections = (
@@ -3576,7 +4202,7 @@ def validate_review(review_dir: Path) -> list[str]:
         for item in substance_active:
             if item.get("id") in writing_ids:
                 errors.append(f"substance-channel finding {item.get('id')} must not appear in editing-comments.md")
-    if plan_path.exists():
+    if plan_path.exists() and not strict_complete:
         plan = plan_path.read_text(encoding="utf-8")
         plan_ids = re.findall(
             r"^<!-- finding_id: ([A-Z][A-Z0-9_-]*-[0-9]{2,}) -->\s*$",
@@ -3616,7 +4242,12 @@ def validate_review(review_dir: Path) -> list[str]:
             if repeated_closures:
                 errors.append("fix-plan.md repeats a generic completion condition across items")
 
-    if run.get("status") == "complete":
+    if completion_requested:
+        validate_canonical_text_artifacts(
+            review_dir,
+            errors,
+            include_receipt=not strict_complete,
+        )
         if run.get("verification_passed") is not True:
             errors.append("complete run requires verification_passed=true")
         if split_contract and not isinstance(run.get("telemetry"), dict):
@@ -3624,14 +4255,20 @@ def validate_review(review_dir: Path) -> list[str]:
         if len(active) < minimum_target:
             coverage_probe = load_json(review_dir / "evidence/coverage.json", errors)
             sweep = coverage_probe.get("second_sweep", {}) if isinstance(coverage_probe, dict) else {}
+            rounds = sweep.get("rounds", []) if isinstance(sweep, dict) else []
             if not (
                 isinstance(sweep, dict)
                 and sweep.get("completed") is True
+                and sweep.get("saturation_reached") is True
+                and isinstance(rounds, list)
+                and rounds
+                and isinstance(rounds[-1], dict)
+                and not rounds[-1].get("new_finding_ids")
                 and isinstance(sweep.get("shortfall_explanation"), str)
                 and sweep.get("shortfall_explanation", "").strip()
             ):
                 errors.append(
-                    f"complete run falls below the requested comment target without a documented second-sweep shortfall: {len(active)} < {minimum_target}"
+                    f"complete run falls below the requested comment target without a documented zero-yield saturation round: {len(active)} < {minimum_target}"
                 )
         if run.get("mode") == "full" and comment_policy.get("exhaustive") is not True:
             errors.append("complete full run requires comment_policy.exhaustive=true")
@@ -3659,6 +4296,7 @@ def validate_review(review_dir: Path) -> list[str]:
                 "evidence/round-reconciliation.md",
             ])
         if run.get("mode") == "full":
+            required_artifacts.append("evidence/candidates.json")
             required_artifacts.append("evidence/reader-claim-audit.md")
             required_artifacts.append("evidence/claims.json")
             required_artifacts.append("evidence/figures.md")
@@ -3927,9 +4565,18 @@ def validate_review(review_dir: Path) -> list[str]:
                         errors.append("evidence/verification.md is not synchronized with verification.json")
                 except (OSError, UnicodeError, TypeError, ValueError) as exc:
                     errors.append(f"cannot render canonical verification audit: {exc}")
-            validate_finalization_receipt(
-                review_dir, run.get("review_id"), errors, run.get("mode")
-            )
+            if not strict_complete:
+                validate_finalization_receipt(
+                    review_dir,
+                    run.get("review_id"),
+                    errors,
+                    run.get("mode"),
+                    (
+                        run.get("provenance", {}).get("renderer")
+                        if isinstance(run.get("provenance"), dict)
+                        else None
+                    ),
+                )
 
         coverage_unit_ids: set[str] = set()
         coverage_anchor_ids_by_unit: dict[str, set[str]] = {}
@@ -4357,6 +5004,14 @@ def validate_review(review_dir: Path) -> list[str]:
                 if comment_policy.get("exhaustive") is True:
                     if not isinstance(sweep, dict) or sweep.get("required") is not True or sweep.get("completed") is not True:
                         errors.append("exhaustive full review requires a completed second sweep")
+                if strict_burden_coverage:
+                    validate_candidate_discovery(
+                        review_dir,
+                        run,
+                        coverage,
+                        active,
+                        errors,
+                    )
                 if coverage.get("schema_version") == "0.2":
                     readable_coverage = review_dir / "evidence" / "coverage.md"
                     if readable_coverage.exists():
@@ -6136,7 +6791,7 @@ def validate_review(review_dir: Path) -> list[str]:
                         errors.append(f"adverse table state {row.get('id')} must map to an active finding")
                     if row.get("render_status") != "inspected" and row.get("visual_status") != "bounded":
                         errors.append(f"table {row.get('id')} must be rendered and inspected or explicitly bounded")
-                    if row.get("extraction_status") == "conflict_unresolved" and run.get("status") == "complete":
+                    if row.get("extraction_status") == "conflict_unresolved" and completion_requested:
                         errors.append(f"complete review cannot leave table extraction conflict unresolved: {row.get('id')}")
                     checks = row.get("checks", {})
                     if isinstance(checks, dict):
@@ -6443,7 +7098,7 @@ def validate_review(review_dir: Path) -> list[str]:
                             errors.append(f"table-cell evidence for {finding_id} has no matching table-audit row: {exhibit}")
                         elif not any(finding_id in row.get("finding_ids", []) for row in matches):
                             errors.append(f"table-cell evidence for {finding_id} is not mapped back from table audit: {exhibit}")
-                if run.get("status") == "complete":
+                if completion_requested:
                     for row in rows:
                         if row.get("render_status") != "inspected":
                             errors.append(
@@ -7132,7 +7787,11 @@ def validate_review(review_dir: Path) -> list[str]:
                     errors.append(
                         "current v0.4 full review requires evidence/writing.json schema_version 0.4"
                     )
-                if writing_audit_version in {"0.3", "0.4"} and writing_report_path.exists():
+                if (
+                    not strict_complete
+                    and writing_audit_version in {"0.3", "0.4"}
+                    and writing_report_path.exists()
+                ):
                     current_writing_report = writing_report_path.read_text(encoding="utf-8")
                     if re.search(
                         r"^## (?:References and citation integrity|Reference accuracy and citation support)\s*$",
@@ -7592,7 +8251,7 @@ def validate_review(review_dir: Path) -> list[str]:
                         if finding_id not in active_writing_ids:
                             errors.append(f"highest-return writing ID is not an active writing finding: {finding_id}")
 
-                    if writing_report_path.exists():
+                    if writing_report_path.exists() and not strict_complete:
                         writing_report = writing_report_path.read_text(encoding="utf-8")
                         rich_headings = (
                             "## Editing assessment",
@@ -7663,8 +8322,16 @@ def validate_review(review_dir: Path) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate an econ-review output directory")
     parser.add_argument("review_dir", type=Path, help="Path containing run.json, findings.json, report.md, and fix-plan.md")
+    parser.add_argument(
+        "--strict-complete",
+        action="store_true",
+        help=(
+            "Apply every semantic completion check to a draft package while "
+            "excluding only the not-yet-written finalization receipt"
+        ),
+    )
     args = parser.parse_args()
-    errors = validate_review(args.review_dir)
+    errors = validate_review(args.review_dir, strict_complete=args.strict_complete)
     if errors:
         print("econ-review validation failed:", file=sys.stderr)
         for error in errors:
@@ -7675,4 +8342,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from cli_io import configure_utf8_stdio
+
+    configure_utf8_stdio()
     raise SystemExit(main())

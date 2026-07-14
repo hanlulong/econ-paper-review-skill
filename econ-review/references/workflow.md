@@ -4,6 +4,7 @@
 
 - [Mode matrix](#mode-matrix)
 - [Stage and overall run state](#stage-state)
+- [Efficient execution without scope loss](#efficient-execution-without-scope-loss)
 - [Assessment boundary](#assessment-boundary)
 - [Identity and literature degradation](#best-effort-identity-minimization)
 - [Parsing degradation and conditional recomputation](#parsing-degradation)
@@ -17,7 +18,7 @@
 | Reconstruction | Central claim, design, and key exhibit | Claim inventory, derivation ledger, methods map |
 | User checkpoint | Optional | Pause by default when interactive |
 | Literature frontier | Central contribution claims when safely searchable; otherwise state the narrower boundary | Core claim inventory, complementary search, candidate/version screening, attribution audit, and documented closure; `bounded` when safe search or decisive source access is unavailable; add venue evidence only when requested |
-| Candidate audit | Top risks only | Exhaustive section, rendered table/figure, analytical-ledger, and dimension sweeps; conditional lenses |
+| Candidate audit | Top risks only | Independent source-order and cross-unit discovery, rendered table/figure, analytical-ledger, and applicable object-specific passes; compact candidate ledger before full verification |
 | Counterargument | Required for reported major risks | Independent refutation where available for critical/major; fairness check for every minor |
 | Synthesis | Up to 3 central risks in the bounded pass | Normally a few root-cause essentials, with every independently or cumulatively dispositive concern preserved, plus every surviving detailed comment ranked 1..N |
 | Verification | Required | Required for every detailed comment, line by line |
@@ -35,7 +36,7 @@ Record each stage as `pending`, `in_progress`, `passed`, `bounded`, `failed`, or
 
 For full mode, record `comment_policy.minimum_target`, deprecated aggregate `maximum: null`, `substance_maximum: 100`, `writing_maximum: 30`, and whether exhaustive coverage passed. The channel maxima are author-facing publication capacities, not discovery limits: continue candidate generation through source and burden closure even after reaching either number. Never pad toward a capacity or suppress a distinct survivor to stay below it. Merge only a true shared root cause while retaining every material location. If independently defensible survivors still exceed a channel capacity, preserve them, record the overflow, and pause completion for explicit user resolution.
 
-Run a second sweep when an explicit user target remains unmet, source-derived coverage is incomplete, an activated burden is thinly audited relative to the objects it contains, manuscript scale warrants another pass, or the first pass was visibly dominated by one issue class. If fewer comments survive than an explicit target, document the source-specific shortfall and never pad. Do not set `exhaustive=true` until every source-derived unit and activated burden appears in `evidence/coverage.json` and its readable rendering. Treat `paper_family`, `designs`, and coverage branches as descriptive routing metadata; none activates or suppresses a burden.
+Treat the second sweep as a saturation loop. Run a complete independent sweep when an explicit user target remains unmet, source-derived coverage is incomplete, an activated burden is thinly audited relative to the objects it contains, manuscript scale warrants another pass, or the first pass was visibly dominated by one issue class. Whenever a sweep produces a new retained finding, update the candidate ledger and repeat the complete sweep. A full review stops only after the final round revisits every non-excluded unit and active burden and produces zero new retained findings. If fewer comments survive than an explicit target, document the source-specific shortfall and never pad. Do not set `exhaustive=true` until every source-derived unit and activated burden appears in `evidence/coverage.json`, every candidate has a disposition, and the zero-yield round is recorded. Treat `paper_family`, `designs`, and coverage branches as descriptive routing metadata; none activates or suppresses a burden.
 
 Use overall run states:
 
@@ -47,7 +48,15 @@ Use overall run states:
 
 Never set `complete` merely because files exist. For the current contract, use the finalization command defined by the installed scripts. It stages a completed run and generated artifacts, verifies source integrity, structured evidence, deterministic source/coverage/report generation, contract consistency, safe paths, exact gate semantics, and hashes, atomically replaces each generated artifact with rollback on ordinary failures, and writes the finalization receipt last so a partial update cannot remain receipt-valid. Legacy contracts retain their documented compatibility gates.
 
-Do not set `complete` when a comment target remains unexplained or a channel capacity has unresolved overflow. After the required second sweep, a documented evidence-based shortfall is acceptable when exhaustive coverage is otherwise complete; weak comments added to meet a number are not.
+Do not set `complete` when a comment target remains unexplained or a channel capacity has unresolved overflow. After documented candidate closure and a zero-yield saturation round, an evidence-based shortfall is acceptable when exhaustive coverage is otherwise complete; weak comments added to meet a number are not.
+
+## Efficient execution without scope loss
+
+Complete reconstruction before starting dependent audit work. Once the source map, claims, and active burdens are stable, run literature, logical/technical/methodological, exhibit, replication, and writing-reader discovery concurrently when their inputs do not depend on one another. Each worker returns compact candidate rows; only the coordinator writes `candidates.json`, `findings.json`, and other canonical ledgers.
+
+Retrieve exact source slices by source, page, anchor, unit, or object instead of loading complete multi-megabyte ingestion files into model context. Batch candidate verification by shared claim, exhibit, computation, or external source, while preserving a separate disposition and evidence chain for each candidate. Reuse hash-matched ingestion and reconstruction artifacts; rerun them only when the source or recorded pipeline fingerprint changes.
+
+Do not optimize by sampling pages, lowering render fidelity, skipping separate figure/table/equation inspection, weakening literature closure, or combining genuinely independent problems. Record observed wall time and token counts when the runtime exposes them so a slow stage can be diagnosed rather than guessed.
 
 ## Assessment boundary
 

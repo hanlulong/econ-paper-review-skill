@@ -40,12 +40,13 @@ python3 scripts/install_econ_review.py --global --all --with-review-desk
 Native Windows PowerShell:
 
 ```powershell
-py -3 scripts\install_econ_review.py --dry-run --global --all --with-review-desk
-py -3 scripts\install_econ_review.py --global --all --with-review-desk
+python scripts\install_econ_review.py --dry-run --global --all --with-review-desk
+python scripts\install_econ_review.py --global --all --with-review-desk
 ```
 
-If the Windows `py` launcher is unavailable, use the machine's Python 3.10+
-command. Native Windows does not require Bash.
+Use the working Python 3.10+ command already available on the machine; the
+optional Windows `py` launcher is not required. Native Windows does not require
+Bash.
 
 For one project instead of the whole user account:
 
@@ -60,7 +61,7 @@ Project setup uses `.claude/skills/econ-review`,
 
 - macOS: `~/Library/Application Support/econ-review/`
 - Linux: `${XDG_DATA_HOME:-~/.local/share}/econ-review/`
-- Windows: `%LOCALAPPDATA%\econ-review\`
+- Windows: `%USERPROFILE%\.econ-review\`
 
 `--runtime-dir`, `--review-desk-dir`, and `ECON_REVIEW_DESK_HOME` provide
 explicit overrides. Environment overrides must be absolute paths.
@@ -73,6 +74,15 @@ serves only release-manifest files on loopback, accepts only `GET` and `HEAD`,
 ships no manuscript or review bundle, and uses the browser's local file picker.
 If a browser cannot open automatically, the launcher prints the URL to open
 manually. No manuscript is uploaded.
+
+On Windows managed installations, `review-desk.cmd` is generated beside the
+stable Python launcher and is bound to the resolved managed-runtime interpreter.
+It forwards options such as `--check` and `--port`, so Review Desk never depends
+on whichever `python` happens to be first on the user's later `PATH`.
+The launcher reuses an already-running, integrity-matched Review Desk on the
+same port. If another program owns the port, it reports the conflict (and the
+PID when the operating system exposes it) instead of presenting a generic bind
+failure; choose another loopback port with `--port PORT`.
 
 The setup is idempotent: it skips unchanged skill copies, reuses a healthy
 runtime, and keeps an already verified Review Desk version. Use
@@ -113,12 +123,15 @@ Review Desk can still be installed, and the installer reports both states
 separately.
 
 Professional report rendering is a third, independent capability. When a
-compatible LuaLaTeX or Tectonic executable is already available, econ-review
-uses it for the report. When neither is available, the maintained ReportLab
-renderer remains available. A selected LaTeX renderer that encounters a source
-or compilation error fails visibly and leaves the prior verified PDF intact; it
-never silently falls back to ReportLab. The setup does not install or alter a
-system TeX distribution. Pandoc is neither bundled nor required.
+compatible and working LuaLaTeX or Tectonic executable is already available,
+econ-review uses it for the report. Auto-selection first compiles a minimal
+health document, so an installed but unusable TeX command is skipped and the
+maintained ReportLab renderer remains available. Once a healthy LaTeX renderer
+is selected, a manuscript-report source or compilation error fails visibly and
+leaves the prior verified PDF intact; it is not hidden by a ReportLab retry.
+Use `finalize_review.py --renderer reportlab` when a deterministic explicit
+override is needed. The setup does not install or alter a system TeX
+distribution. Pandoc is neither bundled nor required.
 
 After skill installation, restart or reload Codex and Claude Code so their
 skill discovery refreshes.

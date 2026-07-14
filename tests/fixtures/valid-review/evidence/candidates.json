@@ -1,0 +1,106 @@
+{
+  "schema_version": "0.1",
+  "review_id": "synthetic-valid-001",
+  "passes": [
+    {
+      "id": "PASS-01",
+      "kind": "source_order",
+      "role": "source-order discovery",
+      "scope": "Read the complete synthetic manuscript in source order.",
+      "coverage_unit_ids": ["paper"],
+      "burden_ids": [
+        "claim_consistency",
+        "logical_validity",
+        "technical_validity",
+        "methodological_validity",
+        "writing_mechanics",
+        "source_support"
+      ],
+      "status": "completed",
+      "boundary": null
+    },
+    {
+      "id": "PASS-02",
+      "kind": "cross_unit",
+      "role": "cross-unit discovery",
+      "scope": "Reconcile the proposition, boundary case, interpretation, and writing across the manuscript.",
+      "coverage_unit_ids": ["paper"],
+      "burden_ids": [
+        "claim_consistency",
+        "logical_validity",
+        "technical_validity",
+        "methodological_validity",
+        "writing_mechanics",
+        "source_support"
+      ],
+      "status": "completed",
+      "boundary": null
+    },
+    {
+      "id": "PASS-03",
+      "kind": "low_count_recovery",
+      "role": "independent low-count recovery",
+      "scope": "Recheck minor correctness, definitions, notation, cross-references, and cross-section consistency across the complete short manuscript.",
+      "coverage_unit_ids": ["paper"],
+      "burden_ids": [
+        "claim_consistency",
+        "logical_validity",
+        "technical_validity",
+        "methodological_validity",
+        "writing_mechanics",
+        "source_support"
+      ],
+      "status": "completed",
+      "boundary": null
+    },
+    {
+      "id": "PASS-04",
+      "kind": "saturation",
+      "role": "independent saturation sweep",
+      "scope": "Revisit the complete source and every active burden without using the retained findings as a checklist.",
+      "coverage_unit_ids": ["paper"],
+      "burden_ids": [
+        "claim_consistency",
+        "logical_validity",
+        "technical_validity",
+        "methodological_validity",
+        "writing_mechanics",
+        "source_support"
+      ],
+      "status": "completed",
+      "boundary": null
+    }
+  ],
+  "candidates": [
+    {
+      "id": "CND-001",
+      "pass_id": "PASS-01",
+      "coverage_unit_ids": ["paper"],
+      "burden_ids": ["claim_consistency", "logical_validity", "technical_validity"],
+      "locator": "synthetic-paper.md, Sections 2-3",
+      "provisional_issue": "The global uniqueness claim appears to fail at the equality boundary.",
+      "consequence": "The headline proposition would overstate the model prediction at equality.",
+      "proposed_repair": "Add a tie-breaking rule or state the equilibrium as set-valued at equality.",
+      "strongest_author_reply": "The equality case may be implicitly excluded by the parameter domain.",
+      "disposition": "admitted",
+      "disposition_reason": "The source includes the equality case and provides no tie-breaking rule.",
+      "finding_id": "LOGIC-01",
+      "merged_into_candidate_id": null
+    },
+    {
+      "id": "CND-002",
+      "pass_id": "PASS-02",
+      "coverage_unit_ids": ["paper"],
+      "burden_ids": ["writing_mechanics"],
+      "locator": "synthetic-paper.md, Section 3, paragraph 2",
+      "provisional_issue": "The proposition summary appears to contain a subject-verb agreement error.",
+      "consequence": "The error is conspicuous in the sentence summarizing the main proposition.",
+      "proposed_repair": "Replace 'characterize' with 'characterizes'.",
+      "strongest_author_reply": null,
+      "disposition": "admitted",
+      "disposition_reason": "The singular subject requires the verb form 'characterizes'.",
+      "finding_id": "WRT-01",
+      "merged_into_candidate_id": null
+    }
+  ]
+}

@@ -52,7 +52,7 @@ def render(payload: dict[str, Any]) -> str:
     lines = [
         "# Coverage Matrix",
         "",
-        "This matrix is generated from the canonical coverage ledger. It records source units, activated burdens, audit dimensions, and the exhaustive second sweep without treating an absent method as an applicable check.",
+        "This matrix is generated from the canonical coverage ledger. It records source units, activated burdens, audit dimensions, and the saturation audit without treating an absent method as an applicable check.",
         "",
         "## Source units",
         "",
@@ -122,14 +122,34 @@ def render(payload: dict[str, Any]) -> str:
 
     lines.extend([
         "",
-        "## Second sweep",
+        "## Saturation audit",
         "",
         f"- Required: {'yes' if sweep.get('required') is True else 'no'}",
         f"- Completed: {'yes' if sweep.get('completed') is True else 'no'}",
+        f"- Saturation reached: {'yes' if sweep.get('saturation_reached') is True else 'no'}",
         f"- Rejected candidates: {cell(sweep.get('rejected_candidate_count'))}",
+        f"- Bounded candidates: {cell(sweep.get('bounded_candidate_count'))}",
+        f"- Merged candidates: {cell(sweep.get('merged_candidate_count'))}",
         f"- New findings: {references(sweep.get('new_finding_ids'))}",
         f"- Shortfall or completion note: {cell(sweep.get('shortfall_explanation'))}",
     ])
+    sweep_rounds = sweep.get("rounds")
+    if isinstance(sweep_rounds, list) and sweep_rounds:
+        lines.extend([
+            "",
+            "| Round | Candidate pass | Scope | Coverage units | New findings |",
+            "|---|---|---|---|---|",
+        ])
+        for row in sweep_rounds:
+            if not isinstance(row, dict):
+                continue
+            lines.append(
+                "| " + " | ".join([
+                    f"`{cell(row.get('id'))}`", f"`{cell(row.get('pass_id'))}`",
+                    cell(row.get("scope")), references(row.get("coverage_unit_ids")),
+                    references(row.get("new_finding_ids")),
+                ]) + " |"
+            )
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -156,4 +176,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from cli_io import configure_utf8_stdio
+
+    configure_utf8_stdio()
     raise SystemExit(main())

@@ -5,6 +5,37 @@
   "assessment_date": "2026-07-13",
   "status": "complete",
   "mode": "full",
+  "requested_mode": "full",
+  "delivered_mode": "full",
+  "mode_transition": "none",
+  "transition_reason": null,
+  "transition_source_review_id": null,
+  "finding_granularity": {
+    "policy": "one_per_defect",
+    "consolidation_policy": null,
+    "occurrence_basis": "related_locations",
+    "unique_defect_count": 2,
+    "occurrence_count": 3,
+    "evidence_record_count": 2
+  },
+  "provenance": {
+    "git_commit": null,
+    "git_dirty": null,
+    "source_tree_sha256": null,
+    "operating_system": "portable synthetic fixture",
+    "python_version": "portable synthetic fixture",
+    "node_version": null,
+    "package_versions": {},
+    "renderer": "latexmk-lualatex",
+    "semantic_backend": null,
+    "ocr_backend": null,
+    "command": [
+      "synthetic fixture generation"
+    ],
+    "model_identity": null,
+    "prompt_identity": "econ-review v0.4 synthetic fixture",
+    "agent_count": 1
+  },
   "target": {
     "venue": null,
     "tier": "unspecified"

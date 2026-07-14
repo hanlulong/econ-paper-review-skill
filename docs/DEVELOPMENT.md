@@ -38,7 +38,8 @@ python3 scripts/install_econ_review.py --dry-run --global --all --with-review-de
 python3 scripts/install_econ_review.py --global --all --with-review-desk
 ```
 
-On native Windows, use `py -3` and backslash paths. Project-local setup uses
+On native Windows, use the machine's working Python 3.10+ command (normally
+`python`) and backslash paths; the optional `py` launcher is not required. Project-local setup uses
 `--local /path/to/project`; `--claude` and `--codex` select one agent. See
 [INSTALL.md](INSTALL.md) for the one-paste Codex/Claude prompt and non-admin
 Poppler guidance.
@@ -188,6 +189,12 @@ For a new strict full review, build the canonical source manifest and coverage u
 python3 econ-review/scripts/propose_source_inventory.py REVIEW_DIR SRC-01 UNIT-ID
 python3 econ-review/scripts/propose_source_bindings.py REVIEW_DIR --source-id SRC-01
 ```
+
+The source-inventory proposer may run immediately after the source manifest, before
+`coverage.json` exists. In that case `UNIT-ID` names the source-bound unit you will
+create, the result marks it `planned`, and `coverage_unit_anchor_ids_to_add` lists
+the exact granular and scope anchors that unit must receive. If coverage already
+exists, the helper fails unless that unit exists and belongs to the selected source.
 
 Inspect every proposal against the retained source. Create a narrower anchor when a proposed span is broader than the quoted text, and record checked absence only after searching the complete declared scope.
 

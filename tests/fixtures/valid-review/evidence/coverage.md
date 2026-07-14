@@ -1,6 +1,6 @@
 # Coverage Matrix
 
-This matrix is generated from the canonical coverage ledger. It records source units, activated burdens, audit dimensions, and the exhaustive second sweep without treating an absent method as an applicable check.
+This matrix is generated from the canonical coverage ledger. It records source units, activated burdens, audit dimensions, and the saturation audit without treating an absent method as an applicable check.
 
 ## Source units
 
@@ -65,10 +65,17 @@ This matrix is generated from the canonical coverage ledger. It records source u
 | `magnitude-plausibility` | universal | not_applicable | — | The qualitative fixture reports no headline numerical magnitude. |
 | `population-claim-transport` | universal | findings | `LOGIC-01` | The proposition transports strict-ranking uniqueness to the equality boundary without a selection condition. |
 
-## Second sweep
+## Saturation audit
 
 - Required: yes
 - Completed: yes
+- Saturation reached: yes
 - Rejected candidates: 0
+- Bounded candidates: 0
+- Merged candidates: 0
 - New findings: —
-- Shortfall or completion note: The fixture is one paragraph with one proposition; a second sweep found no additional defensible issue.
+- Shortfall or completion note: The fixture is one paragraph with one proposition; a complete saturation sweep found no additional defensible issue.
+
+| Round | Candidate pass | Scope | Coverage units | New findings |
+|---|---|---|---|---|
+| `SWEEP-01` | `PASS-04` | All in-scope units and active burdens after the initial discovery passes. | `paper` | — |

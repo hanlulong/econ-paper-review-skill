@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -33,8 +34,92 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+def sync_candidate_contract(target: Path) -> None:
+    """Keep unrelated positive fixture mutations inside the discovery contract."""
+
+    candidates_path = target / "evidence" / "candidates.json"
+    coverage_path = target / "evidence" / "coverage.json"
+    if not candidates_path.exists() or not coverage_path.exists():
+        return
+    run = json.loads((target / "run.json").read_text(encoding="utf-8"))
+    findings = json.loads((target / "findings.json").read_text(encoding="utf-8"))
+    coverage = json.loads(coverage_path.read_text(encoding="utf-8"))
+    candidates = json.loads(candidates_path.read_text(encoding="utf-8"))
+    unit_ids = [
+        row["id"] for row in coverage.get("units", [])
+        if row.get("status") != "not_applicable"
+    ]
+    burden_ids = [
+        row["id"] for row in run.get("activated_burdens", [])
+        if row.get("status") == "active"
+    ]
+    for row in candidates.get("passes", []):
+        if row.get("status") == "completed":
+            row["coverage_unit_ids"] = unit_ids
+            row["burden_ids"] = burden_ids
+    active_rows = [
+        row for row in findings.get("findings", [])
+        if row.get("status") not in {"dismissed", "resolved"}
+    ]
+    active_ids = {row.get("id") for row in active_rows}
+    granularity = run.get("finding_granularity")
+    if isinstance(granularity, dict):
+        granularity.update({
+            "unique_defect_count": len(active_rows),
+            "occurrence_count": sum(
+                len(row.get("related_locations", [])) for row in active_rows
+            ),
+            "evidence_record_count": sum(
+                len(row.get("evidence", [])) for row in active_rows
+            ),
+        })
+        (target / "run.json").write_text(
+            json.dumps(run, indent=2) + "\n", encoding="utf-8"
+        )
+    for row in candidates.get("candidates", []):
+        if row.get("finding_id") not in active_ids and row.get("disposition") in {
+            "admitted", "weakened", "merged"
+        }:
+            row.update({
+                "disposition": "refuted",
+                "disposition_reason": "The fixture mutation removed the corresponding active finding.",
+                "finding_id": None,
+                "merged_into_candidate_id": None,
+            })
+    sweep = coverage.get("second_sweep", {})
+    rounds = sweep.get("rounds", []) if isinstance(sweep, dict) else []
+    if rounds:
+        rounds[-1]["coverage_unit_ids"] = unit_ids
+        pass_id = rounds[-1].get("pass_id")
+        sweep_pass_ids = {row.get("pass_id") for row in rounds}
+        for row in candidates.get("passes", []):
+            if row.get("id") == pass_id:
+                row["burden_ids"] = burden_ids
+        sweep_candidates = [
+            row for row in candidates.get("candidates", [])
+            if row.get("pass_id") in sweep_pass_ids
+        ]
+        sweep["rejected_candidate_count"] = sum(
+            row.get("disposition") == "refuted"
+            for row in sweep_candidates
+        )
+        sweep["bounded_candidate_count"] = sum(
+            row.get("disposition") == "bounded" for row in sweep_candidates
+        )
+        sweep["merged_candidate_count"] = sum(
+            row.get("disposition") == "merged" for row in sweep_candidates
+        )
+    candidates_path.write_text(
+        json.dumps(candidates, indent=2) + "\n", encoding="utf-8"
+    )
+    coverage_path.write_text(
+        json.dumps(coverage, indent=2) + "\n", encoding="utf-8"
+    )
+
+
 def refresh_finalization_receipt(target: Path) -> None:
     """Re-sign intentional fixture mutations that are not finalizer tests."""
+    sync_candidate_contract(target)
     path = target / "finalization.json"
     if not path.exists():
         return
@@ -2329,6 +2414,38 @@ class ValidateReviewTests(unittest.TestCase):
             refresh_finalization_receipt(target)
             self.assertEqual(MODULE.validate_review(target), [])
 
+    def test_immutable_full_v04_receipt_v02_does_not_require_new_execution_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "review"
+            shutil.copytree(FIXTURE, target)
+
+            receipt_path = target / "finalization.json"
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            receipt["schema_version"] = "0.2"
+            receipt["gates"] = [
+                gate for gate in receipt["gates"]
+                if gate not in {"structured_audit_v02", "burden_coverage_v02"}
+            ]
+            receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+
+            run_path = target / "run.json"
+            run = json.loads(run_path.read_text(encoding="utf-8"))
+            for field in (
+                "requested_mode",
+                "delivered_mode",
+                "mode_transition",
+                "transition_reason",
+                "transition_source_review_id",
+                "finding_granularity",
+                "provenance",
+            ):
+                run.pop(field, None)
+            run_path.write_text(json.dumps(run, indent=2) + "\n", encoding="utf-8")
+
+            refresh_finalization_receipt(target)
+            errors = MODULE.validate_review(target)
+            self.assertFalse(any("current run.json requires" in error for error in errors), errors)
+
     def test_current_receipt_gate_removal_does_not_bypass_v02_audits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "review"
@@ -2563,6 +2680,7 @@ class ValidateReviewTests(unittest.TestCase):
                     "portable review-relative path" in error for error in errors
                 ))
 
+    @unittest.skipIf(os.name == "nt", "symlink creation is privilege-dependent on Windows")
     def test_v02_asset_safe_read_failure_is_not_silently_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "review"
@@ -4423,6 +4541,7 @@ class ValidateReviewTests(unittest.TestCase):
                 "canonical portable review-relative path" in error for error in errors
             ), errors)
 
+    @unittest.skipIf(os.name == "nt", "symlink creation is privilege-dependent on Windows")
     def test_figure_extraction_symlink_cannot_escape_review_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "review"

@@ -36,6 +36,29 @@ class TrustSpineTests(unittest.TestCase):
         shutil.copytree(FIXTURE, target)
         return target
 
+    def sync_candidate_scope(self, target: Path) -> None:
+        """Keep synthetic fixture edits consistent with the discovery contract."""
+        run = json.loads((target / "run.json").read_text(encoding="utf-8"))
+        coverage_path = target / "evidence" / "coverage.json"
+        coverage = json.loads(coverage_path.read_text(encoding="utf-8"))
+        candidate_path = target / "evidence" / "candidates.json"
+        candidates = json.loads(candidate_path.read_text(encoding="utf-8"))
+        unit_ids = sorted(
+            row["id"] for row in coverage["units"]
+            if row.get("status") != "not_applicable"
+        )
+        burden_ids = sorted(
+            row["id"] for row in run["activated_burdens"]
+            if row.get("status") == "active"
+        )
+        for discovery_pass in candidates["passes"]:
+            if discovery_pass.get("status") == "completed":
+                discovery_pass["coverage_unit_ids"] = unit_ids
+                discovery_pass["burden_ids"] = burden_ids
+        coverage["second_sweep"]["rounds"][-1]["coverage_unit_ids"] = unit_ids
+        candidate_path.write_text(json.dumps(candidates, indent=2) + "\n", encoding="utf-8")
+        coverage_path.write_text(json.dumps(coverage, indent=2) + "\n", encoding="utf-8")
+
     def make_composite(self, target: Path, *, complete: bool) -> tuple[dict, dict]:
         ledger_path = target / "findings.json"
         ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
@@ -733,6 +756,7 @@ class TrustSpineTests(unittest.TestCase):
                 "notes": "The claim activates the burden, but this synthetic fixture does not contain a numerical estimate to assess.",
             })
             coverage_path.write_text(json.dumps(coverage, indent=2) + "\n", encoding="utf-8")
+            self.sync_candidate_scope(target)
             result = subprocess.run(
                 [sys.executable, str(FINALIZER), str(target)], capture_output=True, text=True
             )
@@ -814,6 +838,11 @@ class TrustSpineTests(unittest.TestCase):
             run_path = target / "run.json"
             run = json.loads(run_path.read_text(encoding="utf-8"))
             run["mode"] = "quick"
+            run["requested_mode"] = "quick"
+            run["delivered_mode"] = "quick"
+            run["mode_transition"] = "none"
+            run["transition_reason"] = None
+            run["transition_source_review_id"] = None
             run["comment_policy"]["exhaustive"] = False
             run_path.write_text(json.dumps(run, indent=2) + "\n", encoding="utf-8")
             (target / "evidence" / "coverage.json").unlink()
@@ -873,16 +902,27 @@ class TrustSpineTests(unittest.TestCase):
                 "evidence/coverage.md", "evidence/sources.md", "finalization.json",
             ]
             before = {relative: (target / relative).read_bytes() for relative in tracked}
+            real_validate = FINALIZE_MODULE.validate_review
+
+            def fail_committed_package(
+                review_dir: Path, *, strict_complete: bool = False
+            ) -> list[str]:
+                errors = real_validate(review_dir, strict_complete=strict_complete)
+                if not strict_complete and review_dir.resolve() == target.resolve():
+                    errors.append("synthetic post-commit verification failure")
+                return errors
+
             with mock.patch.object(
                 FINALIZE_MODULE,
-                "check",
-                return_value=["synthetic post-commit verification failure"],
+                "validate_review",
+                side_effect=fail_committed_package,
             ):
                 with self.assertRaisesRegex(ValueError, "post-commit verification failure"):
                     FINALIZE_MODULE.finalize(target)
             after = {relative: (target / relative).read_bytes() for relative in tracked}
             self.assertEqual(after, before)
 
+    @unittest.skipIf(os.name == "nt", "symlink creation is privilege-dependent on Windows")
     @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
     def test_finalizer_rejects_a_symlinked_review_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -897,6 +937,7 @@ class TrustSpineTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("review directory must be a real directory", result.stderr)
 
+    @unittest.skipIf(os.name == "nt", "symlink creation is privilege-dependent on Windows")
     @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
     def test_generator_refuses_symlink_destination(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -914,6 +955,7 @@ class TrustSpineTests(unittest.TestCase):
             self.assertIn("link or junction destination", result.stderr)
             self.assertEqual(outside.read_text(encoding="utf-8"), "do not overwrite\n")
 
+    @unittest.skipIf(os.name == "nt", "symlink creation is privilege-dependent on Windows")
     @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
     def test_finalizer_rejects_any_package_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -97,7 +97,11 @@ When subagents are available, choose independent roles that cover the paper's ac
 - cold-reader claim consistency, terminology, convincingness, and author-facing tone;
 - section-by-section completeness reader.
 
-Activate only applicable roles and add paper-specific roles as needed. Give each role the raw manuscript and reconstruction, not the existing candidate list. Ask for exact evidence, consequence, fix, strongest author reply, and survival judgment. Merge only after independent passes finish.
+Activate only applicable roles and add paper-specific roles as needed. Give each role the raw manuscript and reconstruction, not the existing candidate list. Ask for a compact candidate row containing the exact location, issue, consequence, minimum repair, strongest author reply, and provisional survival judgment. Do not ask discovery agents to draft author-facing prose, populate the full finding contract, or repeat the reconstruction. Merge only after every independent pass finishes.
+
+Launch roles that share only the completed reconstruction concurrently. Literature/frontier work, internal technical and methodological review, rendered-exhibit review, and writing/reader review can normally proceed in parallel. Serialize a role only when it genuinely requires an output from another role. The coordinator alone writes canonical findings and audit ledgers after collecting all candidate rows.
+
+Build the initial candidate inventory before spending time on full per-finding verification or report prose. Verification may refute or merge candidates, but contract construction must not crowd out discovery. Preserve compact counts and dispositions for rejected and merged candidates so a low final count can be distinguished from premature stopping.
 
 When subagents are unavailable, run the same roles sequentially and keep separate candidate lists until merge.
 
@@ -157,8 +161,16 @@ Run a cold second sweep when:
 - source-derived coverage or an activated burden remains thin relative to the manuscript objects it contains.
 - a headline economic link, load-bearing comparison, related-result edge, promised evidence object, headline magnitude, or broad transport claim lacks a source-specific audit row.
 - either author-facing channel has reached its capacity; capacity is not evidence that discovery is complete.
+- a full review has fewer than 30 substantive survivors after challenge. Run a distinct `low_count_recovery` pass over every applicable unit and burden; for a genuinely short paper it may be compact. This is a diagnostic trigger, not a minimum or permission to pad.
 
-The second sweep searches for missed issues; it does not relax the admission standard. Record new candidates, rejected candidates with reasons, and the final coverage result.
+The second sweep searches for missed issues; it does not relax the admission standard. Run it as a saturation loop:
+
+1. Re-read every non-excluded coverage unit in paper order, then audit cross-unit links among the abstract, introduction, model or design, equations, results, exhibits, appendix, and conclusion. Do not use the existing finding list as the search outline.
+2. Record the sweep scope, all coverage-unit IDs, new surviving finding IDs, and separate refuted, bounded, and merged candidate counts.
+3. If any new candidate survives challenge, update the inventory and repeat a complete sweep.
+4. Finish only when the last complete sweep covers every non-excluded unit and produces no new surviving finding.
+
+Record every round in `coverage.json.second_sweep.rounds`, set `saturation_reached` only after the zero-new-finding round, and keep the aggregate new-finding and rejected-candidate fields synchronized with the rounds. A time, token, or context limit is a boundary or incomplete run, not saturation.
 
 ## 8. Verify every detailed comment
 

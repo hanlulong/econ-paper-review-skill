@@ -37,6 +37,21 @@ EVIDENCE_PREFIX_REPRESENTATIONS = {
     "[Rendered transcription]": "normalized_transcription",
 }
 
+EXTERNAL_METADATA_PROJECTION_FIELDS = (
+    "authors",
+    "title",
+    "identifiers",
+    "source_type",
+    "venue",
+    "publication_date",
+    "first_public_date",
+    "first_public_date_status",
+    "metadata_source_url",
+    "record_status",
+    "record_status_checked_at",
+    "record_status_source_url",
+)
+
 
 def _load(path: Path, errors: list[str]) -> Any:
     try:
@@ -66,6 +81,116 @@ def _canonical_external_identifier(value: str) -> str:
     if lowered.startswith("openalex:") or lowered.startswith("repec:"):
         return lowered.rstrip("/")
     return normalized.rstrip("/")
+
+
+def external_metadata_projection(source: dict[str, Any]) -> dict[str, Any]:
+    """Return the exact metadata projection required by the v0.4 trust contract."""
+
+    metadata = source.get("bibliographic_metadata")
+    if not isinstance(metadata, dict):
+        raise ValueError("external source has no bibliographic_metadata object")
+    return {
+        field: source.get("title") if field == "title" else metadata.get(field)
+        for field in EXTERNAL_METADATA_PROJECTION_FIELDS
+    }
+
+
+def validate_external_metadata_support(
+    source: dict[str, Any],
+    support_by_id: dict[str, tuple[str, dict[str, Any]]],
+    errors: list[str],
+) -> None:
+    """Validate source metadata against its canonical support projection."""
+
+    metadata = source.get("bibliographic_metadata")
+    if not isinstance(metadata, dict):
+        return
+    source_id = source.get("id")
+    field_support = metadata.get("field_support_record_ids")
+    field_support = field_support if isinstance(field_support, dict) else {}
+    expected_metadata_fields = external_metadata_projection(source)
+    for field_name, support_id in field_support.items():
+        owner, record = support_by_id.get(support_id, (None, None))
+        if not isinstance(record, dict):
+            errors.append(
+                f"external source {source_id} metadata field {field_name} references unknown support record {support_id}"
+            )
+            continue
+        if owner != source_id:
+            errors.append(
+                f"external source {source_id} metadata field {field_name} support belongs to {owner}"
+            )
+        if (
+            record.get("proposition_kind") != "bibliographic_metadata"
+            or record.get("support_state") != "supported"
+            or record.get("access_scope") not in {"metadata", "full_text", "official_summary"}
+        ):
+            errors.append(
+                f"external source {source_id} metadata field {field_name} requires a supported bibliographic-metadata record"
+            )
+        excerpt = record.get("snapshot_excerpt")
+        try:
+            projection = json.loads(excerpt) if isinstance(excerpt, str) else None
+        except json.JSONDecodeError:
+            projection = None
+        if not isinstance(projection, dict):
+            errors.append(
+                f"external source {source_id} metadata field {field_name} support must be an exact canonical JSON projection"
+            )
+            continue
+        canonical_projection = json.dumps(
+            projection, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        if excerpt != canonical_projection:
+            errors.append(
+                f"external source {source_id} metadata field {field_name} support is not canonical JSON"
+            )
+        if field_name not in projection:
+            errors.append(
+                f"external source {source_id} metadata field {field_name} is absent from its canonical JSON support projection"
+            )
+            continue
+        if projection[field_name] != expected_metadata_fields.get(field_name):
+            label = "ordered authors" if field_name == "authors" else field_name.replace("_", " ")
+            errors.append(
+                f"external source {source_id} {label} does not match its metadata field support record"
+            )
+
+    identifier_candidates = set()
+    for identifier in metadata.get("identifiers", []):
+        if not isinstance(identifier, dict):
+            continue
+        scheme = identifier.get("scheme")
+        value = identifier.get("value")
+        if not isinstance(scheme, str) or not isinstance(value, str):
+            continue
+        candidate = value if scheme == "other" else f"{scheme}:{value}"
+        identifier_candidates.add(_canonical_external_identifier(candidate).casefold())
+    stable_id = _canonical_external_identifier(str(source.get("stable_id") or "")).casefold()
+    if stable_id not in identifier_candidates:
+        errors.append(
+            f"external source {source_id} stable identifier is not one of its source-verified identifiers"
+        )
+
+    first_public = metadata.get("first_public_date")
+    publication = metadata.get("publication_date")
+    if isinstance(first_public, str) and isinstance(publication, str):
+        try:
+            if date.fromisoformat(first_public) > date.fromisoformat(publication):
+                errors.append(
+                    f"external source {source_id} first-public date is after its publication date"
+                )
+        except ValueError:
+            pass
+    if not any(
+        record.get("proposition_kind") == "bibliographic_metadata"
+        and record.get("support_state") == "supported"
+        for record in source.get("support_records", [])
+        if isinstance(record, dict)
+    ):
+        errors.append(
+            f"external source {source_id} lacks a supported bibliographic-metadata record"
+        )
 
 
 def _validate_frontier_v04(
@@ -733,82 +858,7 @@ def _validate_frontier_v04(
             errors.append(
                 f"external source {source_id} bibliographic work-family link is unresolved"
             )
-        field_support = metadata.get("field_support_record_ids")
-        field_support = field_support if isinstance(field_support, dict) else {}
-        expected_metadata_fields = {
-            "authors": metadata.get("authors"),
-            "title": source.get("title"),
-            "identifiers": metadata.get("identifiers"),
-            "source_type": metadata.get("source_type"),
-            "venue": metadata.get("venue"),
-            "publication_date": metadata.get("publication_date"),
-            "first_public_date": metadata.get("first_public_date"),
-            "first_public_date_status": metadata.get("first_public_date_status"),
-            "metadata_source_url": metadata.get("metadata_source_url"),
-            "record_status": metadata.get("record_status"),
-            "record_status_checked_at": metadata.get("record_status_checked_at"),
-            "record_status_source_url": metadata.get("record_status_source_url"),
-        }
-        for field_name, support_id in field_support.items():
-            owner, record = support_by_id.get(support_id, (None, None))
-            if not isinstance(record, dict):
-                errors.append(
-                    f"external source {source_id} metadata field {field_name} references unknown support record {support_id}"
-                )
-                continue
-            if owner != source_id:
-                errors.append(
-                    f"external source {source_id} metadata field {field_name} support belongs to {owner}"
-                )
-            if (
-                record.get("proposition_kind") != "bibliographic_metadata"
-                or record.get("support_state") != "supported"
-                or record.get("access_scope") not in {"metadata", "full_text", "official_summary"}
-            ):
-                errors.append(
-                    f"external source {source_id} metadata field {field_name} requires a supported bibliographic-metadata record"
-                )
-            excerpt = record.get("snapshot_excerpt")
-            try:
-                projection = json.loads(excerpt) if isinstance(excerpt, str) else None
-            except json.JSONDecodeError:
-                projection = None
-            if not isinstance(projection, dict):
-                errors.append(
-                    f"external source {source_id} metadata field {field_name} support must be an exact canonical JSON projection"
-                )
-                continue
-            canonical_projection = json.dumps(
-                projection, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-            )
-            if excerpt != canonical_projection:
-                errors.append(
-                    f"external source {source_id} metadata field {field_name} support is not canonical JSON"
-                )
-            if field_name not in projection:
-                errors.append(
-                    f"external source {source_id} metadata field {field_name} is absent from its canonical JSON support projection"
-                )
-                continue
-            if projection[field_name] != expected_metadata_fields.get(field_name):
-                label = "ordered authors" if field_name == "authors" else field_name.replace("_", " ")
-                errors.append(
-                    f"external source {source_id} {label} does not match its metadata field support record"
-                )
-        identifier_candidates = set()
-        for identifier in metadata.get("identifiers", []):
-            if not isinstance(identifier, dict):
-                continue
-            scheme = identifier.get("scheme")
-            value = identifier.get("value")
-            if not isinstance(scheme, str) or not isinstance(value, str):
-                continue
-            candidate = value if scheme == "other" else f"{scheme}:{value}"
-            identifier_candidates.add(_canonical_external_identifier(candidate).casefold())
-        if _canonical_external_identifier(str(source.get("stable_id") or "")).casefold() not in identifier_candidates:
-            errors.append(
-                f"external source {source_id} stable identifier is not one of its source-verified identifiers"
-            )
+        validate_external_metadata_support(source, support_by_id, errors)
         for field in ("publication_date", "first_public_date", "record_status_checked_at"):
             value = metadata.get(field)
             if not isinstance(value, str):
@@ -821,25 +871,6 @@ def _validate_frontier_v04(
                 errors.append(
                     f"external source {source_id} record status was checked after the frontier assessment date"
                 )
-        first_public = metadata.get("first_public_date")
-        publication = metadata.get("publication_date")
-        if isinstance(first_public, str) and isinstance(publication, str):
-            try:
-                if date.fromisoformat(first_public) > date.fromisoformat(publication):
-                    errors.append(
-                        f"external source {source_id} first-public date is after its publication date"
-                    )
-            except ValueError:
-                pass
-        if not any(
-            record.get("proposition_kind") == "bibliographic_metadata"
-            and record.get("support_state") == "supported"
-            for record in source.get("support_records", [])
-            if isinstance(record, dict)
-        ):
-            errors.append(
-                f"external source {source_id} lacks a supported bibliographic-metadata record"
-            )
         if metadata.get("record_status") in {"retracted", "withdrawn"}:
             high_confidence = any(
                 row.get("source_id") == source_id and row.get("confidence") == "high"
@@ -1635,6 +1666,60 @@ def _validate_external_support_records(
     return support_by_id
 
 
+def validate_external_source_fragment(
+    external: dict[str, Any],
+    snapshot_bytes: dict[str, bytes],
+    *,
+    active_finding_ids: set[str] | None = None,
+) -> list[str]:
+    """Validate standalone v0.4 source records against retained snapshot bytes.
+
+    This is the narrow reusable surface for capture builders.  Full package
+    validation still owns frontier, work-family, finding, and reciprocal-link
+    closure; this helper authenticates the snapshot, exact support spans, and
+    canonical bibliographic metadata projection before a fragment is merged.
+    """
+
+    errors: list[str] = []
+    if external.get("schema_version") != "0.4":
+        errors.append("external source fragment requires schema_version 0.4")
+        return errors
+    snapshot_text: dict[str, str] = {}
+    sources = external.get("sources")
+    if not isinstance(sources, list):
+        errors.append("external source fragment sources must be an array")
+        return errors
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        source_id = source.get("id")
+        raw = snapshot_bytes.get(source_id) if isinstance(source_id, str) else None
+        if not isinstance(raw, bytes):
+            errors.append(f"external source {source_id} has no retained snapshot bytes")
+            continue
+        if b"\r" in raw:
+            errors.append(f"external source {source_id} snapshot is not LF-only")
+        if sha256_bytes(raw) != source.get("snapshot_sha256"):
+            errors.append(f"external source {source_id} snapshot hash mismatch")
+        try:
+            snapshot_text[str(source_id)] = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            errors.append(
+                f"external source {source_id} snapshot is not UTF-8 and cannot support exact propositions"
+            )
+    support_by_id = _validate_external_support_records(
+        external,
+        snapshot_text,
+        active_finding_ids or set(),
+        errors,
+        strict_current_contract=True,
+    )
+    for source in sources:
+        if isinstance(source, dict):
+            validate_external_metadata_support(source, support_by_id, errors)
+    return errors
+
+
 def _normalized(value: str, mode: str) -> str:
     if mode == "unicode_nfc":
         return unicodedata.normalize("NFC", value)
@@ -1993,6 +2078,10 @@ def validate_trust_spine(
         else:
             if sha256_bytes(snapshot) != row.get("snapshot_sha256"):
                 errors.append(f"external source {source_id} snapshot hash mismatch")
+            if strict_current_contract and b"\r" in snapshot:
+                errors.append(
+                    f"external source {source_id} snapshot must use LF-only line endings"
+                )
             try:
                 external_snapshot_text[source_id] = snapshot.decode("utf-8")
             except UnicodeDecodeError:
