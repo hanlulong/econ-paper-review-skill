@@ -6,6 +6,7 @@ import importlib.util
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -82,7 +83,7 @@ class CrossPlatformPathTests(unittest.TestCase):
         runtime_python = Path(r"D:\econ-review\runtime\Scripts\python.exe")
         launcher = MODULE.review_desk_cmd_bytes(runtime_python).decode("utf-8")
         self.assertIn(f'"{runtime_python}"', launcher)
-        self.assertIn('"%~dp0launch_review_desk.py" %*', launcher)
+        self.assertIn('-I "%~dp0launch_review_desk.py" %*', launcher)
         self.assertIn("set PYTHONUTF8=1", launcher)
         self.assertTrue(launcher.endswith("exit /b %ERRORLEVEL%\r\n"))
 
@@ -91,6 +92,37 @@ class CrossPlatformPathTests(unittest.TestCase):
             Path(r"D:\Profiles\100%Reviewer\runtime\Scripts\python.exe")
         ).decode("utf-8")
         self.assertIn(r"100%%Reviewer", launcher)
+
+    def test_posix_review_desk_command_is_shell_safe(self) -> None:
+        arguments = [
+            Path("/tmp/$HOME runtime/bin/python"),
+            "-I",
+            Path("/tmp/$(touch should-not-run)/launch_review_desk.py"),
+        ]
+        command = MODULE.format_launch_command(arguments, system="Linux")
+        self.assertEqual(shlex.split(command), [str(value) for value in arguments])
+        self.assertIn("'/tmp/$HOME runtime", command)
+        self.assertIn("'/tmp/$(touch should-not-run)", command)
+
+    def test_windows_review_desk_command_is_pasteable_in_powershell(self) -> None:
+        launcher = Path(r"D:\Review Roots\O'Brien $Reviewer\Review Desk\review-desk.cmd")
+        command = MODULE.format_launch_command([launcher], system="Windows")
+        self.assertEqual(
+            command,
+            r"& 'D:\Review Roots\O''Brien $Reviewer\Review Desk\review-desk.cmd'",
+        )
+
+        python = Path(r"C:\Program Files\Python\python.exe")
+        script = Path(r"D:\Review Roots\Reviewer Name\Review Desk\launch_review_desk.py")
+        self.assertEqual(
+            MODULE.format_launch_command([python, "-I", script], system="Windows"),
+            r"& 'C:\Program Files\Python\python.exe' '-I' "
+            r"'D:\Review Roots\Reviewer Name\Review Desk\launch_review_desk.py'",
+        )
+
+    def test_review_desk_command_rejects_multiline_paths(self) -> None:
+        with self.assertRaisesRegex(MODULE.InstallError, "line breaks"):
+            MODULE.format_launch_command(["/tmp/review\ncommand"], system="Linux")
 
     def test_platform_specific_review_desk_locations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
@@ -458,6 +490,64 @@ class ManagedInstallerTests(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.InstallError, "third-party notices"):
                 MODULE.verify_review_desk_bundle(without_notice)
 
+    def test_review_desk_rejects_unlisted_version_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "desk"
+            bundle = ROOT / "review-viewer" / "release" / "review-desk.zip"
+            installed = MODULE.install_review_desk(bundle, root, dry_run=False)
+            manifest_bytes, records, _digest = MODULE.verify_review_desk_bundle(bundle)
+            (installed / "hashlib.py").write_text("raise RuntimeError('shadowed')\n", encoding="utf-8")
+
+            self.assertFalse(MODULE.review_desk_is_current(installed, manifest_bytes, records))
+            with self.assertRaisesRegex(MODULE.InstallError, "fails verification"):
+                MODULE.install_review_desk(bundle, root, dry_run=False)
+
+    def test_review_desk_authenticates_version_launcher_before_exec(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "desk"
+            bundle = ROOT / "review-viewer" / "release" / "review-desk.zip"
+            installed = MODULE.install_review_desk(bundle, root, dry_run=False)
+            marker = Path(tmp) / "unverified-launcher-ran"
+            (installed / "launch_review_desk.py").write_text(
+                f"open({str(marker)!r}, 'w', encoding='utf-8').write('executed')\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(root / "launch_review_desk.py"), "--check"],
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("pre-launch authentication", result.stderr)
+            self.assertFalse(marker.exists())
+
+    def test_review_desk_stable_launcher_blocks_local_module_shadowing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "desk"
+            bundle = ROOT / "review-viewer" / "release" / "review-desk.zip"
+            MODULE.install_review_desk(bundle, root, dry_run=False)
+            marker = Path(tmp) / "shadow-module-ran"
+            (root / "json.py").write_text(
+                f"open({str(marker)!r}, 'w', encoding='utf-8').write('executed')\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(root / "launch_review_desk.py"), "--check"],
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("integrity check passed", result.stdout)
+            self.assertFalse(marker.exists())
+
     def test_review_desk_specific_paths_require_opt_in(self) -> None:
         result = self.run_installer("--review-desk-dir", "/synthetic/review-desk", check=False)
         self.assertEqual(result.returncode, 1)
@@ -518,6 +608,42 @@ class ManagedInstallerTests(unittest.TestCase):
                 installed.read_text(encoding="utf-8"),
                 (fixture.skill / "SKILL.md").read_text(encoding="utf-8"),
             )
+
+    def test_unlisted_installed_module_is_removed_before_doctor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            (fixture.skill / "scripts" / "pdf_ingestion.py").write_text(
+                "import hashlib\n"
+                "import sys\n"
+                "assert sys.argv[-1] == 'doctor'\n"
+                "print('fixture doctor: complete')\n",
+                encoding="utf-8",
+            )
+            project = root / "project"
+            project.mkdir()
+            arguments = (
+                "--source",
+                str(fixture.skill),
+                "--local",
+                str(project),
+                "--codex",
+                "--copy-only",
+            )
+            self.run_installer(*arguments)
+            destination = project / ".agents" / "skills" / "econ-review"
+            marker = root / "shadow-module-ran"
+            shadow = destination / "scripts" / "hashlib.py"
+            shadow.write_text(
+                f"open({str(marker)!r}, 'w', encoding='utf-8').write('executed')\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_installer(*arguments, "--check")
+
+            self.assertIn("Installed Codex (project)", result.stdout)
+            self.assertFalse(shadow.exists())
+            self.assertFalse(marker.exists())
 
     def test_failed_runtime_refresh_restores_previous_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

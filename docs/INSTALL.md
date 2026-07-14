@@ -1,5 +1,16 @@
 # Install econ-review
 
+## Choose an installation
+
+The complete setup is recommended for a new machine: it installs the skill for
+both agents, prepares a managed Python runtime, checks PDF support, and installs
+Review Desk. The native marketplace path installs only the skill and is useful
+when those supporting components are already available or when you want the
+client's built-in plugin update flow.
+
+Choose one skill-installation path per client. Installing both the native
+plugin and a direct skill copy can make the same skill appear twice.
+
 ## One-paste agent prompt
 
 Paste this prompt into Codex or Claude Code. It installs the skill for both
@@ -10,18 +21,122 @@ need Node.js or npm.
 
 ```text
 Install econ-review from https://github.com/hanlulong/econ-paper-review-skill for
-Claude Code and Codex by following this file. Use my existing GitHub login; never ask
-me to paste a token, and preserve uncommitted work. Detect macOS, Linux, or Windows;
-run the dry run, then the managed global setup for both agents with --with-review-desk.
-Do not install system packages, TeX, Pandoc, cloud backends, or anything requiring
-administrator access. Report both skill paths, PDF/report readiness, the Review Desk
-command and URL, anything still missing, and remind me to reload my sessions.
+Claude Code and Codex by following this file. Clone the public repository over HTTPS;
+never ask me to paste a token, and preserve uncommitted work. Detect macOS, Linux, or
+Windows; run the dry run, then the managed global setup for both agents with
+--with-review-desk. Do not install system packages, TeX, Pandoc, cloud backends, or
+anything requiring administrator access. Report both skill paths, PDF/report readiness,
+the Review Desk command and URL, anything still missing, and remind me to reload my
+sessions.
 ```
 
-The prompt leaves credentials with the user's existing GitHub client. If a
-private-repository checkout is not authorized, configure `gh auth login` or the
-normal Git credential helper; do not expose a token in chat, a URL, or a shell
-command.
+The repository is public and its HTTPS checkout does not require GitHub
+credentials. Do not expose a token in chat, a URL, or a shell command.
+
+## Native marketplace install (skill only)
+
+The repository exposes one marketplace named `econ-paper-review` to both
+clients. Adding the marketplace makes the plugin browsable; installing the
+plugin is a separate second step.
+
+Claude Code, from the `/plugin` interface:
+
+```text
+/plugin marketplace add hanlulong/econ-paper-review-skill
+/plugin install econ-review@econ-paper-review
+```
+
+The equivalent Claude Code CLI commands are:
+
+```bash
+claude plugin marketplace add hanlulong/econ-paper-review-skill
+claude plugin install econ-review@econ-paper-review
+```
+
+Codex:
+
+```bash
+codex plugin marketplace add hanlulong/econ-paper-review-skill
+codex plugin add econ-review@econ-paper-review
+```
+
+These commands work on macOS, Linux, and native Windows terminals. Reload or
+restart the client after installation so it discovers the skill.
+
+A plugin install contains the portable `econ-review` skill, its scripts,
+contracts, references, and dependency manifests. It does not create the
+managed Python environment, install Poppler or optional PDF backends, or
+install Review Desk. If first use reports a missing Python package or PDF tool,
+use the complete setup below rather than treating the plugin install as a
+readiness check.
+
+### Update a plugin install
+
+Claude Code:
+
+```bash
+claude plugin marketplace update econ-paper-review
+claude plugin update econ-review@econ-paper-review
+```
+
+Codex:
+
+```bash
+codex plugin marketplace upgrade econ-paper-review
+codex plugin add econ-review@econ-paper-review
+```
+
+The update commands refresh the catalog and then apply the current plugin
+version. Restart or reload the client after an update.
+
+### Install a pinned release
+
+Published release tags use `econ-review--v<version>`. Pinning the marketplace
+to one of those versioned tags also pins the relative `./econ-review` plugin
+source to the same tagged repository snapshot. For example, after the `0.1.0`
+release tag has been published:
+
+Claude Code:
+
+```bash
+claude plugin marketplace add hanlulong/econ-paper-review-skill@econ-review--v0.1.0
+claude plugin install econ-review@econ-paper-review
+```
+
+Codex:
+
+```bash
+codex plugin marketplace add hanlulong/econ-paper-review-skill --ref econ-review--v0.1.0
+codex plugin add econ-review@econ-paper-review
+```
+
+Both clients can pin the marketplace to a branch or tag. Claude Code does not
+accept a raw commit SHA for a marketplace source, so use a versioned release
+tag when reproducibility matters. This repository deliberately keeps the
+plugin source inside the marketplace repository, avoiding a second independently
+moving source to pin.
+
+### Remove a plugin install
+
+Removal is separate from updating. Run these only when you intend to uninstall
+the skill:
+
+Claude Code:
+
+```bash
+claude plugin uninstall econ-review@econ-paper-review
+claude plugin marketplace remove econ-paper-review
+```
+
+Codex:
+
+```bash
+codex plugin remove econ-review@econ-paper-review
+codex plugin marketplace remove econ-paper-review
+```
+
+Removing the marketplace is optional; do it only when you no longer want this
+repository listed.
 
 ## Recommended direct setup
 
@@ -60,7 +175,7 @@ Project setup uses `.claude/skills/econ-review`,
 `CODEX_HOME`. Global runtime and viewer paths use:
 
 - macOS: `~/Library/Application Support/econ-review/`
-- Linux: `${XDG_DATA_HOME:-~/.local/share}/econ-review/`
+- Linux: `${XDG_DATA_HOME:-$HOME/.local/share}/econ-review/`
 - Windows: `%USERPROFILE%\.econ-review\`
 
 `--runtime-dir`, `--review-desk-dir`, and `ECON_REVIEW_DESK_HOME` provide
@@ -89,6 +204,23 @@ runtime, and keeps an already verified Review Desk version. Use
 `--refresh-runtime` only for a clean Python rebuild. A failed runtime rebuild
 restores the prior runtime. A tampered immutable viewer version fails closed
 instead of being silently trusted.
+
+### Update a managed or copy-only setup
+
+From the original public checkout, fast-forward it and repeat the same dry run
+and setup command:
+
+```bash
+git pull --ff-only
+python3 scripts/install_econ_review.py --dry-run --global --all --with-review-desk
+python3 scripts/install_econ_review.py --global --all --with-review-desk
+```
+
+On native Windows PowerShell, use `python` and backslash script paths as in the
+initial setup. If the original checkout was not retained, make a fresh public
+HTTPS checkout in a new directory and run the same commands there. Rerunning
+the installer updates changed skill files atomically, reuses a compatible
+runtime, and keeps an already verified Review Desk version.
 
 ## Skill-only and manual modes
 

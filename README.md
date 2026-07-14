@@ -10,8 +10,6 @@
 
 *Built for economics. Also works well for finance, accounting, political economy, and other social science papers that rest on data, causal inference, or formal models.*
 
-**[Read a sample referee report →](docs/sample-review/paper-review.pdf)**
-
 ## What you get
 
 A finished review lands in a clean `review/` folder next to your paper:
@@ -42,18 +40,46 @@ Every comment quotes the relevant manuscript text — or, when the issue comes f
 
 Works on macOS, Windows, and Linux. Needs Python 3.10+ and [Poppler](https://poppler.freedesktop.org/) for PDF reading; no TeX, Pandoc, Node.js, or administrator access required.
 
+### Complete setup (recommended)
+
 Paste this into Claude Code or Codex and it will install itself:
 
 ```text
 Help me install econ-review from https://github.com/hanlulong/econ-paper-review-skill
 by following its docs/INSTALL.md. Run the dry run first, then the managed global setup
-for both Claude Code and Codex with --with-review-desk. Use my existing GitHub login —
-never ask me to paste a token — and do not install system packages, TeX, Pandoc, or
+for both Claude Code and Codex with --with-review-desk. Clone the public repository over
+HTTPS; never ask me to paste a token. Do not install system packages, TeX, Pandoc, or
 anything needing administrator access. When done, tell me the Review Desk command and
 URL and remind me to reload my agent sessions.
 ```
 
 The expanded, security-preserving prompt and project-local variants are in [docs/INSTALL.md](docs/INSTALL.md).
+
+### Native plugin install (skill only)
+
+If the core Python packages and Poppler are already available, install the
+skill directly from its marketplace.
+
+Claude Code:
+
+```text
+/plugin marketplace add hanlulong/econ-paper-review-skill
+/plugin install econ-review@econ-paper-review
+```
+
+Codex:
+
+```bash
+codex plugin marketplace add hanlulong/econ-paper-review-skill
+codex plugin add econ-review@econ-paper-review
+```
+
+This native path gives each client a browsable, versioned skill and its normal
+marketplace update flow. It does not prepare the managed Python runtime,
+install Poppler, or install Review Desk. Use the complete setup above on a new
+machine or whenever those components are not already ready. Update, pinned
+release, and removal commands are in
+[docs/INSTALL.md](docs/INSTALL.md#update-a-plugin-install).
 
 <details>
 <summary>Manual installation</summary>
@@ -82,7 +108,7 @@ Use the econ-review skill to reconstruct the theory and empirical design before 
 `quick` gives you the biggest risks fast. `full` goes through every section, table, figure, equation, footnote, and appendix. When it finishes, open `review/paper-review.pdf`; use `review/README.md` for the file map and next-round workflow.
 
 > [!IMPORTANT]
-> **A full review takes 20 minutes to an hour**, depending on the paper's length and complexity. Let it run to the end — the verification passes that keep the comments trustworthy happen late in the run. `quick` mode finishes in a few minutes.
+> **A full review often takes 30 minutes or longer**, and a long or technical paper with live literature verification may take substantially longer. Let it run to the end — the verification passes that keep the comments trustworthy happen late in the run. Use `quick` mode when you need a faster first pass over the largest risks.
 
 Then hand the to-do list to your agent — the revision plan is written for exactly that:
 
@@ -101,8 +127,6 @@ AI peer review usually fails in one of two ways: it makes things up, or it hands
 - **It checks comments against the source.** Quotations, equations, tables, and figures are checked against the supplied source or rendered PDF pages; reviewer-derived comparisons and calculations are labeled in plain language instead of presented as quotations.
 - **It argues with itself before it argues with you.** Before a major comment reaches the report, the skill searches your paper and appendix for the strongest reply you could make. If your reply would win, the comment is deleted.
 - **It checks your contribution against live literature.** Each novelty and citation claim becomes a targeted search; candidate papers are screened, authors and versions confirmed, and available full texts read before the review calls a citation missing or a contribution overstated. When the evidence is not decisive, it says so.
-- **It is fair about data limits.** If your data can't do something, you say so in the paper, and your claims stay within those limits, that is not a flaw — and the review won't treat it as one.
-- **It checks what fits your paper.** Difference-in-differences, IV, and RDD checks switch on only when your paper actually uses those designs. No demands for robustness checks that make no sense for your setting.
 
 Every review also passes a set of automatic consistency checks before it is shown to you as finished.
 

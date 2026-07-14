@@ -25,6 +25,7 @@ import sys
 import tempfile
 import unicodedata
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePath
 from typing import Any, Iterable
 
@@ -220,14 +221,32 @@ def _doctor_python_line(status: RequirementStatus, profile: str, *, label: str |
     return f"{label or status.name}: {installed} ({profile}; {status.state}; requires {status.requirement})"
 
 
+DOCTOR_COMMAND_SPECS = (
+    ("pdftotext", ("-v",), True),
+    ("pdftoppm", ("-v",), True),
+    ("pdfinfo", ("-v",), True),
+    ("pdffonts", ("-v",), False),
+    ("tesseract", ("--version",), False),
+)
+
+
+def doctor_command_rows() -> list[tuple[str, str, bool]]:
+    """Probe independent command versions concurrently and retain report order."""
+
+    def probe(spec: tuple[str, tuple[str, ...], bool]) -> str:
+        name, arguments, _required = spec
+        return command_version(name, list(arguments))
+
+    with ThreadPoolExecutor(max_workers=len(DOCTOR_COMMAND_SPECS)) as executor:
+        versions = executor.map(probe, DOCTOR_COMMAND_SPECS)
+        return [
+            (name, version, required)
+            for (name, _arguments, required), version in zip(DOCTOR_COMMAND_SPECS, versions)
+        ]
+
+
 def doctor() -> int:
-    command_rows = [
-        ("pdftotext", command_version("pdftotext", ["-v"]), True),
-        ("pdftoppm", command_version("pdftoppm", ["-v"]), True),
-        ("pdfinfo", command_version("pdfinfo", ["-v"]), True),
-        ("pdffonts", command_version("pdffonts", ["-v"]), False),
-        ("tesseract", command_version("tesseract", ["--version"]), False),
-    ]
+    command_rows = doctor_command_rows()
     required_failure = False
     for name, version, required in command_rows:
         state = "required" if required else "optional"

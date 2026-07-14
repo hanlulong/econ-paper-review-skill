@@ -44,11 +44,11 @@ On native Windows, use the machine's working Python 3.10+ command (normally
 [INSTALL.md](INSTALL.md) for the one-paste Codex/Claude prompt and non-admin
 Poppler guidance.
 
-The shell installer remains the lightweight copy-only path. On macOS or Linux,
+The shell installer remains the lightweight copy-only path and has no Python
+package prerequisites beyond Python 3.10 itself. On macOS or Linux,
 `./install.sh --setup` delegates to the cross-platform managed installer.
 
 ```bash
-python3 -m pip install -r requirements.txt
 ./install.sh                        # Claude Code and Codex, globally
 ./install.sh --global --claude      # Claude Code only
 ./install.sh --global --codex       # Codex only
@@ -123,8 +123,9 @@ product, recommendation, count, or workflow cards. PDF metadata uses the
 manuscript title and “Referee Report,” without product or run-mode suffixes.
 The visible contents page lists each included document and useful level-two
 reader sections—for example,
-Overall Assessment, Main Grounds, Detailed Comments, Highest-Return Editing
-Revisions, Detailed Editing Comments, and the P0/P1/P2 revision-plan sections.
+Overall Assessment, Main Grounds, Closest Literature and Key Differences when
+present, Detailed Comments, Highest-Return Editing Revisions, Detailed Editing
+Comments, and the P0/P1/P2 revision-plan sections.
 Individual comments remain out of the visible contents and may use deeper PDF
 bookmarks.
 
@@ -141,7 +142,7 @@ Contract v0.4 retains the v0.3 two-report presentation and adds a source-grounde
 
 - `review/paper-review.pdf` — primary professional report containing the author-facing referee report, editing comments, revision plan, and prior-round progress when present, with a restrained title page, balanced contents, bookmarks, quotes, tables, and page numbers.
 - `review/README.md` and `review/reports/` — clean reader map plus Markdown copies of the referee report, editing comments, and revision plan.
-- `review/supporting/report.md` — substance-only referee report; a conventional referee assessment first, then `## Detailed Comments (N)` for every active substance finding.
+- `review/supporting/report.md` — substance-only referee report; a conventional referee assessment first, an optional deduplicated `## Closest literature and key differences` section after convincingness, then `## Detailed Comments (N)` for every active substance finding.
 - `review/supporting/editing-comments.md` — writing quality, mechanics, terminology, exhibit presentation, optional style improvements, and `## Detailed Editing Comments (N)`. Journal fit remains opt-in.
 - `review/supporting/fix-plan.md` — active findings from both channels exactly once, ordered by severity and dependency.
 - `review/supporting/review-manifest.json` — indexes the deliberate author-facing reports and plans for the PDF and Review Desk. Internal audit documents are not reader navigation entries.
@@ -256,15 +257,42 @@ A public-safe six-family synthetic benchmark supplies rubric-only manuscripts fo
 
 ## Release process
 
-Private development papers and comparison research are ignored by git and are never viewer bundles or distributable skill assets. Internal strategy documents remain in the private repository and are excluded from the public-release allowlist and archive. After the owner-level license and release decision:
+Private development papers and comparison research are ignored by git and are never viewer bundles or distributable skill assets. Internal strategy documents remain outside the public-release allowlist and archive. To assemble a release from the current source-available tree:
 
 ```bash
 python3 scripts/build_public_release.py --output /path/to/release.zip
 ```
 
+The plugin version is declared in `econ-review/.claude-plugin/plugin.json` and
+`econ-review/.codex-plugin/plugin.json`. Bump both to the same semantic version
+for every plugin release; the test suite rejects drift. The common marketplace
+entry deliberately omits `version`: each client reads its native manifest, and
+duplicating the field in the catalog would create another drift surface. Before
+the release commit, validate the common marketplace and both installed-client
+paths:
+
+```bash
+claude plugin validate . --strict
+claude plugin validate econ-review --strict
+python3 tests/test_plugin_marketplace.py -v
+```
+
+The repository-root Claude marketplace is intentionally the single catalog for
+both clients. Codex reads that common catalog and then uses its native plugin
+manifest; a second catalog would add a version-synchronization surface without
+changing the user-facing install flow.
+
 The release builder validates the files in the current working tree. Passing it
-does not prove that uncommitted work can be reconstructed from Git. Before a
-public release, stage and commit intended files explicitly, verify a clean
-status, then repeat the managed-runtime test suite, Review Desk bundle check,
-and public-release check from a fresh worktree or clone. Never publish the
-private working tree directly.
+does not prove that uncommitted work can be reconstructed from Git. Stage and
+commit intended files explicitly, verify a clean status, and only then verify
+the release tag that would be created:
+
+```bash
+git status --short
+claude plugin tag --dry-run econ-review
+```
+
+Finally, repeat the managed-runtime test suite, Review Desk bundle check, and
+public-release check from a fresh worktree or clone. Create and push the
+`econ-review--v<version>` tag only from that verified release commit. Never
+publish the private working tree directly.

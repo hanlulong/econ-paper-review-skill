@@ -21,6 +21,7 @@ PACKAGE_NAME = "econ-paper-review-skill"
 ARCHIVE_FORMAT_VERSION = 1
 FILE_CONTRACT = Path("scripts/public-release-files.json")
 SCAN_ROOTS = (
+    Path(".claude-plugin"),
     Path(".github"),
     Path("benchmarks"),
     Path("docs"),

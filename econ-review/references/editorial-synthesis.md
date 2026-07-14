@@ -77,6 +77,7 @@ Use this order:
 3. `Issues that could prevent publication`: principal concerns mapped to active findings.
 4. `Other major issues`: every posture-material finding not already grouped above.
 5. `Is the argument convincing?`: which links work, which remain provisional, and what would change the assessment.
+6. `Closest literature and key differences`, when material verified comparisons exist: what each distinct prior work establishes, the meaningful overlap and difference, whether the manuscript's contribution claim survives, and the minimum fair reframing. Mention each intellectual work once and place this section immediately before the detailed comments.
 
 Do not imitate any one journal's stock opening or word limit. The transferable standard is accurate reconstruction, decisive prioritization, constructive specificity, and a clear claim-evidence judgment.
 

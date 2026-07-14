@@ -8,6 +8,7 @@ import ast
 import json
 import os
 import re
+import stat
 import sys
 from pathlib import Path
 from urllib.parse import unquote
@@ -22,6 +23,16 @@ from safe_io import strict_json_load  # noqa: E402
 FRONTMATTER = re.compile(r"\A---\n(.*?)\n---(?:\n|\Z)", re.DOTALL)
 LOCAL_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 SKILL_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+STRICT_SEMVER = re.compile(
+    r"(?:0|[1-9][0-9]*)\."
+    r"(?:0|[1-9][0-9]*)\."
+    r"(?:0|[1-9][0-9]*)"
+    r"(?:-(?:"
+    r"(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+    r"(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*"
+    r"))?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+)
 ALLOWED_FRONTMATTER = {"name", "description"}
 ALLOWED_OPENAI_TOP_LEVEL = {"interface", "dependencies", "policy"}
 REQUIRED_RUNTIME = {
@@ -131,6 +142,78 @@ def _inside(root: Path, candidate: Path) -> bool:
         return False
 
 
+def _is_link_or_junction(path: Path) -> bool:
+    """Return true for symlinks and native Windows reparse points."""
+
+    if path.is_symlink():
+        return True
+    is_junction = getattr(path, "is_junction", None)
+    if is_junction and is_junction():
+        return True
+    try:
+        attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+
+
+def _is_versioned_plugin_cache(root: Path, skill_name: str, skill_description: str) -> bool:
+    """Recognize the cache layout created by Claude Code and Codex plugins.
+
+    Direct skill installs live in a directory named for the skill. Marketplace
+    clients instead cache the plugin in a directory named for its version. The
+    exception remains fail-closed: the strict, regular client manifests must
+    bind that directory, version, root skill path, and SKILL.md name together.
+    """
+
+    if (
+        not SKILL_NAME.fullmatch(skill_name)
+        or len(skill_name) > 64
+        or not STRICT_SEMVER.fullmatch(root.name)
+    ):
+        return False
+    manifests: list[dict] = []
+    for relative in (
+        Path(".claude-plugin/plugin.json"),
+        Path(".codex-plugin/plugin.json"),
+    ):
+        manifest_path = root / relative
+        if not manifest_path.is_file() or _is_link_or_junction(manifest_path):
+            return False
+        try:
+            manifest = strict_json_load(manifest_path)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+            return False
+        if not isinstance(manifest, dict):
+            return False
+        manifests.append(manifest)
+    return all(
+        manifest.get("name") == skill_name
+        and manifest.get("version") == root.name
+        and manifest.get("skills") == "./skills/"
+        for manifest in manifests
+    ) and _plugin_entry_matches(root, skill_name, skill_description)
+
+
+def _plugin_entry_matches(root: Path, skill_name: str, skill_description: str) -> bool:
+    entry_path = root / "skills" / skill_name / "SKILL.md"
+    if not entry_path.is_file() or _is_link_or_junction(entry_path):
+        return False
+    try:
+        text = entry_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    match = FRONTMATTER.match(text)
+    if not match:
+        return False
+    errors: list[str] = []
+    frontmatter = _yaml_mapping(match.group(1), "plugin skill frontmatter", errors)
+    return not errors and frontmatter == {
+        "name": skill_name,
+        "description": skill_description,
+    }
+
+
 def _validate_links(root: Path, errors: list[str]) -> None:
     for document in sorted(root.rglob("*.md")):
         if document.is_symlink():
@@ -229,17 +312,31 @@ def _validate_runtime(root: Path, errors: list[str]) -> None:
 def validate_skill_package(root: Path) -> list[str]:
     errors: list[str] = []
     root = root.expanduser().absolute()
-    if root.is_symlink():
-        return [f"skill directory must not be a symbolic link: {root}"]
+    if _is_link_or_junction(root):
+        return [f"skill directory must not be a symbolic link or junction: {root}"]
     root = root.resolve()
     if not root.is_dir():
         return [f"skill directory does not exist: {root}"]
 
     for current, directories, files in os.walk(root, followlinks=False):
-        for name in [*directories, *files]:
+        safe_directories: list[str] = []
+        for name in directories:
             path = Path(current, name)
-            if path.is_symlink():
-                errors.append(f"skill package contains a symbolic link: {path.relative_to(root)}")
+            if _is_link_or_junction(path):
+                errors.append(
+                    "skill package contains a symbolic link or junction: "
+                    f"{path.relative_to(root)}"
+                )
+            else:
+                safe_directories.append(name)
+        directories[:] = safe_directories
+        for name in files:
+            path = Path(current, name)
+            if _is_link_or_junction(path):
+                errors.append(
+                    "skill package contains a symbolic link or junction: "
+                    f"{path.relative_to(root)}"
+                )
     if errors:
         # Do not follow an already-rejected assets, references, or scripts
         # subtree during the deeper schema/link/runtime passes below.
@@ -275,7 +372,11 @@ def validate_skill_package(root: Path) -> list[str]:
     description = frontmatter.get("description")
     if not isinstance(name, str) or not SKILL_NAME.fullmatch(name) or len(name) > 64:
         errors.append("SKILL.md name must be 1-64 lowercase letters, digits, or single hyphens")
-    if name != root.name:
+    if name != root.name and not (
+        isinstance(name, str)
+        and isinstance(description, str)
+        and _is_versioned_plugin_cache(root, name, description)
+    ):
         errors.append(f"SKILL.md name {name!r} does not match directory name {root.name!r}")
     if not isinstance(description, str) or not description.strip() or len(description) > 1024:
         errors.append("SKILL.md description must be a nonempty string of at most 1024 characters")

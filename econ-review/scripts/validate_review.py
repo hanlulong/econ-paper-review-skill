@@ -26,7 +26,12 @@ from trust_spine import pdf_sources, validate_trust_spine  # noqa: E402
 from generate_verification import render as render_verification  # noqa: E402
 from generate_coverage import render as render_coverage  # noqa: E402
 from generate_sources import render as render_sources  # noqa: E402
-from generate_reports import render_current_writing_report, validate_current_venue_fit  # noqa: E402
+from generate_reports import (  # noqa: E402
+    contribution_comparison_lines,
+    reader_facing_locator,
+    render_current_writing_report,
+    validate_current_venue_fit,
+)
 from round_reconciliation import validate_round_reconciliation  # noqa: E402
 
 try:
@@ -70,6 +75,11 @@ ASSESSMENT_BOUNDARY_HEADING = re.compile(
 )
 JOURNAL_FIT_HEADING = re.compile(
     r"^#{1,6}[ \t]+Journal[ \t-]+fit\b.*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+LITERATURE_REPORT_HEADING = "## Closest literature and key differences"
+LEGACY_LITERATURE_REPORT_HEADING = re.compile(
+    r"^##[ \t]+Contribution and closest literature[ \t]*$",
     re.MULTILINE | re.IGNORECASE,
 )
 
@@ -1869,6 +1879,83 @@ def check_required_sections(
         content = following[:next_heading.start()] if next_heading else following
         if not content.strip():
             errors.append(f"{file_label} section '{heading}' must be non-empty")
+
+
+def validate_literature_report_section(
+    report: str,
+    external_sources: dict[str, Any] | None,
+    errors: list[str],
+) -> None:
+    """Keep the optional author-facing literature synthesis tied to evidence.
+
+    Canonical evidence remains claim-specific, while the deterministic report
+    projection groups versions of the same intellectual work.  The section is
+    therefore present exactly when that projection has at least one supported,
+    material comparison; a decorative or manually invented section fails.
+    """
+
+    if LEGACY_LITERATURE_REPORT_HEADING.search(report):
+        errors.append(
+            "report.md uses the retired heading '## Contribution and closest literature'; "
+            f"use '{LITERATURE_REPORT_HEADING}'"
+        )
+
+    try:
+        expected = bool(contribution_comparison_lines(external_sources))
+    except (TypeError, ValueError) as exc:
+        errors.append(f"cannot project the author-facing literature comparison: {exc}")
+        return
+
+    heading_matches = list(re.finditer(
+        rf"^{re.escape(LITERATURE_REPORT_HEADING)}\s*$",
+        report,
+        re.MULTILINE,
+    ))
+    if not expected:
+        if heading_matches:
+            errors.append(
+                f"report.md must omit '{LITERATURE_REPORT_HEADING}' when no supported "
+                "material literature comparison can be projected"
+            )
+        return
+
+    if len(heading_matches) != 1:
+        errors.append(
+            f"report.md requires '{LITERATURE_REPORT_HEADING}' exactly once when "
+            "supported material literature comparisons are available"
+        )
+        return
+
+    heading_match = heading_matches[0]
+    following = report[heading_match.end():]
+    next_heading = re.search(r"^## ", following, re.MULTILINE)
+    content = following[:next_heading.start()] if next_heading else following
+    if not content.strip():
+        errors.append(
+            f"report.md section '{LITERATURE_REPORT_HEADING}' must be non-empty"
+        )
+
+    convincing_match = re.search(
+        r"^## Is the argument convincing\?\s*$",
+        report,
+        re.MULTILINE,
+    )
+    details_match = re.search(
+        r"^## Detailed Comments(?: \([0-9]+\))?\s*$",
+        report,
+        re.MULTILINE,
+    )
+    if (
+        convincing_match is not None
+        and details_match is not None
+        and not (
+            convincing_match.start() < heading_match.start() < details_match.start()
+        )
+    ):
+        errors.append(
+            f"'{LITERATURE_REPORT_HEADING}' must appear after "
+            "'## Is the argument convincing?' and before '## Detailed Comments'"
+        )
 
 
 def check_alternative_section_sets(
@@ -4028,6 +4115,23 @@ def validate_review(review_dir: Path, *, strict_complete: bool = False) -> list[
         positions = [report.find(heading) for heading in required_headings]
         if all(position >= 0 for position in positions) and positions != sorted(positions):
             errors.append("v0.3 referee-report synthesis headings are out of order")
+        external_sources_for_report: dict[str, Any] | None = None
+        external_sources_path = review_dir / "evidence" / "external-sources.json"
+        if external_sources_path.exists():
+            try:
+                loaded_external_sources = strict_json_load(external_sources_path)
+            except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+                # The canonical artifact/schema passes report the concrete read
+                # failure. Avoid duplicating it here while still failing closed
+                # on any unsupported literature section in the report.
+                loaded_external_sources = None
+            if isinstance(loaded_external_sources, dict):
+                external_sources_for_report = loaded_external_sources
+        validate_literature_report_section(
+            report,
+            external_sources_for_report,
+            errors,
+        )
         for heading in (
             "## Writing, clarity, consistency, and typographical review",
             "## Reference accuracy and citation support",
@@ -7803,6 +7907,79 @@ def validate_review(review_dir: Path, *, strict_complete: bool = False) -> list[
                         )
                 if writing.get("review_id") != run.get("review_id"):
                     errors.append("writing review_id differs from run.json")
+                if writing_audit_version == "0.4":
+                    def check_reader_location(
+                        value: Any,
+                        label: str,
+                        reader_value: Any = None,
+                    ) -> None:
+                        try:
+                            reader_facing_locator(value, label, reader_value)
+                        except ValueError as exc:
+                            errors.append(str(exc))
+
+                    for row_index, row in enumerate(
+                        writing.get("section_audit", [])
+                        if isinstance(writing.get("section_audit"), list) else [],
+                        start=1,
+                    ):
+                        if isinstance(row, dict):
+                            check_reader_location(
+                                row.get("section"),
+                                f"writing section_audit row {row_index}.section",
+                            )
+                    for row_index, row in enumerate(
+                        writing.get("consistency_groups", [])
+                        if isinstance(writing.get("consistency_groups"), list) else [],
+                        start=1,
+                    ):
+                        if isinstance(row, dict):
+                            check_reader_location(
+                                row.get("locations_checked"),
+                                f"writing consistency_groups row {row_index}.locations_checked",
+                            )
+                    for row_index, row in enumerate(
+                        writing.get("style_suggestions", [])
+                        if isinstance(writing.get("style_suggestions"), list) else [],
+                        start=1,
+                    ):
+                        if isinstance(row, dict):
+                            check_reader_location(
+                                row.get("locator"),
+                                f"writing style_suggestions row {row_index}.locator",
+                            )
+                    for row_index, row in enumerate(
+                        writing.get("redundancy_map", [])
+                        if isinstance(writing.get("redundancy_map"), list) else [],
+                        start=1,
+                    ):
+                        if not isinstance(row, dict):
+                            continue
+                        locations = row.get("locations")
+                        for location_index, location in enumerate(
+                            locations if isinstance(locations, list) else [], start=1
+                        ):
+                            check_reader_location(
+                                location,
+                                f"writing redundancy_map row {row_index}.locations[{location_index}]",
+                            )
+                    for row_index, row in enumerate(
+                        writing.get("mechanics", [])
+                        if isinstance(writing.get("mechanics"), list) else [],
+                        start=1,
+                    ):
+                        if not isinstance(row, dict):
+                            continue
+                        occurrences = row.get("occurrences")
+                        for occurrence_index, occurrence in enumerate(
+                            occurrences if isinstance(occurrences, list) else [], start=1
+                        ):
+                            if isinstance(occurrence, dict):
+                                check_reader_location(
+                                    occurrence.get("locator"),
+                                    f"writing mechanics row {row_index}.occurrences[{occurrence_index}]",
+                                    occurrence.get("reader_locator"),
+                                )
                 active_ids = {item.get("id") for item in active}
                 strict_writing_source_binding = (
                     strict_burden_coverage and writing_audit_version == "0.4"

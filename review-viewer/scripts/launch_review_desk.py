@@ -3,6 +3,20 @@
 
 from __future__ import annotations
 
+import sys
+
+
+# The immutable release directory is data, not an import root.  Remove it from
+# Python's import path before importing shadowable standard-library modules.
+# The stable dispatcher uses ``-I``, which already omits the script directory.
+if __name__ == "__main__" and not sys.flags.isolated and sys.path:
+    _SCRIPT_PATH_ENTRY = sys.path[0]
+    sys.path[:] = [
+        entry
+        for index, entry in enumerate(sys.path)
+        if index != 0 and entry not in {"", _SCRIPT_PATH_ENTRY}
+    ]
+
 import argparse
 import hashlib
 import http.server
@@ -12,9 +26,10 @@ import mimetypes
 import os
 import shutil
 import socketserver
+import stat
 import subprocess
-import sys
 import threading
+import unicodedata
 import urllib.parse
 import webbrowser
 from pathlib import Path, PurePosixPath
@@ -32,8 +47,88 @@ SECURITY_HEADERS = {
 }
 
 
+def _is_link_or_junction(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    is_junction = getattr(path, "is_junction", None)
+    if is_junction and is_junction():
+        return True
+    try:
+        attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+
+
+def _safe_manifest_path(raw: object) -> PurePosixPath:
+    if (
+        not isinstance(raw, str)
+        or not raw
+        or "\\" in raw
+        or ":" in raw
+        or raw.startswith("/")
+        or raw != unicodedata.normalize("NFC", raw)
+        or any(ord(character) < 32 or ord(character) == 127 for character in raw)
+    ):
+        raise ValueError(f"unsafe Review Desk manifest path: {raw!r}")
+    path = PurePosixPath(raw)
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or any(part in {"", "."} or part != part.strip() or part.endswith(".") for part in path.parts)
+        or raw != path.as_posix()
+        or (
+            raw not in {"launch_review_desk.py", "launch_installed_review_desk.py"}
+            and path.parts[0] != "app"
+        )
+    ):
+        raise ValueError(f"unsafe Review Desk manifest path: {raw!r}")
+    return path
+
+
+def _verify_exact_membership(root: Path, expected_files: set[str]) -> None:
+    expected_directories = {""}
+    for raw in expected_files:
+        parts = PurePosixPath(raw).parts
+        for length in range(1, len(parts)):
+            expected_directories.add(PurePosixPath(*parts[:length]).as_posix())
+
+    actual_files: set[str] = set()
+    actual_directories: set[str] = set()
+
+    def raise_walk_error(error: OSError) -> None:
+        raise error
+
+    for current, directories, names in os.walk(
+        root,
+        followlinks=False,
+        onerror=raise_walk_error,
+    ):
+        current_path = Path(current)
+        if _is_link_or_junction(current_path):
+            raise ValueError("installed Review Desk contains a link or junction")
+        relative_directory = current_path.relative_to(root).as_posix()
+        actual_directories.add("" if relative_directory == "." else relative_directory)
+        for name in directories:
+            candidate = current_path / name
+            if _is_link_or_junction(candidate) or not candidate.is_dir():
+                raise ValueError("installed Review Desk contains an unsafe directory")
+        for name in names:
+            candidate = current_path / name
+            if _is_link_or_junction(candidate) or not candidate.is_file():
+                raise ValueError("installed Review Desk contains a non-regular file")
+            actual_files.add(candidate.relative_to(root).as_posix())
+
+    if actual_files != expected_files or actual_directories != expected_directories:
+        raise ValueError("installed Review Desk differs from its exact manifest membership")
+
+
 def load_inventory(root: Path) -> dict[str, tuple[int, str]]:
     manifest_path = root / "bundle-manifest.json"
+    if _is_link_or_junction(root) or not root.is_dir():
+        raise ValueError("installed Review Desk version directory is missing or unsafe")
+    if _is_link_or_junction(manifest_path) or not manifest_path.is_file():
+        raise ValueError("installed Review Desk manifest is missing or unsafe")
     manifest_bytes = manifest_path.read_bytes()
     expected_digest = root.name
     actual_digest = hashlib.sha256(manifest_bytes).hexdigest()
@@ -58,38 +153,55 @@ def load_inventory(root: Path) -> dict[str, tuple[int, str]]:
         raise ValueError("Review Desk manifest has unexpected fields")
     if value["package"] != "econ-review-desk" or value["schema_version"] != "1":
         raise ValueError("Review Desk manifest has the wrong package or schema version")
+    records = value["files"]
+    if not isinstance(records, list) or not records or len(records) > 500:
+        raise ValueError("Review Desk manifest files must be a non-empty bounded array")
     inventory: dict[str, tuple[int, str]] = {}
-    if not isinstance(value["files"], list):
-        raise ValueError("Review Desk manifest files must be an array")
-    for record in value["files"]:
+    expected_files = {"bundle-manifest.json"}
+    checked: list[tuple[PurePosixPath, int, str]] = []
+    previous = ""
+    folded: set[str] = set()
+    for record in records:
         if not isinstance(record, dict):
             raise ValueError("Review Desk manifest contains a non-object file record")
         if set(record) != {"path", "sha256", "size"}:
             raise ValueError("Review Desk manifest contains an invalid file record")
-        raw_path = record["path"]
-        if not isinstance(raw_path, str) or not raw_path or "\\" in raw_path or ":" in raw_path:
-            raise ValueError("Review Desk manifest contains an unsafe file path")
-        path = PurePosixPath(raw_path)
-        if not path.parts or path.parts[0] != "app" or path.is_absolute() or ".." in path.parts:
-            if path.as_posix() in {"launch_review_desk.py", "launch_installed_review_desk.py"}:
-                continue
-            raise ValueError(f"unsafe Review Desk manifest path: {path}")
-        relative = PurePosixPath(*path.parts[1:]).as_posix()
-        if not relative:
-            raise ValueError("empty Review Desk application path")
-        candidate = root.joinpath(*path.parts)
-        if candidate.is_symlink() or not candidate.is_file():
-            raise ValueError(f"Review Desk file is missing or unsafe: {path}")
-        data = candidate.read_bytes()
+        path = _safe_manifest_path(record["path"])
+        name = path.as_posix()
+        if name <= previous or name.casefold() in folded:
+            raise ValueError("Review Desk manifest file records must be sorted and portable-unique")
+        previous = name
+        folded.add(name.casefold())
+        size = record["size"]
+        digest = record["sha256"]
+        if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+            raise ValueError(f"invalid Review Desk file size: {path}")
         if (
-            not isinstance(record["size"], int)
-            or isinstance(record["size"], bool)
-            or not isinstance(record["sha256"], str)
-            or len(data) != record["size"]
-            or hashlib.sha256(data).hexdigest() != record["sha256"]
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
         ):
+            raise ValueError(f"invalid Review Desk file hash: {path}")
+        expected_files.add(name)
+        checked.append((path, size, digest))
+
+    if not {
+        "launch_review_desk.py",
+        "launch_installed_review_desk.py",
+        "app/index.html",
+    }.issubset(expected_files):
+        raise ValueError("Review Desk release lacks its launchers or application entry point")
+    _verify_exact_membership(root, expected_files)
+    for path, size, digest in checked:
+        candidate = root.joinpath(*path.parts)
+        data = candidate.read_bytes()
+        if len(data) != size or hashlib.sha256(data).hexdigest() != digest:
             raise ValueError(f"Review Desk file failed integrity verification: {path}")
-        inventory[relative] = (record["size"], record["sha256"])
+        if path.parts[0] == "app":
+            relative = PurePosixPath(*path.parts[1:]).as_posix()
+            if not relative:
+                raise ValueError("empty Review Desk application path")
+            inventory[relative] = (size, digest)
     if "index.html" not in inventory:
         raise ValueError("Review Desk release has no index.html")
     return inventory

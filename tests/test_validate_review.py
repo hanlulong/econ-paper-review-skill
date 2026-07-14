@@ -1521,6 +1521,138 @@ class ValidateReviewTests(unittest.TestCase):
             errors = MODULE.validate_review(target)
             self.assertTrue(any("missing '## Is the argument convincing?'" in error for error in errors))
 
+    @staticmethod
+    def _material_literature_projection() -> dict:
+        return {
+            "schema_version": "0.4",
+            "sources": [{
+                "id": "EXT-01",
+                "title": "A Closely Related Result",
+                "url": "https://example.org/related",
+                "stable_id": "doi:10.0000/related",
+                "bibliographic_metadata": {
+                    "authors": [{"name": "A. Author"}],
+                    "publication_date": "2024-01-01",
+                    "first_public_date": "2023-06-01",
+                },
+            }],
+            "frontier_audit": {
+                "work_families": [{
+                    "id": "WORK-01",
+                    "member_source_ids": ["EXT-01"],
+                    "preferred_source_id": "EXT-01",
+                }],
+                "literature_comparisons": [{
+                    "id": "LIT-CMP-01",
+                    "source_id": "EXT-01",
+                    "claim_id": "LIT-CLM-01",
+                    "relation_type": "closest_antecedent",
+                    "assessment_state": "supported",
+                    "source_contribution": (
+                        "The prior paper derives the benchmark result in a static model."
+                    ),
+                    "overlap": (
+                        "Both papers study the same equilibrium restriction."
+                    ),
+                    "surviving_difference": (
+                        "The manuscript allows dynamics that the benchmark excludes."
+                    ),
+                }],
+                "claim_assessments": [{
+                    "id": "LIT-CLM-01",
+                    "claim_text": "This is the first result of its kind.",
+                    "assessment": "supported_if_narrowed",
+                    "assessment_note": (
+                        "The dynamic extension is distinct, but the benchmark result is known."
+                    ),
+                    "fair_restatement": (
+                        "The paper extends the benchmark result to a dynamic environment."
+                    ),
+                }],
+                "candidate_screening": [{
+                    "id": "LIT-SCR-01",
+                    "comparison_ids": ["LIT-CMP-01"],
+                    "materiality": "material",
+                    "materiality_effect": "narrows_contribution",
+                    "disposition": "material_prior_work",
+                    "recommended_change": (
+                        "Compare the benchmark directly and narrow the priority claim."
+                    ),
+                }],
+            },
+        }
+
+    def test_literature_section_is_required_only_for_material_projection(self) -> None:
+        payload = self._material_literature_projection()
+        report = (
+            "## Is the argument convincing?\n\nYes.\n\n"
+            "## Closest literature and key differences\n\nComparison.\n\n"
+            "## Detailed Comments (1)\n\nComment.\n"
+        )
+        errors: list[str] = []
+        MODULE.validate_literature_report_section(report, payload, errors)
+        self.assertEqual(errors, [])
+
+        missing_errors: list[str] = []
+        MODULE.validate_literature_report_section(
+            report.replace(
+                "## Closest literature and key differences\n\nComparison.\n\n",
+                "",
+            ),
+            payload,
+            missing_errors,
+        )
+        self.assertTrue(any("exactly once" in error for error in missing_errors))
+
+        unsupported_errors: list[str] = []
+        MODULE.validate_literature_report_section(report, None, unsupported_errors)
+        self.assertTrue(any(
+            "must omit '## Closest literature and key differences'" in error
+            for error in unsupported_errors
+        ))
+
+    def test_literature_section_rejects_legacy_heading_and_wrong_order(self) -> None:
+        payload = self._material_literature_projection()
+        report = (
+            "## Closest literature and key differences\n\nComparison.\n\n"
+            "## Is the argument convincing?\n\nYes.\n\n"
+            "## Contribution and closest literature\n\nLegacy comparison.\n\n"
+            "## Detailed Comments (1)\n\nComment.\n"
+        )
+        errors: list[str] = []
+        MODULE.validate_literature_report_section(report, payload, errors)
+        self.assertTrue(any("retired heading" in error for error in errors))
+        self.assertTrue(any("must appear after" in error for error in errors))
+
+    def test_current_contract_wires_literature_projection_to_report(self) -> None:
+        with mock.patch.object(
+            MODULE,
+            "contribution_comparison_lines",
+            return_value=["Supported material comparison."],
+        ):
+            errors = MODULE.validate_review(FIXTURE)
+        self.assertTrue(any(
+            "requires '## Closest literature and key differences' exactly once" in error
+            for error in errors
+        ))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "review"
+            shutil.copytree(FIXTURE, target)
+            report_path = target / "report.md"
+            report = report_path.read_text(encoding="utf-8")
+            report = report.replace(
+                "## Detailed Comments (1)",
+                "## Closest literature and key differences\n\nUnsupported comparison.\n\n"
+                "## Detailed Comments (1)",
+            )
+            report_path.write_text(report, encoding="utf-8")
+            errors = MODULE.validate_review(target)
+        self.assertTrue(any(
+            "must omit '## Closest literature and key differences'" in error
+            for error in errors
+        ))
+
     def test_unsafe_claim_occurrence_requires_finding(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "review"
@@ -1578,6 +1710,22 @@ class ValidateReviewTests(unittest.TestCase):
             errors = MODULE.validate_review(target)
             self.assertTrue(any("requires non-empty content" in error for error in errors))
             self.assertTrue(any("must identify at least one manuscript location" in error for error in errors))
+
+    def test_current_writing_reader_locations_reject_internal_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "review"
+            shutil.copytree(FIXTURE, target)
+            path = target / "evidence" / "writing.json"
+            writing = json.loads(path.read_text(encoding="utf-8"))
+            writing["consistency_groups"][0]["locations_checked"] = (
+                "anchor_id=ANC-99; bbox=1,2,3,4"
+            )
+            path.write_text(json.dumps(writing, indent=2) + "\n", encoding="utf-8")
+            errors = MODULE.validate_review(target)
+            self.assertTrue(any(
+                "locations_checked" in error and "internal source locator" in error
+                for error in errors
+            ), errors)
 
     def test_inherent_data_fix_structurally_disallows_new_data(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

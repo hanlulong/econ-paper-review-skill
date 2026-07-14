@@ -48,6 +48,42 @@ JOURNAL_FIT_HEADING = re.compile(
     r"^#{1,6}[ \t]+Journal[ \t-]+fit\b.*$",
     re.MULTILINE | re.IGNORECASE,
 )
+HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+PDF_PAGE_LOCATOR = re.compile(
+    r"\b(?:PDF\s+)?p(?:age)?\.?\s*(?:=\s*)?([0-9]+)\b|\bpage\s*=\s*([0-9]+)\b",
+    re.IGNORECASE,
+)
+# Canonical source locators deliberately retain exact ingestion provenance.
+# These tokens are useful to validators and later review rounds, but are not
+# meaningful author-facing locations.
+AUDIT_LOCATOR_TOKEN = re.compile(
+    r"(?:"
+    r"\b(?:SRC-[0-9]{2,}(?:-PDF-B[0-9]{4,})?|ANC-[0-9]{2,}|PDF-B[0-9]{4,})\b"
+    r"|\bbbox\b"
+    r"|\b(?:block|block_id|anchor_id|source_id)\s*[:=]\s*\S+"
+    r"|\bblock\s+id\s*[:=]\s*\S+"
+    r"|\bblock\s+(?:SRC-[0-9]{2,}-PDF-B[0-9]{4,}|PDF-B[0-9]{4,})\b"
+    r"|\b(?:extraction_method|parser_method|ocr_method)\s*[:=]\s*\S+"
+    r"|\bmethod\s*[:=]\s*(?:pdf_text_layer|ocr|tesseract|poppler|mathpix)\b"
+    r"|\bsha(?:-?256)?\s*[:=]\s*[0-9a-f]{32,64}\b"
+    r"|\bpage\s*=\s*[0-9]+\b"
+    r"|<!--|-->"
+    r")",
+    re.IGNORECASE,
+)
+VISIBLE_AUDIT_PROVENANCE = re.compile(
+    r"(?:"
+    r"\b(?:SRC-[0-9]{2,}(?:-PDF-B[0-9]{4,})?|ANC-[0-9]{2,}|PDF-B[0-9]{4,})\b"
+    r"|\bbbox\s*(?:[:=]\s*|\s+)[-+]?(?:[0-9]|\.[0-9])"
+    r"|\b(?:block|block_id|anchor_id|source_id)\s*[:=]\s*\S+"
+    r"|\bblock\s+id\s*[:=]\s*\S+"
+    r"|\b(?:extraction_method|parser_method|ocr_method)\s*[:=]\s*\S+"
+    r"|\bmethod\s*[:=]\s*(?:pdf_text_layer|ocr|tesseract|poppler|mathpix)\b"
+    r"|\bsha(?:-?256)?\s*[:=]\s*[0-9a-f]{32,64}\b"
+    r"|\bpage\s*=\s*[0-9]+\b"
+    r")",
+    re.IGNORECASE,
+)
 
 
 def review_navigation(include_writing: bool) -> str:
@@ -340,6 +376,55 @@ def heading_location(value: str) -> str:
     return re.sub(r"\s*:\s*", " — ", normalized)
 
 
+def reader_facing_locator(
+    canonical_locator: str,
+    context: str,
+    reader_locator: Any = None,
+) -> str:
+    """Return a readable location without weakening canonical provenance.
+
+    ``canonical_locator`` may be the exact source-manifest locator needed for
+    anchor reconciliation.  A separately supplied ``reader_locator`` is the
+    preferred display label.  When it is absent, ordinary prose locators pass
+    through unchanged and PDF ingestion locators reduce deterministically to
+    their page.  Any other machine locator fails closed instead of leaking an
+    ID or inventing a location.
+    """
+    if not isinstance(canonical_locator, str) or not canonical_locator.strip():
+        raise ValueError(f"{context} must provide a non-empty canonical locator")
+    explicit = reader_locator is not None
+    if explicit and (not isinstance(reader_locator, str) or not reader_locator.strip()):
+        raise ValueError(f"{context}.reader_locator must be a non-empty string when provided")
+    candidate = " ".join(
+        (reader_locator if explicit else canonical_locator).split()
+    ).strip(" ,;:")
+    if not AUDIT_LOCATOR_TOKEN.search(candidate):
+        return candidate
+    if explicit:
+        raise ValueError(
+            f"{context}.reader_locator contains internal source provenance; "
+            "use a section, exhibit, paragraph, equation, or page label"
+        )
+    page_match = PDF_PAGE_LOCATOR.search(canonical_locator)
+    if page_match:
+        page = page_match.group(1) or page_match.group(2)
+        return f"PDF p. {int(page)}"
+    raise ValueError(
+        f"{context} contains an internal source locator that cannot be displayed safely; "
+        "provide reader_locator while retaining locator for canonical provenance"
+    )
+
+
+def assert_author_facing_markdown_safe(markdown: str, context: str) -> None:
+    """Fail closed if visible report copy contains ingestion provenance."""
+    visible = HTML_COMMENT.sub("", markdown)
+    if VISIBLE_AUDIT_PROVENANCE.search(visible):
+        raise ValueError(
+            f"{context} exposes an internal source, anchor, block, bounding-box, "
+            "or audit locator in visible prose"
+        )
+
+
 def constructive_feedback(row: dict[str, Any]) -> str:
     """Render one author-facing recommendation from the structured repair fields.
 
@@ -383,6 +468,10 @@ def detail_block(number: int, row: dict[str, Any]) -> str:
     location = locator.get("section") or locator.get("exhibit") or locator.get("file") or "Manuscript"
     if not isinstance(location, str):
         raise ValueError(f"{context}.evidence[0].locator values must be strings")
+    location = reader_facing_locator(
+        location,
+        f"{context}.evidence[0].locator",
+    )
     title = optional_text(row, "title", context) or issue
     concern = clean_join(
         optional_text(row, "why_it_matters", context),
@@ -722,7 +811,9 @@ def render_landing_page(
         "",
         "Use Review Desk to set your priority, add an instruction or response, and choose **Open**, **Ready for review**, or **Set aside** for each comment. Ready for review means either that a change was made or that a reasoned response is ready to assess. Set aside distinguishes comments to revisit next round from comments that do not apply or cannot be addressed. The exported revision brief carries these choices and your notes into the next round.",
     ])
-    return "\n".join(lines).rstrip() + "\n"
+    rendered = "\n".join(lines).rstrip() + "\n"
+    assert_author_facing_markdown_safe(rendered, "README.md")
+    return rendered
 
 
 def _markdown_label(value: str) -> str:
@@ -756,6 +847,8 @@ def _source_citation(source: dict[str, Any]) -> str:
         authors = author_names[0]
     elif len(author_names) == 2:
         authors = f"{author_names[0]} and {author_names[1]}"
+    elif len(author_names) == 3:
+        authors = f"{author_names[0]}, {author_names[1]}, and {author_names[2]}"
     elif author_names:
         authors = f"{author_names[0]} et al."
     else:
@@ -767,13 +860,118 @@ def _source_citation(source: dict[str, Any]) -> str:
     return f"{prefix}, {linked_title}" if prefix else linked_title
 
 
+MATERIAL_LITERATURE_RELATIONS = {
+    "closest_antecedent", "material_overlap", "adjacent_contribution",
+    "method_or_data_precedent", "contradictory_result", "replication",
+}
+
+AUTHOR_FACING_MATERIALITY_EFFECTS = {
+    "changes_priority", "changes_credit", "narrows_contribution",
+    "changes_interpretation",
+}
+
+AUTHOR_FACING_LITERATURE_DISPOSITIONS = {
+    "closest", "material_prior_work", "material_adjacent",
+}
+
+INTERNAL_LITERATURE_ID = re.compile(
+    r"\b(?:EXT|WORK|QRYF?|ANC|CLM|SRC|LIT-(?:CMP|CLM|SCR|RND))-[0-9]{2,}\b"
+)
+
+LITERATURE_RELATION_PRIORITY = {
+    "closest_antecedent": 0,
+    "material_overlap": 1,
+    "contradictory_result": 2,
+    "replication": 3,
+    "method_or_data_precedent": 4,
+    "adjacent_contribution": 5,
+}
+
+LITERATURE_ASSESSMENT_VERDICT = {
+    "contradicted": "is not convincing as written.",
+    "materially_overstated": "is materially overstated.",
+    "positioning_incomplete": "may survive, but its current literature positioning is incomplete.",
+    "supported_if_narrowed": "is convincing only in a narrower form.",
+    "bounded": "cannot be judged confidently from the available search and source access.",
+    "supported": "is supported within the documented search scope.",
+}
+
+
+def _unique_sentences(values: list[Any]) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        sentence = _sentence(value)
+        key = " ".join(sentence.lower().split())
+        if sentence and key not in seen:
+            seen.add(key)
+            output.append(sentence)
+    return output
+
+
+def _author_facing_sentence(value: Any, internal_ids: set[str], context: str) -> str:
+    sentence = _sentence(value)
+    leaked_ids = {
+        internal_id for internal_id in sorted(internal_ids)
+        if re.search(rf"\b{re.escape(internal_id)}\b", sentence)
+    }
+    leaked_ids.update(INTERNAL_LITERATURE_ID.findall(sentence))
+    if leaked_ids:
+        raise ValueError(
+            f"{context} must use reader-facing prose rather than internal identifiers: "
+            + ", ".join(sorted(leaked_ids))
+        )
+    return sentence
+
+
+def _literature_work_maps(
+    audit: dict[str, Any],
+    sources: dict[str, dict[str, Any]],
+) -> tuple[dict[str, str], dict[str, str]]:
+    raw_families = audit.get("work_families")
+    if not isinstance(raw_families, list):
+        raise ValueError("current external-sources.json must provide a work_families array")
+    family_by_source: dict[str, str] = {}
+    preferred_by_family: dict[str, str] = {}
+    for index, family in enumerate(raw_families):
+        if not isinstance(family, dict):
+            raise ValueError(f"external-sources.json work family {index} must be an object")
+        family_id = family.get("id")
+        members = family.get("member_source_ids")
+        if not isinstance(family_id, str) or not isinstance(members, list):
+            raise ValueError(f"external-sources.json work family {index} is incomplete")
+        for source_id in members:
+            if isinstance(source_id, str):
+                family_by_source[source_id] = family_id
+        preferred = family.get("preferred_source_id")
+        if isinstance(preferred, str) and preferred in sources:
+            preferred_by_family[family_id] = preferred
+    for source_id, source in sources.items():
+        metadata = source.get("bibliographic_metadata")
+        family_id = metadata.get("work_family_id") if isinstance(metadata, dict) else None
+        if isinstance(family_id, str) and family_id:
+            family_by_source.setdefault(source_id, family_id)
+    return family_by_source, preferred_by_family
+
+
+def _literature_group_key(source: dict[str, Any], family_id: str | None) -> str:
+    if family_id:
+        return f"work:{family_id}"
+    stable_id = source.get("stable_id")
+    if isinstance(stable_id, str) and stable_id.strip():
+        return "stable:" + stable_id.strip().lower()
+    return f"source:{source.get('id')}"
+
+
 def contribution_comparison_lines(external_sources: dict[str, Any] | None) -> list[str]:
-    """Project verified material comparators into the referee report.
+    """Project verified literature evidence into one author-facing synthesis.
 
     Search confidentiality governs outbound queries; it does not require the
     final report to conceal public papers whose metadata and propositions have
-    been verified. Inconclusive or background rows remain in supporting
-    evidence rather than being promoted into author-facing claims.
+    been verified. Claim-specific rows remain separate in canonical evidence,
+    while this projection cites each intellectual work once. Inconclusive or
+    background rows remain in supporting evidence rather than being promoted
+    into affirmative author-facing claims.
     """
     if not isinstance(external_sources, dict) or external_sources.get("schema_version") != "0.4":
         return []
@@ -782,36 +980,213 @@ def contribution_comparison_lines(external_sources: dict[str, Any] | None) -> li
         return []
     raw_sources = external_sources.get("sources")
     raw_comparisons = audit.get("literature_comparisons")
-    if not isinstance(raw_sources, list) or not isinstance(raw_comparisons, list):
-        raise ValueError("current external-sources.json must provide sources and literature_comparisons arrays")
+    raw_claims = audit.get("claim_assessments")
+    raw_screenings = audit.get("candidate_screening")
+    if not all(isinstance(value, list) for value in (
+        raw_sources, raw_comparisons, raw_claims, raw_screenings,
+    )):
+        raise ValueError(
+            "current external-sources.json must provide sources, claim_assessments, "
+            "literature_comparisons, and candidate_screening arrays"
+        )
     by_id = {
         row.get("id"): row
         for row in raw_sources
         if isinstance(row, dict) and isinstance(row.get("id"), str)
     }
-    material_relations = {
-        "closest_antecedent", "material_overlap", "adjacent_contribution",
-        "method_or_data_precedent", "contradictory_result", "replication",
+    internal_ids = {
+        row.get("id")
+        for collection in (raw_sources, raw_comparisons, raw_claims, raw_screenings)
+        for row in collection
+        if isinstance(row, dict) and isinstance(row.get("id"), str)
     }
-    lines: list[str] = []
+    family_by_source, preferred_by_family = _literature_work_maps(audit, by_id)
+
+    # A supported comparison is evidence, not by itself an author-facing
+    # criticism.  Its owning source-claim screening must also conclude that the
+    # work materially changes priority, credit, contribution, or
+    # interpretation.  This join keeps adjacent/background comparisons in the
+    # audit trail without promoting them into the referee report.
+    eligible_comparison_ids: set[str] = set()
+    for index, screening in enumerate(raw_screenings):
+        if not isinstance(screening, dict):
+            raise ValueError(f"external-sources.json candidate screening {index} must be an object")
+        comparison_ids = screening.get("comparison_ids")
+        if not isinstance(comparison_ids, list):
+            raise ValueError(
+                f"external-sources.json candidate screening {screening.get('id')} "
+                "must provide comparison_ids"
+            )
+        if (
+            screening.get("materiality") == "material"
+            and screening.get("materiality_effect") in AUTHOR_FACING_MATERIALITY_EFFECTS
+            and screening.get("disposition") in AUTHOR_FACING_LITERATURE_DISPOSITIONS
+        ):
+            eligible_comparison_ids.update(
+                comparison_id
+                for comparison_id in comparison_ids
+                if isinstance(comparison_id, str)
+            )
+
+    grouped: dict[str, dict[str, Any]] = {}
+    projected_comparison_ids: set[str] = set()
+    linked_claim_ids: list[str] = []
     for index, comparison in enumerate(raw_comparisons):
         if not isinstance(comparison, dict):
             raise ValueError(f"external-sources.json literature comparison {index} must be an object")
-        if comparison.get("assessment_state") != "supported" or comparison.get("relation_type") not in material_relations:
+        if (
+            comparison.get("id") not in eligible_comparison_ids
+            or
+            comparison.get("assessment_state") != "supported"
+            or comparison.get("relation_type") not in MATERIAL_LITERATURE_RELATIONS
+        ):
             continue
         source_id = comparison.get("source_id")
         source = by_id.get(source_id)
         if source is None:
             raise ValueError(f"external-sources.json comparison references unknown source {source_id}")
-        source_contribution = _sentence(comparison.get("source_contribution"))
-        overlap = _sentence(comparison.get("overlap"))
-        surviving_difference = _sentence(comparison.get("surviving_difference"))
-        if not all((source_contribution, overlap, surviving_difference)):
+        comparison_sentences = [
+            _author_facing_sentence(
+                comparison.get(field),
+                internal_ids,
+                f"external-sources.json comparison {comparison.get('id')}.{field}",
+            )
+            for field in ("source_contribution", "overlap", "surviving_difference")
+        ]
+        if not all(comparison_sentences):
             raise ValueError(f"external-sources.json comparison {comparison.get('id')} is incomplete")
-        lines.append(
-            f"- **{_source_citation(source)}.** {source_contribution} "
-            f"The overlap is specific: {overlap} The reviewed paper remains distinct because {surviving_difference}"
+        comparison_id = comparison.get("id")
+        if isinstance(comparison_id, str):
+            projected_comparison_ids.add(comparison_id)
+        claim_id = comparison.get("claim_id")
+        if isinstance(claim_id, str) and claim_id not in linked_claim_ids:
+            linked_claim_ids.append(claim_id)
+        family_id = family_by_source.get(str(source_id))
+        key = _literature_group_key(source, family_id)
+        group = grouped.setdefault(key, {
+            "family_id": family_id,
+            "source_ids": [],
+            "comparisons": [],
+        })
+        if source_id not in group["source_ids"]:
+            group["source_ids"].append(source_id)
+        group["comparisons"].append((index, comparison))
+
+    if not grouped:
+        return []
+
+    claim_by_id: dict[str, dict[str, Any]] = {}
+    for index, claim in enumerate(raw_claims):
+        if not isinstance(claim, dict):
+            raise ValueError(f"external-sources.json claim assessment {index} must be an object")
+        claim_id = claim.get("id")
+        if isinstance(claim_id, str):
+            claim_by_id[claim_id] = claim
+    missing_claims = [claim_id for claim_id in linked_claim_ids if claim_id not in claim_by_id]
+    if missing_claims:
+        raise ValueError(
+            "material literature comparisons lack claim assessments: "
+            + ", ".join(missing_claims)
         )
+
+    linked_claims = [claim_by_id[claim_id] for claim_id in linked_claim_ids]
+    source_lines: list[str] = []
+
+    ordered_groups = sorted(
+        grouped.values(),
+        key=lambda group: min(
+            (
+                LITERATURE_RELATION_PRIORITY.get(row.get("relation_type"), 99),
+                index,
+            )
+            for index, row in group["comparisons"]
+        ),
+    )
+    for group in ordered_groups:
+        comparisons = sorted(
+            group["comparisons"],
+            key=lambda item: (
+                LITERATURE_RELATION_PRIORITY.get(item[1].get("relation_type"), 99),
+                item[0],
+            ),
+        )
+        family_id = group["family_id"]
+        preferred_id = preferred_by_family.get(family_id) if family_id else None
+        citation_source = by_id.get(preferred_id) or by_id[group["source_ids"][0]]
+        sentences = _unique_sentences([
+            *(row.get("source_contribution") for _, row in comparisons),
+            *(row.get("overlap") for _, row in comparisons),
+            *(row.get("surviving_difference") for _, row in comparisons),
+        ])
+        source_lines.extend([f"**{_source_citation(citation_source)}.** {' '.join(sentences)}", ""])
+
+    claim_lines: list[str] = []
+    for claim_index, claim in enumerate(linked_claims):
+        assessment = claim.get("assessment")
+        verdict = LITERATURE_ASSESSMENT_VERDICT.get(assessment)
+        claim_text = _author_facing_sentence(
+            claim.get("claim_text"),
+            internal_ids,
+            f"external-sources.json claim assessment {claim.get('id')}.claim_text",
+        )
+        note = _author_facing_sentence(
+            claim.get("assessment_note"),
+            internal_ids,
+            f"external-sources.json claim assessment {claim.get('id')}.assessment_note",
+        )
+        restatement = _author_facing_sentence(
+            claim.get("fair_restatement"),
+            internal_ids,
+            f"external-sources.json claim assessment {claim.get('id')}.fair_restatement",
+        )
+        if not all((verdict, claim_text, note, restatement)):
+            raise ValueError(f"external-sources.json claim assessment {claim.get('id')} is incomplete")
+        if len(linked_claims) == 1:
+            claim_lead = "The manuscript's relevant claim is"
+        elif claim_index == 0:
+            claim_lead = "One relevant claim is"
+        else:
+            claim_lead = "Another relevant claim is"
+        line = (
+            f"{claim_lead}: {claim_text} That claim {verdict} {note}"
+        )
+        if assessment != "supported":
+            line += f" A more defensible formulation is: “{restatement}”"
+        claim_lines.append(line)
+    lines: list[str] = []
+    for line in claim_lines:
+        lines.extend([line, ""])
+    lines.extend(source_lines)
+
+    recommendations: list[str] = []
+    seen_recommendations: set[str] = set()
+    for index, screening in enumerate(raw_screenings):
+        if not isinstance(screening, dict):
+            raise ValueError(f"external-sources.json candidate screening {index} must be an object")
+        comparison_ids = screening.get("comparison_ids")
+        if (
+            not isinstance(comparison_ids, list)
+            or not projected_comparison_ids.intersection(comparison_ids)
+        ):
+            continue
+        recommendation = _author_facing_sentence(
+            screening.get("recommended_change"),
+            internal_ids,
+            f"external-sources.json candidate screening {screening.get('id')}.recommended_change",
+        )
+        key = " ".join(recommendation.lower().split())
+        if recommendation and key not in seen_recommendations:
+            seen_recommendations.add(key)
+            recommendations.append(recommendation)
+    if recommendations:
+        if len(recommendations) == 1:
+            lines.append(f"**Suggested revision:** {recommendations[0]}")
+        else:
+            lines.extend([
+                "**Suggested revisions:**",
+                "",
+                *(f"- {recommendation}" for recommendation in recommendations),
+            ])
     return lines
 
 
@@ -851,15 +1226,6 @@ def render_report(
         lines.extend(["", "The main strengths worth preserving are:", ""])
         lines.extend(f"- {value}" for value in strengths)
     comparison_lines = contribution_comparison_lines(external_sources)
-    if comparison_lines:
-        lines.extend([
-            "",
-            "## Contribution and closest literature",
-            "",
-            "The verified comparisons below are the ones that materially affect how the contribution should be framed:",
-            "",
-            *comparison_lines,
-        ])
     if round_reconciliation is not None:
         records = round_reconciliation.get("records")
         new_finding_ids = round_reconciliation.get("new_finding_ids")
@@ -973,12 +1339,23 @@ def render_report(
         "## Is the argument convincing?",
         "",
         convincingness,
+    ])
+    if comparison_lines:
+        lines.extend([
+            "",
+            "## Closest literature and key differences",
+            "",
+            *comparison_lines,
+        ])
+    lines.extend([
         "",
         f"## Detailed Comments ({len(substance)})",
         "",
     ])
     lines.append("\n\n".join(detail_block(index, row) for index, row in enumerate(substance, start=1)))
-    return "\n".join(lines).rstrip() + "\n"
+    rendered = "\n".join(lines).rstrip() + "\n"
+    assert_author_facing_markdown_safe(rendered, "report.md")
+    return rendered
 
 
 def markdown_cell(value: Any) -> str:
@@ -1084,10 +1461,14 @@ def render_current_writing_report(
     for index, row in enumerate(section_rows):
         if not isinstance(row, dict):
             raise ValueError(f"evidence/writing.json.section_audit[{index}] must be an object")
+        section = reader_facing_locator(
+            required_text(row, "section", f"evidence/writing.json.section_audit[{index}]"),
+            f"evidence/writing.json.section_audit[{index}].section",
+        )
         lines.append(
             "| "
             + " | ".join([
-                markdown_cell(row.get("section")),
+                markdown_cell(section),
                 markdown_cell(row.get("current_job")),
                 markdown_cell(row.get("what_works")),
                 markdown_cell(row.get("reader_friction")),
@@ -1115,6 +1496,14 @@ def render_current_writing_report(
         variants = row.get("variants")
         if not isinstance(variants, list):
             raise ValueError(f"evidence/writing.json.consistency_groups[{index}].variants must be an array")
+        locations_checked = reader_facing_locator(
+            required_text(
+                row,
+                "locations_checked",
+                f"evidence/writing.json.consistency_groups[{index}]",
+            ),
+            f"evidence/writing.json.consistency_groups[{index}].locations_checked",
+        )
         lines.append(
             "| "
             + " | ".join([
@@ -1122,7 +1511,7 @@ def render_current_writing_report(
                 markdown_cell(humanize(row.get("status"))),
                 markdown_cell(row.get("preferred")),
                 markdown_cell("; ".join(str(value) for value in variants)),
-                markdown_cell(row.get("locations_checked")),
+                markdown_cell(locations_checked),
                 related_comment_list(row, comment_labels),
             ])
             + " |"
@@ -1163,6 +1552,11 @@ def render_current_writing_report(
                     "locator",
                     f"evidence/writing.json.mechanics[{index}].occurrences[{occurrence_index}]",
                 )
+                display_locator = reader_facing_locator(
+                    locator,
+                    f"evidence/writing.json.mechanics[{index}].occurrences[{occurrence_index}]",
+                    occurrence.get("reader_locator"),
+                )
                 before = required_text(
                     occurrence,
                     "quote",
@@ -1175,7 +1569,7 @@ def render_current_writing_report(
                 )
                 lines.extend([
                     f"<!-- occurrence_source: {occurrence.get('source_provenance')}; render_verification: {occurrence.get('render_verification')} -->",
-                    f"- **{locator}:** Replace “{clean_join(before)}” with “{clean_join(after)}”",
+                    f"- **{display_locator}:** Replace “{clean_join(before)}” with “{clean_join(after)}”",
                 ])
             lines.append("")
         else:
@@ -1205,10 +1599,14 @@ def render_current_writing_report(
         for index, row in enumerate(style_rows):
             if not isinstance(row, dict):
                 raise ValueError(f"evidence/writing.json.style_suggestions[{index}] must be an object")
+            display_locator = reader_facing_locator(
+                required_text(row, "locator", f"evidence/writing.json.style_suggestions[{index}]"),
+                f"evidence/writing.json.style_suggestions[{index}].locator",
+            )
             lines.append(
                 "| "
                 + " | ".join([
-                    markdown_cell(row.get("locator")),
+                    markdown_cell(display_locator),
                     markdown_cell(row.get("current_problem")),
                     markdown_cell(row.get("suggested_revision")),
                     markdown_cell(humanize(row.get("priority"))),
@@ -1230,11 +1628,18 @@ def render_current_writing_report(
             locations = row.get("locations")
             if not isinstance(locations, list):
                 raise ValueError(f"evidence/writing.json.redundancy_map[{index}].locations must be an array")
+            display_locations = [
+                reader_facing_locator(
+                    value,
+                    f"evidence/writing.json.redundancy_map[{index}].locations[{location_index}]",
+                )
+                for location_index, value in enumerate(locations)
+            ]
             lines.append(
                 "| "
                 + " | ".join([
                     markdown_cell(row.get("idea")),
-                    markdown_cell("; ".join(str(value) for value in locations)),
+                    markdown_cell("; ".join(display_locations)),
                     markdown_cell(row.get("recommended_home")),
                     related_comment_list(row, comment_labels),
                 ])
@@ -1307,6 +1712,7 @@ def render_current_writing_report(
         raise ValueError(
             "canonical writing evidence creates a journal-fit section inconsistent with run.json.requested_addons"
         )
+    assert_author_facing_markdown_safe(rendered, "editing-comments.md")
     return rendered
 
 
@@ -1335,7 +1741,9 @@ def render_legacy_writing_report(review_dir: Path, ledger: dict[str, Any]) -> st
     preamble = add_navigation(preamble, include_writing=True)
     writing = active_rows(ledger, "writing")
     details = "\n\n".join(detail_block(index, row) for index, row in enumerate(writing, start=1))
-    return f"{preamble}\n\n## Detailed Editing Comments ({len(writing)})\n\n{details}\n"
+    rendered = f"{preamble}\n\n## Detailed Editing Comments ({len(writing)})\n\n{details}\n"
+    assert_author_facing_markdown_safe(rendered, "editing-comments.md")
+    return rendered
 
 
 def render_writing_report(

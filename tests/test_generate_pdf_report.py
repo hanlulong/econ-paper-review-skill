@@ -7,6 +7,7 @@ import importlib.util
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -40,6 +41,23 @@ class GeneratePdfReportTests(unittest.TestCase):
         target = Path(temporary) / name
         shutil.copytree(FIXTURE, target)
         return target
+
+    def test_checked_in_sample_pdf_contains_no_internal_provenance(self) -> None:
+        sample = ROOT / "docs" / "sample-review" / "paper-review.pdf"
+        reader = PdfReader(sample)
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        forbidden = re.compile(
+            r"(?:"
+            r"\b(?:SRC-[0-9]{2,}(?:-PDF-B[0-9]{4,})?|ANC-[0-9]{2,}|PDF-B[0-9]{4,})\b"
+            r"|\bbbox\s*(?:[:=]\s*|\s+)[-+]?(?:[0-9]|\.[0-9])"
+            r"|\b(?:block_id|anchor_id|source_id)\s*[:=]\s*\S+"
+            r"|\bpage\s*=\s*[0-9]+"
+            r")",
+            re.IGNORECASE,
+        )
+        self.assertIsNone(forbidden.search(text))
+        self.assertNotIn("Package verification", text)
+        self.assertNotIn("Assessment Boundary", text)
 
     def test_auto_renderer_uses_reportlab_when_tex_health_checks_fail(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -96,6 +114,9 @@ class GeneratePdfReportTests(unittest.TestCase):
             first.write_bytes(first_bytes)
             reader = PdfReader(first)
             self.assertGreater(len(reader.pages), 3)
+            self.assertNotEqual(reader.metadata.author, "econ-review")
+            self.assertNotEqual(reader.metadata.creator, "econ-review")
+            self.assertNotEqual(reader.metadata.producer, "econ-review")
             text = "\n".join(page.extract_text() or "" for page in reader.pages)
             normalized_text = " ".join(text.split())
             for expected in (
@@ -137,6 +158,47 @@ class GeneratePdfReportTests(unittest.TestCase):
                 "How to use this plan", "P0 - essential before submission",
             ):
                 self.assertIn(destination, contents)
+
+    def test_pdf_paths_reject_visible_audit_locators_but_ignore_hidden_links(self) -> None:
+        hidden = "<!-- anchor_id=ANC-99; source_id=SRC-99 -->\nReadable report text."
+        MODULE.assert_author_facing_markdown_safe(hidden, "report.md")
+        with self.assertRaisesRegex(ValueError, "exposes an internal source"):
+            MODULE.assert_author_facing_markdown_safe(
+                "Location: PDF p. 4, bbox 1,2,3,4, block SRC-01-PDF-B0247",
+                "report.md",
+            )
+        for leaked in (
+            "Location block=ABC123",
+            "Location block id=ABC123",
+            "Location SHA256: " + "a" * 64,
+            "Location parser_method=poppler",
+        ):
+            with self.subTest(leaked=leaked), self.assertRaisesRegex(
+                ValueError, "exposes an internal source"
+            ):
+                MODULE.assert_author_facing_markdown_safe(leaked, "report.md")
+        MODULE.assert_author_facing_markdown_safe(
+            "The preferred estimator uses Method=OLS results.",
+            "report.md",
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.copy_fixture(temporary)
+            report_path = target / "report.md"
+            report_path.write_text(
+                report_path.read_text(encoding="utf-8")
+                + "\nLocation: anchor_id=ANC-99\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "author-facing document report.md"):
+                MODULE._latex_documents(target)
+            with self.assertRaisesRegex(ValueError, "author-facing document report.md"):
+                MODULE.build_pdf(
+                    target,
+                    Path(temporary) / "unsafe.pdf",
+                    page_size="letter",
+                    font_dir=None,
+                )
 
     def test_round_progress_follows_referee_report_in_pdf_order(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

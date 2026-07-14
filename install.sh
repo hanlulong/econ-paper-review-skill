@@ -189,6 +189,79 @@ for current, directories, files in os.walk(root, followlinks=False):
 PY
 }
 
+skill_tree_is_current() {
+  python3 - "$1" "$2" <<'PY'
+import fnmatch
+import hashlib
+import os
+import stat
+import sys
+from pathlib import Path
+
+source, destination = map(Path, sys.argv[1:])
+ignore_patterns = (
+    ".DS_Store", "__pycache__", "*.pyc", "*.pyo",
+    ".pytest_cache", ".mypy_cache", ".ruff_cache",
+)
+
+
+def ignored(name):
+    return any(fnmatch.fnmatch(name, pattern) for pattern in ignore_patterns)
+
+
+def digest(path):
+    value = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            value.update(chunk)
+    return value.hexdigest()
+
+
+def manifest(root, *, ignore_source_artifacts):
+    if not root.is_dir() or root.is_symlink():
+        raise OSError("tree root is missing or unsafe")
+    records = {}
+    for current, directories, files in os.walk(root, followlinks=False):
+        current_path = Path(current)
+        kept_directories = []
+        for name in directories:
+            if ignore_source_artifacts and ignored(name):
+                continue
+            path = current_path / name
+            metadata = path.lstat()
+            if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+                raise OSError("tree contains an unsafe directory")
+            relative = path.relative_to(root).as_posix()
+            records[f"directory:{relative}"] = stat.S_IMODE(metadata.st_mode)
+            kept_directories.append(name)
+        directories[:] = kept_directories
+        for name in files:
+            if ignore_source_artifacts and ignored(name):
+                continue
+            path = current_path / name
+            metadata = path.lstat()
+            if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+                raise OSError("tree contains an unsafe file")
+            relative = path.relative_to(root).as_posix()
+            records[f"file:{relative}"] = (
+                stat.S_IMODE(metadata.st_mode),
+                metadata.st_size,
+                digest(path),
+            )
+    return records
+
+
+try:
+    current = manifest(source, ignore_source_artifacts=True) == manifest(
+        destination,
+        ignore_source_artifacts=False,
+    )
+except OSError:
+    current = False
+raise SystemExit(0 if current else 1)
+PY
+}
+
 verify_and_extract_archive() {
   archive="$1"
   expected_sha="$2"
@@ -395,6 +468,14 @@ install_one() {
   destination="$2"
   label="$3"
 
+  if skill_tree_is_current "$source_dir" "$destination"; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "Would keep current $label: $destination"
+    else
+      echo "Already current $label: $destination"
+    fi
+    return
+  fi
   if [ "$DRY_RUN" -eq 1 ]; then
     echo "Would install $label: $destination"
     return

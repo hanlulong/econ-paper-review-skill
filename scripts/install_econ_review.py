@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import platform
+import shlex
 import shutil
 import stat
 import subprocess
@@ -111,6 +112,59 @@ def _source_files(root: Path) -> list[Path]:
     return sorted(files, key=lambda path: path.as_posix())
 
 
+def _tree_has_exact_membership(root: Path, expected_files: set[str]) -> bool:
+    """Return whether *root* contains exactly the declared regular files.
+
+    The comparison includes directories so an undeclared empty directory, link,
+    junction, reparse point, or non-regular file cannot survive an idempotent
+    installation check and later participate in Python module shadowing.
+    """
+
+    expected_directories = {""}
+    for raw in expected_files:
+        path = PurePosixPath(raw)
+        if (
+            not raw
+            or path.is_absolute()
+            or ".." in path.parts
+            or raw != path.as_posix()
+        ):
+            return False
+        for length in range(1, len(path.parts)):
+            expected_directories.add(PurePosixPath(*path.parts[:length]).as_posix())
+
+    actual_files: set[str] = set()
+    actual_directories: set[str] = set()
+
+    def raise_walk_error(error: OSError) -> None:
+        raise error
+
+    try:
+        for current, directories, names in os.walk(
+            root,
+            followlinks=False,
+            onerror=raise_walk_error,
+        ):
+            current_path = Path(current)
+            if _is_link_or_junction(current_path):
+                return False
+            relative_directory = current_path.relative_to(root).as_posix()
+            actual_directories.add("" if relative_directory == "." else relative_directory)
+            for name in directories:
+                candidate = current_path / name
+                if _is_link_or_junction(candidate) or not candidate.is_dir():
+                    return False
+            for name in names:
+                candidate = current_path / name
+                if _is_link_or_junction(candidate) or not candidate.is_file():
+                    return False
+                actual_files.add(candidate.relative_to(root).as_posix())
+    except (OSError, ValueError):
+        return False
+
+    return actual_files == expected_files and actual_directories == expected_directories
+
+
 def validate_source(root: Path) -> list[Path]:
     if not root.is_dir() or _is_link_or_junction(root):
         raise InstallError(f"trusted local skill source is missing or unsafe: {root}")
@@ -160,6 +214,11 @@ def destination_is_current(
     runtime_python: Path | None,
 ) -> bool:
     if not destination.is_dir() or _is_link_or_junction(destination):
+        return False
+    expected_files = set(source_manifest) | {".econ-review-install.json"}
+    if runtime_python is not None:
+        expected_files.add(".econ-review-runtime.json")
+    if not _tree_has_exact_membership(destination, expected_files):
         return False
     state_path = destination / ".econ-review-install.json"
     if _is_link_or_junction(state_path):
@@ -732,6 +791,12 @@ def review_desk_is_current(
 ) -> bool:
     if not destination.is_dir() or _is_link_or_junction(destination):
         return False
+    expected_files = {REVIEW_DESK_MANIFEST_NAME} | {
+        str(record["path"])
+        for record in records
+    }
+    if not _tree_has_exact_membership(destination, expected_files):
+        return False
     manifest = destination / REVIEW_DESK_MANIFEST_NAME
     if not manifest.is_file() or _is_link_or_junction(manifest) or manifest.read_bytes() != manifest_bytes:
         return False
@@ -775,10 +840,32 @@ def review_desk_cmd_bytes(runtime_python: Path) -> bytes:
         "setlocal DisableDelayedExpansion\r\n"
         "chcp 65001 >nul\r\n"
         "set PYTHONUTF8=1\r\n"
-        f"{quoted_python} \"%~dp0launch_review_desk.py\" %*\r\n"
+        f"{quoted_python} -I \"%~dp0launch_review_desk.py\" %*\r\n"
         "exit /b %ERRORLEVEL%\r\n"
     )
     return text.encode("utf-8")
+
+
+def format_launch_command(
+    arguments: Sequence[str | Path],
+    *,
+    system: str | None = None,
+) -> str:
+    """Return a pasteable launch command for the documented platform shell.
+
+    macOS and Linux instructions use a POSIX shell.  Native Windows
+    instructions use PowerShell, where a quoted executable path must be
+    invoked with the call operator.  Keeping the two quoting rules separate
+    prevents shell expansion in unusual but valid user-owned paths.
+    """
+
+    values = [str(argument) for argument in arguments]
+    if any("\r" in value or "\n" in value for value in values):
+        raise InstallError("Review Desk launch-command paths cannot contain line breaks")
+    if (system or platform.system()) == "Windows":
+        quoted = ["'" + value.replace("'", "''") + "'" for value in values]
+        return "& " + " ".join(quoted)
+    return shlex.join(values)
 
 
 def install_review_desk_cmd(
@@ -887,12 +974,13 @@ def install_review_desk(
             runtime_python,
             dry_run=dry_run,
         )
-        print(f"Review Desk launch command: {windows_launcher}")
+        launch_command = format_launch_command([windows_launcher], system="Windows")
     else:
-        print(
-            "Review Desk launch command: "
-            + subprocess.list2cmdline([str(launcher_python), str(launcher)])
+        launch_command = format_launch_command(
+            [launcher_python, "-I", launcher],
+            system=system,
         )
+    print(f"Review Desk launch command: {launch_command}")
     print("Review Desk URL: http://127.0.0.1:48127/")
     return destination
 
@@ -941,7 +1029,12 @@ def poppler_guidance(system: str | None = None) -> str:
 
 
 def run_doctor(python: Path, skill: Path) -> bool:
-    result = _run_quiet([str(python), str(skill / "scripts" / "pdf_ingestion.py"), "doctor"])
+    doctor_environment = os.environ.copy()
+    doctor_environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    result = _run_quiet(
+        [str(python), str(skill / "scripts" / "pdf_ingestion.py"), "doctor"],
+        env=doctor_environment,
+    )
     if result.stdout.strip():
         print(result.stdout.rstrip())
     if result.stderr.strip():

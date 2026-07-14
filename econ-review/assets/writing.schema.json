@@ -25,7 +25,7 @@
         "type": "object", "additionalProperties": false,
         "required": ["section", "current_job", "what_works", "reader_friction", "revision_direction", "finding_ids"],
         "properties": {
-          "section": {"type": "string", "minLength": 1},
+          "section": {"$ref": "#/$defs/readerLocator"},
           "current_job": {"type": "string", "minLength": 1},
           "what_works": {"type": "string", "minLength": 1},
           "reader_friction": {"type": "string", "minLength": 1},
@@ -43,7 +43,7 @@
         "required": ["idea", "locations", "recommended_home", "finding_ids"],
         "properties": {
           "idea": {"type": "string", "minLength": 1},
-          "locations": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "locations": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"$ref": "#/$defs/readerLocator"}},
           "recommended_home": {"type": "string", "minLength": 1},
           "coverage_unit_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
           "evidence_refs": {"$ref": "#/$defs/sourceEvidenceRefs"},
@@ -91,7 +91,10 @@
           "id": {"type": "string", "pattern": "^WRT-[0-9]{2,}$"},
           "kind": {"enum": ["grammar", "article_usage", "spelling_typo", "agreement", "preposition_idiom", "punctuation", "hyphenation", "capitalization", "tense_voice", "pronoun_antecedent", "sentence_structure", "cross_reference", "other"]},
           "status": {"enum": ["issue", "checked_clean_group", "bounded"]},
-          "locator": {"type": "string", "minLength": 1},
+          "locator": {
+            "type": "string", "minLength": 1,
+            "description": "Canonical source locator. It may retain ingestion provenance for verification and is never rendered directly when it contains machine-only syntax."
+          },
           "quote": {"type": ["string", "null"]},
           "correction": {"type": ["string", "null"]},
           "occurrences": {
@@ -100,7 +103,14 @@
               "type": "object", "additionalProperties": false,
               "required": ["locator", "quote", "correction"],
               "properties": {
-                "locator": {"type": "string", "minLength": 1},
+                "locator": {
+                  "type": "string", "minLength": 1,
+                  "description": "Canonical locator that must reconcile to anchor_id; retain exact provenance here even when it is not suitable for authors."
+                },
+                "reader_locator": {
+                  "$ref": "#/$defs/readerLocator",
+                  "description": "Optional author-facing section, exhibit, paragraph, equation, or page label. Required by semantic validation only when locator cannot be reduced safely without exposing provenance."
+                },
                 "quote": {"type": "string", "minLength": 1},
                 "correction": {"type": "string", "minLength": 1},
                 "anchor_id": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"},
@@ -137,7 +147,7 @@
           "variants": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
           "preferred": {"type": "string", "minLength": 1},
           "status": {"enum": ["consistent", "issue", "bounded"]},
-          "locations_checked": {"type": "string", "minLength": 1},
+          "locations_checked": {"$ref": "#/$defs/readerLocator"},
           "coverage_unit_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
           "evidence_refs": {"$ref": "#/$defs/sourceEvidenceRefs"},
           "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
@@ -151,7 +161,7 @@
         "required": ["id", "locator", "current_problem", "suggested_revision", "priority", "finding_ids"],
         "properties": {
           "id": {"type": "string", "pattern": "^STYLE-[0-9]{2,}$"},
-          "locator": {"type": "string", "minLength": 1},
+          "locator": {"$ref": "#/$defs/readerLocator"},
           "current_problem": {"type": "string", "minLength": 1},
           "suggested_revision": {"type": "string", "minLength": 1},
           "priority": {"enum": ["substantive", "recommended", "optional"]},
@@ -225,6 +235,11 @@
     }
   },
   "$defs": {
+    "readerLocator": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Readable author-facing location. Use section, exhibit, paragraph, equation, or page language; never put source IDs, anchor IDs, block IDs, bounding boxes, hashes, extraction methods, or audit key-value syntax here."
+    },
     "sourceEvidenceRefs": {
       "type": "array",
       "minItems": 1,

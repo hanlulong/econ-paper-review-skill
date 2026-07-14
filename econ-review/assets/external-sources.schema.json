@@ -209,7 +209,11 @@
         "access_scope": {"enum": ["full_text", "abstract", "official_summary", "metadata", "other"]},
         "scope_complete": {"type": "boolean"},
         "scope_complete_basis": {"type": ["string", "null"], "minLength": 1},
-        "assessment_note": {"type": ["string", "null"], "minLength": 1},
+        "assessment_note": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "A concise, author-facing explanation of why the comparison is only partial, conflicting, or inconclusive; use null when a supported comparison needs no qualification."
+        },
         "locator": {"type": "string", "minLength": 1},
         "snapshot_excerpt": {"type": ["string", "null"], "minLength": 1},
         "snapshot_start": {"type": ["integer", "null"], "minimum": 0},
@@ -493,7 +497,11 @@
             "other"
           ]
         },
-        "claim_text": {"type": "string", "minLength": 1},
+        "claim_text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A concise reviewer summary of the manuscript's literature or contribution claim, grounded by manuscript_anchor_ids. This field is not represented as a verbatim quotation in author-facing output."
+        },
         "manuscript_anchor_ids": {
           "type": "array",
           "minItems": 1,
@@ -523,8 +531,16 @@
             "materially_overstated", "contradicted", "bounded"
           ]
         },
-        "assessment_note": {"type": "string", "minLength": 1},
-        "fair_restatement": {"type": "string", "minLength": 1},
+        "assessment_note": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A concise, author-facing explanation of why the contribution or literature claim received this assessment. State the evidentiary reason without source IDs, ledger codes, or internal audit labels."
+        },
+        "fair_restatement": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A complete, natural sentence giving the strongest defensible version of the manuscript's claim after accounting for the verified literature."
+        },
         "finding_ids": {
           "type": "array",
           "uniqueItems": true,
@@ -564,9 +580,21 @@
             "background", "other"
           ]
         },
-        "source_contribution": {"type": "string", "minLength": 1},
-        "overlap": {"type": "string", "minLength": 1},
-        "surviving_difference": {"type": "string", "minLength": 1},
+        "source_contribution": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A complete, standalone author-facing sentence explaining what the prior work studies, the relevant approach or evidence, and the result that matters for this comparison. Avoid audit shorthand."
+        },
+        "overlap": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A complete, standalone author-facing sentence identifying the precise economic question, mechanism, method, data, or result shared with the manuscript."
+        },
+        "surviving_difference": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A complete, standalone author-facing sentence explaining the meaningful economic or scientific difference that remains. A different sample, setting, or label is not by itself evidence of novelty."
+        },
         "assessment_state": {"enum": ["supported", "partial", "conflict", "inconclusive"]},
         "assessment_note": {"type": ["string", "null"], "minLength": 1},
         "confidence": {"enum": ["high", "medium", "low"]}
@@ -659,7 +687,11 @@
           "uniqueItems": true,
           "items": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"}
         },
-        "recommended_change": {"type": ["string", "null"], "minLength": 1},
+        "recommended_change": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "A concrete, author-facing revision to the literature discussion or contribution framing, written as a complete sentence; use null only when no change is warranted."
+        },
         "reasoning": {"type": "string", "minLength": 1}
       },
       "allOf": [

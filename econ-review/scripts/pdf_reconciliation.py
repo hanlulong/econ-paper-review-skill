@@ -16,7 +16,7 @@ import sys
 from collections import Counter
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -32,6 +32,14 @@ DECISION_STATES = [
 CRITICAL_TOKEN = re.compile(
     r"(?:[+\-−–±]?[0-9]+(?:[.,][0-9]+)*)|[=<>≤≥±×÷−]|[Α-ω]|(?:\\[A-Za-z]+)"
 )
+MIN_BLOCK_TEXT_SIMILARITY = 0.35
+
+
+class _PreparedBlockElement(NamedTuple):
+    element: dict[str, Any]
+    text: str
+    bbox: list[float] | None
+    matcher: SequenceMatcher
 
 
 def load_proposal_page_index(
@@ -122,19 +130,43 @@ def _overlap_ratio(left: list[float], right: list[float]) -> float:
     return round(width * height / area, 4)
 
 
-def _block_candidate(
-    block: dict[str, Any], proposal_id: str, proposal_page: dict[str, Any], page: dict[str, Any],
-) -> dict[str, Any] | None:
-    canonical = _text_key(block["raw_text"])
-    ranked: list[tuple[float, float, dict[str, Any], list[float] | None]] = []
+def _prepare_block_elements(
+    proposal_page: dict[str, Any], page: dict[str, Any],
+) -> list[_PreparedBlockElement]:
+    """Normalize elements once and retain matcher indexes for this sequential page pass."""
+    prepared: list[_PreparedBlockElement] = []
     for element in proposal_page.get("elements", []):
         if not isinstance(element, dict):
             continue
         text = _text_key(str(element.get("text") or ""))
-        bbox = _scaled_bbox(element, proposal_page, page)
+        prepared.append(_PreparedBlockElement(
+            element=element,
+            text=text,
+            bbox=_scaled_bbox(element, proposal_page, page),
+            matcher=SequenceMatcher(None, "", text, autojunk=False),
+        ))
+    return prepared
+
+
+def _block_candidate(
+    block: dict[str, Any], proposal_id: str, proposal_page: dict[str, Any], page: dict[str, Any],
+    *, prepared_elements: list[_PreparedBlockElement] | None = None,
+) -> dict[str, Any] | None:
+    canonical = _text_key(block["raw_text"])
+    ranked: list[tuple[float, float, dict[str, Any], list[float] | None]] = []
+    if prepared_elements is None:
+        prepared_elements = _prepare_block_elements(proposal_page, page)
+    for element, text, bbox, matcher in prepared_elements:
         overlap = _overlap_ratio(block["bbox"], bbox) if bbox else 0.0
-        similarity = SequenceMatcher(None, canonical, text, autojunk=False).ratio() if canonical or text else 1.0
-        if overlap > 0 or similarity >= 0.35:
+        if canonical or text:
+            matcher.set_seq1(canonical)
+            # quick_ratio is an upper bound: below the threshold, ratio cannot qualify.
+            if overlap <= 0.0 and matcher.quick_ratio() < MIN_BLOCK_TEXT_SIMILARITY:
+                continue
+            similarity = matcher.ratio()
+        else:
+            similarity = 1.0
+        if overlap > 0 or similarity >= MIN_BLOCK_TEXT_SIMILARITY:
             ranked.append((overlap, similarity, element, bbox))
     if not ranked:
         return None
@@ -214,6 +246,11 @@ def build_page_packets(
     page_packets: list[dict[str, Any]] = []
     for page in pages:
         number = page["page"]
+        prepared_block_elements = {
+            proposal_id: (proposal_page, _prepare_block_elements(proposal_page, page))
+            for proposal_id, proposal_pages in proposal_page_index.items()
+            if (proposal_page := proposal_pages.get(number)) is not None
+        }
         page_objects = sorted(objects_by_page.get(number, []), key=lambda row: row["id"])
         full_objects = sorted(
             (
@@ -236,9 +273,11 @@ def build_page_packets(
         for block in page_blocks:
             candidates = [
                 candidate
-                for proposal_id, proposal_pages in proposal_page_index.items()
-                if (proposal_page := proposal_pages.get(number)) is not None
-                if (candidate := _block_candidate(block, proposal_id, proposal_page, page)) is not None
+                for proposal_id, (proposal_page, prepared_elements) in prepared_block_elements.items()
+                if (candidate := _block_candidate(
+                    block, proposal_id, proposal_page, page,
+                    prepared_elements=prepared_elements,
+                )) is not None
             ]
             if candidates and any(
                 not row["critical_tokens_match"] or row["text_similarity"] < 0.85
