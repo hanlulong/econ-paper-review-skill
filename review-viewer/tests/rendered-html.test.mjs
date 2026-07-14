@@ -84,7 +84,8 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(workspace, /validateReviewComputations/);
   assert.match(workspace, /validateReviewComputationLinks/);
   assert.match(workspace, /ComputationProvenance/);
-  assert.match(workspace, /sourceAnchorPageLabel\(locator\)/);
+  assert.match(workspace, /\.map\(readerFacingSourceAnchorLocation\)/);
+  assert.doesNotMatch(workspace, /title=\{sourceAnchors\[anchorId\]\?\.locator \|\| anchorId\}/);
   assert.match(workspace, /<dt>Location<\/dt>/);
   for (const label of ["Calculation details", "Inputs checked", "Result", "Method", "Tolerance"]) {
     assert.match(workspace, new RegExp(label));
@@ -227,8 +228,8 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(workspace, /validateReviewLedger as validateLedger/);
   assert.match(workspace, /value\.target\.venue === null/);
   assert.match(workspace, /formatUserFacingLocator\(value\)/);
-  assert.match(locatorFormatter, /value\.paragraph && `para\./);
-  assert.match(locatorFormatter, /value\.lines && `lines/);
+  assert.match(locatorFormatter, /readable\(value\.paragraph\) && `para\./);
+  assert.match(locatorFormatter, /readable\(value\.lines\) && `lines/);
   assert.doesNotMatch(locatorFormatter, /value\.file/);
   assert.match(evidenceContract, /typeof field === "string"/);
   assert.match(ledgerContract, /raw\.fix\.resolved_when/);

@@ -77,6 +77,19 @@ NAVIGATION_BLOCK = re.compile(
     re.DOTALL,
 )
 HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+VISIBLE_AUDIT_PROVENANCE = re.compile(
+    r"(?:"
+    r"\b(?:SRC-[0-9]{2,}(?:-PDF-B[0-9]{4,})?|ANC-[0-9]{2,}|PDF-B[0-9]{4,})\b"
+    r"|\bbbox\s*(?:[:=]\s*|\s+)[-+]?(?:[0-9]|\.[0-9])"
+    r"|\b(?:block|block_id|anchor_id|source_id)\s*[:=]\s*\S+"
+    r"|\bblock\s+id\s*[:=]\s*\S+"
+    r"|\b(?:extraction_method|parser_method|ocr_method)\s*[:=]\s*\S+"
+    r"|\bmethod\s*[:=]\s*(?:pdf_text_layer|ocr|tesseract|poppler|mathpix)\b"
+    r"|\bsha(?:-?256)?\s*[:=]\s*[0-9a-f]{32,64}\b"
+    r"|\bpage\s*=\s*[0-9]+\b"
+    r")",
+    re.IGNORECASE,
+)
 DERIVED_EVIDENCE_PREFIX = re.compile(
     r"^\[(?:Reviewer observation|Reviewer comparison|Figure observation|"
     r"Table observation|Checked absence|Computation)\]\s*",
@@ -94,6 +107,15 @@ WINDOWS_RESERVED = {
     *(f"com{index}" for index in range(1, 10)),
     *(f"lpt{index}" for index in range(1, 10)),
 }
+
+
+def assert_author_facing_markdown_safe(markdown: str, source_name: str) -> None:
+    """Reject reader documents that expose source-ingestion provenance."""
+    if VISIBLE_AUDIT_PROVENANCE.search(HTML_COMMENT.sub("", markdown)):
+        raise ValueError(
+            f"author-facing document {source_name} exposes an internal source, anchor, "
+            "block, bounding-box, or audit locator"
+        )
 
 
 @dataclass(frozen=True)
@@ -156,7 +178,7 @@ class ReviewDocTemplate(BaseDocTemplate):
 
     def _page(self, canvas: Any, doc: Any) -> None:
         canvas.setTitle(self.metadata_title)
-        canvas.setAuthor("econ-review")
+        canvas.setAuthor("")
         canvas.setSubject(self.metadata_subject)
         page = canvas.getPageNumber()
         if page == 1:
@@ -943,6 +965,7 @@ def build_pdf(review_dir: Path, output: Path, *, page_size: str, font_dir: Path 
             story.append(SectionBreak(width, colors.HexColor("#2457A6")))
             story.append(Spacer(1, 8))
             markdown = _portable_document_path(review_dir, entry.path).read_text(encoding="utf-8")
+            assert_author_facing_markdown_safe(markdown, entry.path)
             story.extend(markdown_flowables(
                 markdown,
                 style_map,
@@ -1001,10 +1024,12 @@ def _latex_documents(review_dir: Path) -> list[ReviewDocument]:
             "fix-plan.md": "revision_plan",
             "evidence/round-reconciliation.md": "round_progress",
         }.get(entry.path, "supplementary")
+        markdown = _portable_document_path(review_dir, entry.path).read_text(encoding="utf-8")
+        assert_author_facing_markdown_safe(markdown, entry.path)
         documents.append(
             ReviewDocument(
                 title=entry.title,
-                markdown=_portable_document_path(review_dir, entry.path).read_text(encoding="utf-8"),
+                markdown=markdown,
                 role=role,
                 source_name=entry.path,
             )

@@ -9,6 +9,7 @@ import io
 import os
 import sys
 import tempfile
+import threading
 import types
 import unittest
 from pathlib import Path
@@ -143,6 +144,28 @@ class PdfDependencyGateTests(unittest.TestCase):
                 self.assertEqual(INGESTION.doctor(), 0)
             self.assertIn("Docling: 1.9 (optional; unsupported", optional_output.getvalue())
             self.assertIn("PDF ingestion: READY", optional_output.getvalue())
+
+    def test_doctor_command_probes_run_together_and_keep_report_order(self) -> None:
+        barrier = threading.Barrier(len(INGESTION.DOCTOR_COMMAND_SPECS))
+
+        def command_version(name: str, arguments: list[str]) -> str:
+            self.assertEqual(
+                arguments,
+                ["--version"] if name == "tesseract" else ["-v"],
+            )
+            barrier.wait(timeout=10)
+            return f"{name} synthetic-version"
+
+        with mock.patch.object(INGESTION, "command_version", side_effect=command_version):
+            rows = INGESTION.doctor_command_rows()
+
+        self.assertEqual(
+            rows,
+            [
+                (name, f"{name} synthetic-version", required)
+                for name, _arguments, required in INGESTION.DOCTOR_COMMAND_SPECS
+            ],
+        )
 
     def test_ingestion_required_version_gate_runs_before_pdf_commands(self) -> None:
         args = argparse.Namespace(

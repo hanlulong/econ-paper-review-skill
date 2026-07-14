@@ -30,11 +30,15 @@ class PublicReleaseTests(unittest.TestCase):
 
     def test_exact_contract_excludes_private_and_generated_material(self) -> None:
         paths = {path.as_posix() for path in MODULE.public_files(ROOT)}
+        self.assertIn(".claude-plugin/marketplace.json", paths)
         self.assertIn("CONTRIBUTING.md", paths)
         self.assertIn(".github/PULL_REQUEST_TEMPLATE.md", paths)
         self.assertIn("docs/CONTRIBUTOR_LICENSE_AGREEMENT.md", paths)
         self.assertIn("econ-review/LICENSE", paths)
+        self.assertIn("econ-review/.claude-plugin/plugin.json", paths)
+        self.assertIn("econ-review/.codex-plugin/plugin.json", paths)
         self.assertIn("econ-review/SKILL.md", paths)
+        self.assertIn("econ-review/skills/econ-review/SKILL.md", paths)
         self.assertIn("review-viewer/LICENSE", paths)
         self.assertIn("review-viewer/package.json", paths)
         self.assertIn("review-viewer/public/favicon.svg", paths)
@@ -61,6 +65,20 @@ class PublicReleaseTests(unittest.TestCase):
                 content = (ROOT / relative).read_text(encoding="utf-8")
                 self.assertIn(self.WINDOWS_MANAGED_INSTALL, content)
                 self.assertNotIn("py -3 scripts", content)
+
+    def test_public_install_guidance_does_not_require_private_credentials(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        install = (ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
+        for content in (readme, install):
+            with self.subTest(document="README" if content is readme else "INSTALL"):
+                self.assertIn("public repository", content)
+                self.assertIn("never ask me to paste a token", content)
+                self.assertNotIn("private-repository", content)
+                self.assertNotIn("gh auth login", content)
+        self.assertIn("${XDG_DATA_HOME:-$HOME/.local/share}/econ-review/", install)
+        self.assertNotIn("${XDG_DATA_HOME:-~/.local/share}", install)
+        self.assertIn("git pull --ff-only", install)
+        self.assertIn("Installing both the native\nplugin and a direct skill copy", install)
 
     def test_local_evaluation_handoffs_are_root_ignored(self) -> None:
         patterns = set((ROOT / ".gitignore").read_text(encoding="utf-8").splitlines())
@@ -320,6 +338,42 @@ class InstallerTests(unittest.TestCase):
             self.assertFalse((destination / "old.txt").exists())
             self.assertFalse((destination / ".DS_Store").exists())
             self.assertFalse((destination / "scripts" / "__pycache__").exists())
+            self.assertFalse(list(destination.parent.glob(".econ-review.*")))
+
+    def test_repeat_install_skips_exact_tree_and_repairs_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            destination = home / ".codex" / "skills" / "econ-review"
+            arguments = ("--global", "--codex")
+            environment = {"HOME": str(home)}
+
+            self.run_installer(ROOT / "install.sh", *arguments, env=environment)
+            installed_skill = destination / "SKILL.md"
+            original_inode = installed_skill.stat().st_ino
+            repeated = self.run_installer(
+                ROOT / "install.sh", *arguments, env=environment,
+            )
+            self.assertIn("Already current Codex (global)", repeated.stdout)
+            self.assertEqual(installed_skill.stat().st_ino, original_inode)
+
+            original = installed_skill.read_bytes()
+            installed_skill.write_bytes((b"X" if original[:1] != b"X" else b"Y") + original[1:])
+            extra = destination / "unexpected.txt"
+            extra.write_text("remove me", encoding="utf-8")
+            installed_script = destination / "scripts" / "validate_review.py"
+            source_script = ROOT / "econ-review" / "scripts" / "validate_review.py"
+            installed_script.chmod(stat.S_IMODE(installed_script.stat().st_mode) & ~0o111)
+
+            repaired = self.run_installer(
+                ROOT / "install.sh", *arguments, env=environment,
+            )
+            self.assertIn("Installed Codex (global)", repaired.stdout)
+            self.assertEqual(installed_skill.read_bytes(), (ROOT / "econ-review" / "SKILL.md").read_bytes())
+            self.assertFalse(extra.exists())
+            self.assertEqual(
+                stat.S_IMODE(installed_script.stat().st_mode),
+                stat.S_IMODE(source_script.stat().st_mode),
+            )
             self.assertFalse(list(destination.parent.glob(".econ-review.*")))
 
     def test_dry_run_reports_no_changes(self) -> None:

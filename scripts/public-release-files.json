@@ -1,6 +1,7 @@
 {
   "schema_version": "1",
   "files": [
+    ".claude-plugin/marketplace.json",
     ".gitattributes",
     ".github/PULL_REQUEST_TEMPLATE.md",
     ".github/dependabot.yml",
@@ -25,6 +26,8 @@
     "docs/images/review-desk.gif",
     "docs/sample-review/demo-paper.pdf",
     "docs/sample-review/paper-review.pdf",
+    "econ-review/.claude-plugin/plugin.json",
+    "econ-review/.codex-plugin/plugin.json",
     "econ-review/LICENSE",
     "econ-review/SKILL.md",
     "econ-review/agents/openai.yaml",
@@ -110,6 +113,7 @@
     "econ-review/scripts/validate_review_actions.py",
     "econ-review/scripts/validate_revision_handoff.py",
     "econ-review/scripts/validate_skill_package.py",
+    "econ-review/skills/econ-review/SKILL.md",
     "install.sh",
     "requirements-docling.txt",
     "requirements-markitdown.txt",
@@ -249,6 +253,7 @@
     "tests/test_pdf_dependency_versions.py",
     "tests/test_pdf_ingestion.py",
     "tests/test_pdf_reconciliation.py",
+    "tests/test_plugin_marketplace.py",
     "tests/test_public_release.py",
     "tests/test_query_source.py",
     "tests/test_review_desk_release.py",

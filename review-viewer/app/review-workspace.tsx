@@ -52,7 +52,7 @@ import { sha256Hex } from "../lib/review-fingerprint";
 import { equationEvidencePresentation, prepareReviewMarkdown } from "../lib/review-equation-presentation";
 import { orderExhibitRenders, type ExhibitRender } from "../lib/review-exhibit-presentation";
 import { formatUserFacingLocator } from "../lib/review-locator";
-import { conciseSourceAnchorLabel, exactAnchorExcerpt, sourceAnchorPageLabel } from "../lib/review-manuscript-context";
+import { conciseSourceAnchorLabel, exactAnchorExcerpt, readerFacingSourceAnchorLocation } from "../lib/review-manuscript-context";
 import {
   authorReportDisplayMarkdown,
   evidenceDisplayText,
@@ -321,7 +321,8 @@ function ComputationProvenance({
   }
   const checkedLocations = computation.input_anchor_ids
     .map((anchorId) => sourceAnchors[anchorId]?.locator || "")
-    .filter(Boolean);
+    .filter(Boolean)
+    .map(readerFacingSourceAnchorLocation);
   return (
     <section className="computation-provenance" aria-labelledby={`computation-${computation.id}`}>
       <div className="computation-heading">
@@ -333,8 +334,7 @@ function ComputationProvenance({
         <div><dt>Tolerance</dt><dd>{computation.tolerance}</dd></div>
         <div className="computation-wide"><dt>Method</dt><dd>{computation.method}</dd></div>
         {checkedLocations.length > 0 && <div className="computation-wide"><dt>Inputs checked</dt><dd>{checkedLocations.map((locator, index) => {
-          const page = sourceAnchorPageLabel(locator);
-          return <span className="computation-anchor" key={`${locator}-${index}`} title={locator}><span>{page || locator}</span>{index < checkedLocations.length - 1 && <span className="computation-anchor-separator" aria-hidden="true">; </span>}</span>;
+          return <span className="computation-anchor" key={`${locator}-${index}`} title={locator}><span>{locator}</span>{index < checkedLocations.length - 1 && <span className="computation-anchor-separator" aria-hidden="true">; </span>}</span>;
         })}</dd></div>}
       </dl>
       <p className="computation-boundary">Review Desk shows the saved result; it does not rerun the calculation.</p>
@@ -2812,7 +2812,7 @@ export function ReviewWorkspace() {
             </div>
           </div>
           {evidenceAnchorIds.length > 1 && <div className="comparison-source-switcher" role="group" aria-label="Comparison passages">
-            {evidenceAnchorIds.map((anchorId, index) => <button key={anchorId} aria-pressed={index === activeSourceAnchorIndex} title={sourceAnchors[anchorId]?.locator || anchorId} data-source-anchor={anchorId} onClick={() => {
+            {evidenceAnchorIds.map((anchorId, index) => <button key={anchorId} aria-pressed={index === activeSourceAnchorIndex} title={conciseSourceAnchorLabel(index, sourceAnchors[anchorId]?.locator || "")} data-source-anchor={anchorId} onClick={() => {
               setSourceAnchorSelection({ evidenceKey: sourceEvidenceKey, index });
               setAnnouncement(`Showing source ${index + 1} for ${commentLabel(findings, selected.id)}`);
             }}><strong>{conciseSourceAnchorLabel(index, sourceAnchors[anchorId]?.locator || "")}</strong></button>)}

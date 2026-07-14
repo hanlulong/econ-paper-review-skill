@@ -59,13 +59,19 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "section": {"type": ["string", "null"]},
+        "section": {
+          "type": ["string", "null"],
+          "description": "Reader-facing section label. Keep source, anchor, block, bounding-box, and extraction provenance in paper_position and the source manifest, not here."
+        },
         "page": {"type": ["integer", "null"], "minimum": 1},
         "paragraph": {"type": ["string", "null"]},
         "lines": {"type": ["string", "null"]},
         "exhibit": {"type": ["string", "null"]},
         "equation": {"type": ["string", "null"]},
-        "file": {"type": ["string", "null"]}
+        "file": {
+          "type": ["string", "null"],
+          "description": "Readable manuscript-relative filename when it helps the author; never an internal evidence path or source identifier."
+        }
       }
     },
     "evidence": {

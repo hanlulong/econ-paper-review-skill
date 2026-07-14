@@ -152,6 +152,9 @@ Use this structure:
 ## Is the argument convincing?
 [State which links in the central claim-evidence-warrant chain are convincing, which remain provisional, and the smallest concrete changes that would make the argument persuasive.]
 
+## Closest literature and key differences
+[Include only when verified public comparators materially affect contribution framing. State the bottom-line contribution judgment; explain what each distinct prior work does, the exact overlap, the meaningful difference, whether the manuscript's claim is convincing, and the minimum fair reframing. Mention each intellectual work once even when it bears on several claims or has several versions.]
+
 ## Detailed Comments (N)
 
 ### 1. Section 3.1: [short issue title]
@@ -168,7 +171,11 @@ Use this structure:
 **Status**: [Pending]
 ```
 
+The literature section is optional, but its position is fixed when present: after `Is the argument convincing?` and immediately before `Detailed Comments`. Project it from canonical work families, claim assessments, literature comparisons, and candidate screenings. Preserve claim-specific comparison rows internally while deduplicating the author-facing discussion by intellectual work. `fair_restatement` must be substitute-ready manuscript language, while `recommended_change` carries the editing instruction. Use complete referee prose; do not expose source IDs or audit labels, repeat a source by claim, or assemble fragments with stock clauses.
+
 Render `Relevant text` from the finding's designated display evidence. Render `verbatim` records and normalized source transcriptions as quotations. Render reviewer observations, comparisons, computations, and checked absences as unquoted evidence notes, without internal bracket labels such as `[Reviewer observation]`. Canonical `representation` metadata—not a prose prefix—preserves provenance. A composite comparison must cite at least two source anchors and verify every cited component. Never make reviewer prose, a composite comparison, an omission, or a computed result look like manuscript text. Multi-location findings list the related checked anchors in `Concern`. When evidence declares `locator.page`, that page must agree with every referenced source anchor; leave it null for cross-page composites until the contract defines explicit anchor roles. Legacy canonical content may retain a matching prefix, but deterministic report generation removes it.
+
+Keep canonical provenance and author-facing location labels separate. Source-manifest and writing-occurrence `locator` values retain the exact source locator needed for reconciliation, including ingestion geometry and stable IDs when present. Reports, PDF output, and Review Desk must never display bounding boxes, source IDs, anchor IDs, block IDs, hashes, extraction methods, or audit key-value syntax. Use a readable section, exhibit, paragraph, equation, or page label. A PDF ingestion locator may reduce deterministically to `PDF p. N`; if no safe label can be derived, supply the writing occurrence's `reader_locator` and fail completion when it is absent or itself exposes provenance. Hidden canonical metadata remains available to validators and later review rounds.
 
 Set `N` to the actual number of surviving substance-channel comments, normally `0..100` under the current full contract. Do not pad toward the capacity, stop discovery when it is reached, or truncate active findings. If more than 100 independently defensible substance findings remain after true-root consolidation, pause completion for explicit user resolution. Sort by `importance_rank`, not manuscript order. The rank is globally severity-first: all critical findings precede all major findings, all major precede all minor findings, and informational observations come last; decision role and repair payoff order findings only within a severity tier. Number comments consecutively and use the visible format exactly:
 
@@ -226,7 +233,7 @@ Full mode requires this separate report. Quick mode creates it only when writing
 [Caption self-containment, titles, units, continuation headings, accessibility, and layout. Route scientifically misleading exhibit content to the substance report.]
 
 ## Mechanics and copyedit inventory
-[Exact corrections grouped by rule, with location and reader consequence in natural prose. Preserve source and render checks in hidden metadata and canonical evidence rather than exposing audit labels.]
+[Exact corrections grouped by rule, with a readable section, exhibit, paragraph, equation, or page location and reader consequence in natural prose. Preserve exact source locators, bounding boxes, IDs, and render checks in canonical evidence rather than exposing audit syntax.]
 
 ## Style and writing improvements
 [Concrete optional or recommended revisions plus the redundancy map. Distinguish objective corrections from matters of style.]

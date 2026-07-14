@@ -269,6 +269,15 @@ class ReviewDeskReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "integrity verification"):
                 LAUNCHER.load_inventory(installed)
 
+    def test_launcher_rejects_unlisted_files_and_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            installed = self.install_release(Path(tmp) / "desk")
+            extra = installed / "undeclared" / "hashlib.py"
+            extra.parent.mkdir()
+            extra.write_text("raise RuntimeError('shadowed')\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "exact manifest membership"):
+                LAUNCHER.load_inventory(installed)
+
 
 if __name__ == "__main__":
     unittest.main()

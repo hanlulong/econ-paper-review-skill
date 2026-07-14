@@ -398,10 +398,15 @@ class RealLuaLatexSmokeTests(unittest.TestCase):
 
     def test_real_compile_is_professional_letter_pdf_and_reproducible(self) -> None:
         comment_sentinel = "Individual concern excluded from contents"
+        literature_sentinel = "The closest study estimates a related margin in a different institutional setting."
         report = document(
             "# Referee report\n\n"
             "## Overall assessment\n\n"
             "The argument is promising, and the main revision is clearly actionable.\n\n"
+            "## Is the argument convincing?\n\n"
+            "The central mechanism is plausible once the benchmark is stated explicitly.\n\n"
+            "## Closest literature and key differences\n\n"
+            f"{literature_sentinel}\n\n"
             "## Detailed Comments (1)\n\n"
             f"### 1. {comment_sentinel}\n\n"
             "**Issue:** The mechanism needs one additional bridge.\n\n"
@@ -432,6 +437,9 @@ class RealLuaLatexSmokeTests(unittest.TestCase):
         reader = PdfReader(io.BytesIO(first.pdf_bytes))
         self.assertGreaterEqual(len(reader.pages), 3)
         self.assertEqual(reader.metadata.title, PAPER_TITLE)
+        self.assertNotEqual(reader.metadata.author, "econ-review")
+        self.assertNotEqual(reader.metadata.creator, "econ-review")
+        self.assertNotEqual(reader.metadata.producer, "econ-review")
         first_page = reader.pages[0]
         self.assertAlmostEqual(float(first_page.mediabox.width), 612.0, delta=1.0)
         self.assertAlmostEqual(float(first_page.mediabox.height), 792.0, delta=1.0)
@@ -439,11 +447,26 @@ class RealLuaLatexSmokeTests(unittest.TestCase):
         self.assertIn(PAPER_TITLE, full_text)
         self.assertIn("Referee Report", full_text)
         self.assertIn("Overall assessment", full_text)
+        self.assertIn("Is the argument convincing?", full_text)
+        self.assertIn("Closest literature and key differences", full_text)
+        self.assertIn(literature_sentinel, full_text)
         self.assertIn(comment_sentinel, full_text)
         contents_text = reader.pages[1].extract_text() or ""
         self.assertIn("Overall assessment", contents_text)
+        self.assertIn("Is the argument convincing?", contents_text)
+        self.assertIn("Closest literature and key differences", contents_text)
         self.assertIn("Detailed Comments (1)", contents_text)
+        self.assertNotIn(literature_sentinel, contents_text)
         self.assertNotIn(comment_sentinel, contents_text)
+        body_text = "\n".join(page.extract_text() or "" for page in reader.pages[2:])
+        self.assertLess(
+            body_text.index("Is the argument convincing?"),
+            body_text.index("Closest literature and key differences"),
+        )
+        self.assertLess(
+            body_text.index("Closest literature and key differences"),
+            body_text.index("Detailed Comments (1)"),
+        )
         for forbidden in ("Economic Paper Review", "Full review", "Author revision"):
             self.assertNotIn(forbidden, full_text)
 

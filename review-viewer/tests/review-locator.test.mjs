@@ -28,3 +28,21 @@ test("does not prepend Eq. to an already descriptive equation label", () => {
   assert.equal(formatUserFacingLocator({ file: "internal.md" }), "Manuscript");
   assert.equal(formatUserFacingLocator(undefined), "Location unavailable");
 });
+
+test("reduces machine provenance to a page without hiding ordinary block terminology", () => {
+  assert.equal(formatUserFacingLocator({
+    section: "PDF p. 14, bbox 1,2,3,4, block SRC-01-PDF-B0247",
+  }), "p. 14");
+  assert.equal(formatUserFacingLocator({
+    section: "block_id=PDF-B0247",
+    page: 14,
+  }), "p. 14");
+  assert.equal(
+    formatUserFacingLocator({ section: "Block bootstrap discussion" }),
+    "Block bootstrap discussion",
+  );
+  assert.equal(
+    formatUserFacingLocator({ section: "Section 3, block 2" }),
+    "Section 3, block 2",
+  );
+});

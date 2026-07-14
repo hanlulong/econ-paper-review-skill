@@ -10,11 +10,11 @@
   "diagnostics": [],
   "document_count": 3,
   "engine": "LuaLaTeX",
-  "latex_sha256": "9ccdf183805b176dd78420c63a8e9bdc82e812849a7d158215a0e45b6a04941d",
+  "latex_sha256": "0fd70b9caebbc0593c446209b17428f6e425c1d47ff23b88f521762b5fe583f6",
   "page_count": 9,
   "page_size": "letter",
-  "pdf_sha256": "f3cb4940f1161c4a93e8a21bdee4074402016cb63034c56d42604b12b052b791",
+  "pdf_sha256": "3756795f907d6bbd6536ad953829eacc748f8e53f6a00a8ad3b888d45caaa998",
   "renderer": "latexmk-lualatex",
   "source_date_epoch": 1783944000,
-  "template_sha256": "7059b533f67052d20c1bff81fa7fdbb28d11bffb94589b66e645cd2400ff71bf"
+  "template_sha256": "066fa14e5435a6378ba2488fa896893c658a29ee40b6b951f46e1f91d6aee925"
 }

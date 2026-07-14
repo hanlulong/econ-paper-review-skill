@@ -1,0 +1,41 @@
+{
+  "name": "econ-review",
+  "version": "0.1.0",
+  "description": "Produce a rigorous, source-grounded referee report and prioritized revision plan for an economics paper.",
+  "author": {
+    "name": "Han Lulong",
+    "email": "hanlulong@gmail.com",
+    "url": "https://openecon.ai"
+  },
+  "homepage": "https://openecon.ai",
+  "repository": "https://github.com/hanlulong/econ-paper-review-skill",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "keywords": [
+    "economics",
+    "paper-review",
+    "referee-report",
+    "research",
+    "academic-writing"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Econ Review",
+    "shortDescription": "Referee-grade review for economics papers",
+    "longDescription": "Review an economics or social-science paper with source-grounded checks of its argument, methods, evidence, contribution, exhibits, and writing, then produce a constructive referee report and prioritized revision plan.",
+    "developerName": "Han Lulong",
+    "category": "Education & Research",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://openecon.ai",
+    "defaultPrompt": [
+      "Use econ-review in full mode to review this economics paper and produce a constructive referee report.",
+      "Use econ-review in quick mode to identify the largest risks to this paper's claims.",
+      "Use econ-review to check whether this paper's argument, methods, evidence, and contribution are convincing."
+    ],
+    "brandColor": "#2F6F68",
+    "screenshots": []
+  }
+}

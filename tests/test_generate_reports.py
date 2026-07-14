@@ -275,25 +275,77 @@ class GenerateReportsTests(unittest.TestCase):
     def test_verified_material_comparators_are_named_in_the_referee_report(self) -> None:
         external = {
             "schema_version": "0.4",
-            "sources": [{
-                "id": "EXT-01",
-                "title": "A Synthetic Closest Result",
-                "url": "https://example.org/closest",
-                "bibliographic_metadata": {
-                    "authors": [{"name": "Alex Example"}],
-                    "first_public_date": "2024-03-15",
+            "sources": [
+                {
+                    "id": "EXT-01",
+                    "stable_id": "doi:10.1000/closest",
+                    "title": "A Synthetic Closest Result",
+                    "url": "https://example.org/closest",
+                    "bibliographic_metadata": {
+                        "authors": [
+                            {"name": "Alex Example"},
+                            {"name": "Blair Example"},
+                            {"name": "Casey Example"},
+                        ],
+                        "first_public_date": "2024-03-15",
+                        "work_family_id": "WORK-01",
+                    },
                 },
-            }],
+                {
+                    "id": "EXT-02",
+                    "stable_id": "repec:old-version",
+                    "title": "An Earlier Version of the Synthetic Result",
+                    "url": "https://example.org/earlier",
+                    "bibliographic_metadata": {
+                        "authors": [{"name": "Alex Example"}],
+                        "first_public_date": "2023-06-01",
+                        "work_family_id": "WORK-01",
+                    },
+                },
+            ],
             "frontier_audit": {
-                "literature_comparisons": [{
-                    "id": "LIT-CMP-01",
-                    "source_id": "EXT-01",
-                    "relation_type": "closest_antecedent",
-                    "assessment_state": "supported",
-                    "source_contribution": "The prior paper establishes the same boundary result",
-                    "overlap": "Both papers characterize the equality boundary",
-                    "surviving_difference": "the reviewed paper applies the result to a broader environment",
+                "work_families": [{
+                    "id": "WORK-01",
+                    "member_source_ids": ["EXT-01", "EXT-02"],
+                    "preferred_source_id": "EXT-01",
                 }],
+                "claim_assessments": [{
+                    "id": "LIT-CLM-01",
+                    "claim_text": "This is the first paper to characterize the equality boundary.",
+                    "assessment": "supported_if_narrowed",
+                    "assessment_note": "The earlier work establishes the same boundary result.",
+                    "fair_restatement": "The paper extends the boundary result to a broader environment.",
+                }],
+                "candidate_screening": [{
+                    "id": "LIT-SCR-01",
+                    "comparison_ids": ["LIT-CMP-01", "LIT-CMP-02"],
+                    "materiality": "material",
+                    "materiality_effect": "narrows_contribution",
+                    "disposition": "material_prior_work",
+                    "recommended_change": "Compare the assumptions and application directly, then remove the priority claim.",
+                }],
+                "literature_comparisons": [
+                    {
+                        "id": "LIT-CMP-01",
+                        "source_id": "EXT-01",
+                        "claim_id": "LIT-CLM-01",
+                        "relation_type": "closest_antecedent",
+                        "assessment_state": "supported",
+                        "source_contribution": "The prior paper establishes the same boundary result",
+                        "overlap": "Both papers characterize the equality boundary",
+                        "surviving_difference": "The reviewed paper applies the result to a broader environment",
+                    },
+                    {
+                        "id": "LIT-CMP-02",
+                        "source_id": "EXT-02",
+                        "claim_id": "LIT-CLM-01",
+                        "relation_type": "material_overlap",
+                        "assessment_state": "supported",
+                        "source_contribution": "The working-paper version proves the same result",
+                        "overlap": "The proof object is the same",
+                        "surviving_difference": "The reviewed paper studies a different application",
+                    },
+                ],
             },
         }
 
@@ -303,11 +355,140 @@ class GenerateReportsTests(unittest.TestCase):
             external_sources=external,
         )
 
-        self.assertIn("## Contribution and closest literature", rendered)
-        self.assertIn("Alex Example (2024)", rendered)
+        self.assertIn("## Closest literature and key differences", rendered)
+        self.assertNotIn("## Contribution and closest literature", rendered)
+        self.assertIn("Alex Example, Blair Example, and Casey Example (2024)", rendered)
         self.assertIn("[A Synthetic Closest Result](<https://example.org/closest>)", rendered)
-        self.assertIn("The reviewed paper remains distinct because", rendered)
+        self.assertNotIn("An Earlier Version of the Synthetic Result", rendered)
+        self.assertEqual(rendered.count("A Synthetic Closest Result"), 1)
+        self.assertIn("is convincing only in a narrower form", rendered)
+        self.assertIn("A more defensible formulation is", rendered)
+        self.assertIn(
+            "The manuscript's relevant claim is: "
+            "This is the first paper to characterize the equality boundary.",
+            rendered,
+        )
+        self.assertLess(
+            rendered.index("The manuscript's relevant claim is"),
+            rendered.index("A Synthetic Closest Result"),
+        )
+        self.assertNotIn("The manuscript states:", rendered)
+        self.assertNotIn("The paper would be on firmer ground with this formulation", rendered)
+        self.assertIn("**Suggested revision:** Compare the assumptions", rendered)
+        self.assertIn("Compare the assumptions and application directly", rendered)
+        self.assertNotIn("The verified comparisons below", rendered)
+        self.assertNotIn("The overlap is specific", rendered)
+        self.assertNotIn("The reviewed paper remains distinct because", rendered)
+        self.assertNotIn("The contribution is convincing only in a narrower form.", rendered)
+        self.assertNotIn("This comparison changes the manuscript's framing", rendered)
         self.assertNotIn("LIT-CMP-01", rendered)
+        self.assertLess(
+            rendered.index("## Is the argument convincing?"),
+            rendered.index("## Closest literature and key differences"),
+        )
+        self.assertLess(
+            rendered.index("## Closest literature and key differences"),
+            rendered.index("## Detailed Comments"),
+        )
+
+        multiple_claims = json.loads(json.dumps(external))
+        multiple_claims["frontier_audit"]["claim_assessments"].append({
+            "id": "LIT-CLM-02",
+            "claim_text": "The application is entirely new to this literature.",
+            "assessment": "positioning_incomplete",
+            "assessment_note": "The prior paper studies a neighboring application.",
+            "fair_restatement": "The paper develops a broader application of the known result.",
+        })
+        multiple_claims["frontier_audit"]["literature_comparisons"].append({
+            "id": "LIT-CMP-03",
+            "source_id": "EXT-01",
+            "claim_id": "LIT-CLM-02",
+            "relation_type": "material_overlap",
+            "assessment_state": "supported",
+            "source_contribution": "The prior paper develops a neighboring application",
+            "overlap": "Both applications use the same boundary result",
+            "surviving_difference": "The manuscript studies a broader environment",
+        })
+        multiple_claims["frontier_audit"]["candidate_screening"][0][
+            "comparison_ids"
+        ].append("LIT-CMP-03")
+        comparison_text = "\n".join(
+            MODULE.contribution_comparison_lines(multiple_claims)
+        )
+        self.assertEqual(comparison_text.count("One relevant claim is"), 1)
+        self.assertEqual(comparison_text.count("Another relevant claim is"), 1)
+        self.assertNotIn("Taken together, these comparisons change", comparison_text)
+
+        external["frontier_audit"]["claim_assessments"][0]["assessment_note"] = (
+            "EXT-01 establishes the same result."
+        )
+        with self.assertRaisesRegex(ValueError, "reader-facing prose rather than internal identifiers"):
+            MODULE.contribution_comparison_lines(external)
+
+        external["frontier_audit"]["claim_assessments"][0]["assessment_note"] = (
+            "WORK-99 establishes the same result."
+        )
+        with self.assertRaisesRegex(ValueError, "WORK-99"):
+            MODULE.contribution_comparison_lines(external)
+
+        external["frontier_audit"]["claim_assessments"][0]["assessment_note"] = (
+            "The earlier work establishes the same boundary result."
+        )
+        external["frontier_audit"]["claim_assessments"][0]["claim_text"] = (
+            "EXT-01 already studies this boundary."
+        )
+        with self.assertRaisesRegex(ValueError, "reader-facing prose rather than internal identifiers"):
+            MODULE.contribution_comparison_lines(external)
+
+    def test_context_only_supported_comparison_stays_out_of_referee_report(self) -> None:
+        external = {
+            "schema_version": "0.4",
+            "sources": [{
+                "id": "EXT-01",
+                "title": "Related Background",
+                "url": "https://example.org/background",
+                "stable_id": "doi:10.1000/background",
+                "bibliographic_metadata": {
+                    "authors": [{"name": "A. Example"}],
+                    "first_public_date": "2020-01-01",
+                    "work_family_id": "WORK-01",
+                },
+            }],
+            "frontier_audit": {
+                "work_families": [{
+                    "id": "WORK-01",
+                    "member_source_ids": ["EXT-01"],
+                    "preferred_source_id": "EXT-01",
+                }],
+                "claim_assessments": [{
+                    "id": "LIT-CLM-01",
+                    "claim_text": "The paper studies this mechanism in a new setting.",
+                    "assessment": "materially_overstated",
+                    "assessment_note": "The source studies a neighboring mechanism.",
+                    "fair_restatement": "The paper studies the mechanism in this setting.",
+                }],
+                "candidate_screening": [{
+                    "id": "LIT-SCR-01",
+                    "comparison_ids": ["LIT-CMP-01"],
+                    "materiality": "context",
+                    "materiality_effect": "context_only",
+                    "disposition": "background",
+                    "recommended_change": None,
+                }],
+                "literature_comparisons": [{
+                    "id": "LIT-CMP-01",
+                    "source_id": "EXT-01",
+                    "claim_id": "LIT-CLM-01",
+                    "relation_type": "adjacent_contribution",
+                    "assessment_state": "supported",
+                    "source_contribution": "The source studies a neighboring mechanism.",
+                    "overlap": "Both papers use the same broad economic setting.",
+                    "surviving_difference": "The manuscript asks a different substantive question.",
+                }],
+            },
+        }
+
+        self.assertEqual(MODULE.contribution_comparison_lines(external), [])
 
     def test_bounded_or_background_literature_is_not_promoted_as_a_verified_comparator(self) -> None:
         external = MODULE.load(FIXTURE / "evidence" / "external-sources.json")
@@ -316,6 +497,7 @@ class GenerateReportsTests(unittest.TestCase):
             MODULE.load(FIXTURE / "synthesis.json"),
             external_sources=external,
         )
+        self.assertNotIn("## Closest literature and key differences", rendered)
         self.assertNotIn("## Contribution and closest literature", rendered)
 
     def test_upgrade_condition_lead_in_is_grammatical_with_imperative_bullets(self) -> None:
@@ -485,6 +667,89 @@ class GenerateReportsTests(unittest.TestCase):
         self.assertIn("Open with the economic result and move procedure second.", report)
         self.assertIn("The boundary case motivates the contribution.", report)
         self.assertIn("shorten the conclusion recap", report)
+
+    def test_author_reports_hide_machine_locators_but_keep_canonical_provenance(self) -> None:
+        ledger = MODULE.load(FIXTURE / "findings.json")
+        writing = MODULE.load(FIXTURE / "evidence" / "writing.json")
+        run = MODULE.load(FIXTURE / "run.json")
+        occurrence = writing["mechanics"][0]["occurrences"][0]
+        raw_locator = "PDF p. 4, bbox 1,2,3,4, block SRC-01-PDF-B0247"
+        occurrence["locator"] = raw_locator
+        occurrence["reader_locator"] = "Section 3, paragraph 2"
+        writing["mechanics"][0]["locator"] = raw_locator
+
+        report = MODULE.render_current_writing_report(ledger, writing, run)
+        self.assertIn("**Section 3, paragraph 2:** Replace", report)
+        self.assertNotIn("bbox", report)
+        self.assertNotIn("SRC-01", report)
+        # Projection must not rewrite the canonical evidence object.
+        self.assertEqual(occurrence["locator"], raw_locator)
+
+        row = json.loads(json.dumps(ledger["findings"][0]))
+        row["evidence"][0]["locator"]["section"] = raw_locator
+        block = MODULE.detail_block(1, row)
+        self.assertIn("### 1. PDF p. 4:", block)
+        self.assertNotIn("bbox", block)
+        self.assertNotIn("SRC-01", block)
+
+    def test_unsafe_or_unprojectable_reader_locators_fail_closed(self) -> None:
+        self.assertEqual(
+            MODULE.reader_facing_locator(
+                "PDF p. 18, bbox 1,2,3,4, block SRC-01-PDF-B0247",
+                "test locator",
+            ),
+            "PDF p. 18",
+        )
+        for readable in (
+            "Block bootstrap discussion",
+            "block model paragraph",
+            "Equation block following Proposition 2",
+            "Section 3, block 2",
+            "Method=OLS results",
+        ):
+            with self.subTest(readable=readable):
+                self.assertEqual(
+                    MODULE.reader_facing_locator(readable, "test locator"),
+                    readable,
+                )
+        with self.assertRaisesRegex(ValueError, "provide reader_locator"):
+            MODULE.reader_facing_locator(
+                "block SRC-01-PDF-B0247",
+                "test locator",
+            )
+        with self.assertRaisesRegex(ValueError, "provide reader_locator"):
+            MODULE.reader_facing_locator("block id=PDF-B0247", "test locator")
+        with self.assertRaisesRegex(ValueError, "contains internal source provenance"):
+            MODULE.reader_facing_locator(
+                "Section 3",
+                "test locator",
+                "anchor_id=ANC-99",
+            )
+
+        for leaked in (
+            "Location block=ABC123",
+            "Location block: ABC123",
+            "Location block id=ABC123",
+            "Location SHA256: " + "a" * 64,
+            "Location extraction_method=pdf_text_layer",
+        ):
+            with self.subTest(leaked=leaked), self.assertRaisesRegex(
+                ValueError, "exposes an internal source"
+            ):
+                MODULE.assert_author_facing_markdown_safe(leaked, "report.md")
+        MODULE.assert_author_facing_markdown_safe(
+            "The main specification uses Method=OLS results.",
+            "report.md",
+        )
+
+        writing = MODULE.load(FIXTURE / "evidence" / "writing.json")
+        writing["assessment_summary"] += " Audit source ANC-99."
+        with self.assertRaisesRegex(ValueError, "exposes an internal source"):
+            MODULE.render_current_writing_report(
+                MODULE.load(FIXTURE / "findings.json"),
+                writing,
+                MODULE.load(FIXTURE / "run.json"),
+            )
 
     def test_quick_canonical_writer_does_not_retroactively_require_addon_inventory(self) -> None:
         run = MODULE.load(FIXTURE / "run.json")

@@ -14,6 +14,7 @@ import {
   alignContextToWordBoundaries,
   conciseSourceAnchorLabel,
   exactAnchorExcerpt,
+  readerFacingSourceAnchorLocation,
   sourceAnchorPageLabel,
   stripGeneratedAnchorComments,
 } from "../lib/review-manuscript-context.ts";
@@ -243,8 +244,23 @@ test("composite comparison evidence validates and each selected anchor yields it
 test("source controls abbreviate page locators and context cleanup removes sliced ingestion comments only", () => {
   assert.equal(conciseSourceAnchorLabel(0, "PDF p. 16, bbox 1,2,3,4, block SRC-01-PDF-B0247"), "Source 1 · p. 16");
   assert.equal(sourceAnchorPageLabel("PDF p. 18, bbox 1,2,3,4"), "p. 18");
+  assert.equal(readerFacingSourceAnchorLocation("PDF p. 18, bbox 1,2,3,4"), "p. 18");
+  assert.equal(readerFacingSourceAnchorLocation("Online appendix, paragraph 2"), "Online appendix, paragraph 2");
+  assert.equal(readerFacingSourceAnchorLocation("block SRC-01-PDF-B0247"), "Manuscript location");
+  assert.equal(readerFacingSourceAnchorLocation("block_id=PDF-B0247"), "Manuscript location");
+  assert.equal(readerFacingSourceAnchorLocation("block id=PDF-B0247"), "Manuscript location");
+  assert.equal(readerFacingSourceAnchorLocation("block=ABC123"), "Manuscript location");
+  assert.equal(readerFacingSourceAnchorLocation(`SHA256: ${"a".repeat(64)}`), "Manuscript location");
+  assert.equal(readerFacingSourceAnchorLocation("extraction_method=pdf_text_layer"), "Manuscript location");
+  for (const readable of [
+    "Block bootstrap discussion",
+    "block model paragraph",
+    "Equation block following Proposition 2",
+    "Section 3, block 2",
+    "Method=OLS results",
+  ]) assert.equal(readerFacingSourceAnchorLocation(readable), readable);
   assert.equal(sourceAnchorPageLabel("Online appendix, paragraph 2"), null);
-  assert.equal(conciseSourceAnchorLabel(1, "Online appendix, paragraph 2"), "Source 2");
+  assert.equal(conciseSourceAnchorLabel(1, "Online appendix, paragraph 2"), "Source 2 · Online appendix, paragraph 2");
   assert.equal(
     stripGeneratedAnchorComments("0247; page=16; bbox=1,2,3,4; method=pdf_text_layer -->\nVisible before.\n<!-- SRC-01-PDF-B0248; page=16"),
     "\nVisible before.\n",
@@ -259,6 +275,26 @@ test("source controls abbreviate page locators and context cleanup removes slice
   }, sha256Hex);
   assert.equal(excerpt.highlight, "HIGHLIGHT", "comment cleanup must not alter the verified span");
   assert.doesNotMatch(`${excerpt.before}${excerpt.after}`, /<!--|-->/);
+});
+
+test("anchor mismatch messages keep stable IDs in provenance state, not reader copy", () => {
+  const noSpan = exactAnchorExcerpt("manuscript", {
+    id: "ANC-9999",
+    start_char: null,
+    end_char: null,
+    content_sha256: sha256Hex(""),
+  }, sha256Hex);
+  assert.match(noSpan.message, /source passage does not declare a text span/i);
+  assert.doesNotMatch(noSpan.message, /ANC-|Source anchor/i);
+
+  const mismatch = exactAnchorExcerpt("manuscript", {
+    id: "ANC-9998",
+    start_char: 0,
+    end_char: 4,
+    content_sha256: sha256Hex("different"),
+  }, sha256Hex);
+  assert.match(mismatch.message, /did not match the loaded manuscript text/i);
+  assert.doesNotMatch(mismatch.message, /ANC-|Source anchor/i);
 });
 
 test("bounded manuscript context trims inward at word boundaries without changing the exact anchor", () => {

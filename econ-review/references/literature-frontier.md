@@ -111,6 +111,8 @@ Group working paper, preprint, conference, accepted, published, corrected, and r
 
 For each genuinely close work, retain verified citation, stable link, access date, question, evidence/design object, main result, overlap, incremental difference, temporal relation, and confidence. Prefer accurate characterization to a long decorative list.
 
+Write `source_contribution`, `overlap`, and `surviving_difference` as complete standalone sentences. The first must tell the reader what the prior work studies, how it learns about the object, and the result relevant to the comparison; the second states the exact shared dimensions; the third identifies an economically or scientifically meaningful difference without assuming that any different sample, setting, or method is automatically a contribution. Avoid audit shorthand and fragments that only become grammatical when attached to a stock clause.
+
 ## 4. Verify sources and author attributions
 
 Use the strongest lawful source available:
@@ -193,6 +195,8 @@ Compare the paper to the closest alternatives on the dimensions it actually clai
 
 Audit credit generously but exactly. Preserve the prior paper's qualifiers and distinguish what it establishes, suggests, assumes, measures, or leaves open. Also state the reviewed paper's genuine surviving difference. Never turn overlap on one dimension into a global “not novel” verdict.
 
+Keep the canonical comparison at the source-claim level because one work may bear differently on several manuscript claims. In the author-facing report, synthesize those rows by intellectual work or resolved work family. Name one preferred version, describe the work once, combine only distinct overlap and difference sentences, and then assess each manuscript claim once. A source appearing in several claim rows or several versions must not appear repeatedly as if it were several papers.
+
 One verified antecedent can falsify an absolute “first” claim. No finite search can prove universal priority. The strongest defensible positive conclusion is: “No closer antecedent was found within the documented search scope as of [date].”
 
 ## 6. Decide whether a missing paper matters
@@ -233,4 +237,8 @@ Report a literature concern only after the relevant manuscript claim, external p
 
 Use fair temporal language, avoid allegations of intent, and state what evidence would change the assessment. If search found no material problem, preserve the checked-clean claim coverage in canonical evidence; do not invent a comment to display the work.
 
-When one or more verified public comparators materially change the contribution assessment, surface them in the referee report's contribution discussion. Name the work, link the stable public record, state the source contribution and exact overlap, and preserve the reviewed paper's surviving difference. Do not replace this with “deidentified checks found prior work”: deidentification governs outbound queries, not disclosure of verified public results to the author. Keep partial, conflicting, or inconclusive comparisons bounded and out of affirmative prose.
+When one or more verified public comparators materially change the contribution assessment, add `## Closest literature and key differences` after `## Is the argument convincing?` and before the detailed comments. Start with the bottom-line contribution judgment. Then discuss each distinct intellectual work once: explain its question, evidence or model, relevant result, exact overlap, and the difference that may leave room for the reviewed paper. Close by stating whether each material manuscript claim is supported, convincing only after narrowing, incompletely positioned, overstated, contradicted, or bounded; give the strongest fair restatement and the minimum concrete revision from the claim and screening ledgers.
+
+Write `fair_restatement` as the actual sentence the author could substitute for the disputed claim, not as an instruction such as “narrow this claim.” Put the editing instruction in `recommended_change`. Keep author-facing rationales free of source IDs, ledger codes, and workflow terminology.
+
+Write this section as ordinary referee prose, not as an audit log or annotated bibliography. Avoid repeated stock clauses such as “the overlap is specific” or “the reviewed paper remains distinct because.” Do not repeat one work for each claim, and do not repeat the full comparison inventory in a detailed comment. Do not replace named work with “deidentified checks found prior work”: deidentification governs outbound queries, not disclosure of verified public results to the author. Keep background, context-only, partial, conflicting, or inconclusive comparisons out of affirmative prose.

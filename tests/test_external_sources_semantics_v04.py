@@ -4,8 +4,13 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib.util
+import json
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
@@ -15,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_DIR = ROOT / "econ-review" / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
 import trust_spine as TRUST  # noqa: E402
+import validate_review as REVIEW_VALIDATOR  # noqa: E402
 
 PAYLOAD_SPEC = importlib.util.spec_from_file_location(
     "external_sources_schema_v04_fixture",
@@ -23,6 +29,8 @@ PAYLOAD_SPEC = importlib.util.spec_from_file_location(
 assert PAYLOAD_SPEC and PAYLOAD_SPEC.loader
 PAYLOAD_MODULE = importlib.util.module_from_spec(PAYLOAD_SPEC)
 PAYLOAD_SPEC.loader.exec_module(PAYLOAD_MODULE)
+FIXTURE = ROOT / "tests" / "fixtures" / "valid-review"
+REPORT_GENERATOR = SCRIPT_DIR / "generate_reports.py"
 
 
 def valid_semantic_payload() -> dict:
@@ -80,6 +88,77 @@ def neutralize_claim_findings(payload: dict) -> None:
             support["finding_ids"] = []
 
 
+def context_only_payload() -> dict:
+    """Return a valid complete audit whose retained source is only background."""
+    payload = valid_semantic_payload()
+    for claim in payload["frontier_audit"]["claim_assessments"]:
+        claim["assessment"] = "supported"
+        claim["finding_ids"] = []
+    for source in payload["sources"]:
+        for support in source.get("support_records", []):
+            support["finding_ids"] = []
+    payload["frontier_audit"]["candidate_screening"][0].update({
+        "citation_status": "cited_fairly",
+        "materiality": "context",
+        "materiality_effect": "context_only",
+        "disposition": "background",
+        "recommended_actions": ["no_action"],
+        "recommended_insertion_anchor_ids": [],
+        "recommended_change": None,
+        "reasoning": (
+            "This paper is useful background but does not alter the contribution claim."
+        ),
+    })
+    return payload
+
+
+def materialize_external_snapshot(review_dir: Path, payload: dict) -> None:
+    """Bind the synthetic support records to exact bytes for full validation."""
+    parts: list[str] = []
+    cursor = 0
+    source = payload["sources"][0]
+    for index, record in enumerate(source["support_records"]):
+        if index:
+            parts.append("\n")
+            cursor += 1
+        proposition = record["proposition"]
+        start = cursor
+        parts.append(proposition)
+        cursor += len(proposition)
+        record.update({
+            "snapshot_start": start,
+            "snapshot_end": cursor,
+            "snapshot_excerpt": proposition,
+            "snapshot_excerpt_sha256": hashlib.sha256(
+                proposition.encode("utf-8")
+            ).hexdigest(),
+        })
+    snapshot = "".join(parts) + "\n"
+    snapshot_path = review_dir / source["snapshot_path"]
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    snapshot_path.write_text(snapshot, encoding="utf-8")
+    source["snapshot_sha256"] = hashlib.sha256(
+        snapshot.encode("utf-8")
+    ).hexdigest()
+
+
+def refresh_finalization_receipt(review_dir: Path) -> None:
+    """Re-sign an intentional integration-fixture mutation."""
+    receipt_path = review_dir / "finalization.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["artifacts"] = {
+        path.relative_to(review_dir).as_posix(): hashlib.sha256(
+            path.read_bytes()
+        ).hexdigest()
+        for path in sorted(review_dir.rglob("*"))
+        if path.is_file()
+        and path.name != ".DS_Store"
+        and path.relative_to(review_dir).as_posix()
+        not in {"finalization.json", "review-actions.json"}
+    }
+    receipt_path.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+
+
 def has_error(errors: list[str], *needles: str) -> bool:
     """Match contract meaning without coupling tests to exact prose."""
     lowered = [error.casefold() for error in errors]
@@ -89,6 +168,57 @@ def has_error(errors: list[str], *needles: str) -> bool:
 class ExternalSourcesSemanticsV04Tests(unittest.TestCase):
     def test_complete_claim_search_graph_closes(self) -> None:
         self.assertEqual(semantic_errors(valid_semantic_payload()), [])
+
+    def test_context_only_comparison_stays_out_of_generated_and_validated_report(self) -> None:
+        """A valid background comparison must survive the full pipeline silently."""
+        payload = context_only_payload()
+        internal_claims = [{
+            "id": "CLM-01",
+            "is_headline": True,
+            "literature_facing": True,
+            "anchor_ids": ["ANC-01"],
+            "occurrences": [{"anchor_id": "ANC-01"}],
+        }]
+        for claim in payload["frontier_audit"]["claim_assessments"]:
+            claim["manuscript_anchor_ids"] = ["ANC-01"]
+
+        self.assertEqual(PAYLOAD_MODULE.schema_errors(payload), [])
+        self.assertEqual(
+            semantic_errors(payload, internal_claim_rows=internal_claims),
+            [],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "review"
+            shutil.copytree(FIXTURE, target)
+            payload["review_id"] = "synthetic-valid-001"
+            materialize_external_snapshot(target, payload)
+            (target / "evidence" / "external-sources.json").write_text(
+                json.dumps(payload, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            run_path = target / "run.json"
+            run = json.loads(run_path.read_text(encoding="utf-8"))
+            run["stage_status"]["frontier"] = "passed"
+            run["capabilities"]["live_literature_search"] = True
+            run_path.write_text(json.dumps(run, indent=2) + "\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [sys.executable, str(REPORT_GENERATOR), str(target)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            (target / "evidence" / "sources.md").write_text(
+                REVIEW_VALIDATOR.render_sources(payload),
+                encoding="utf-8",
+            )
+            refresh_finalization_receipt(target)
+
+            report = (target / "report.md").read_text(encoding="utf-8")
+            self.assertNotIn("## Closest literature and key differences", report)
+            self.assertEqual(REVIEW_VALIDATOR.validate_review(target), [])
 
     def test_complete_search_can_find_no_close_candidate(self) -> None:
         payload = valid_semantic_payload()

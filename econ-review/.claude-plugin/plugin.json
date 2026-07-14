@@ -1,0 +1,21 @@
+{
+  "name": "econ-review",
+  "version": "0.1.0",
+  "description": "Produce a rigorous, source-grounded referee report and prioritized revision plan for an economics paper.",
+  "author": {
+    "name": "Han Lulong",
+    "email": "hanlulong@gmail.com",
+    "url": "https://openecon.ai"
+  },
+  "homepage": "https://openecon.ai",
+  "repository": "https://github.com/hanlulong/econ-paper-review-skill",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "keywords": [
+    "economics",
+    "paper-review",
+    "referee-report",
+    "research",
+    "academic-writing"
+  ],
+  "skills": "./skills/"
+}
