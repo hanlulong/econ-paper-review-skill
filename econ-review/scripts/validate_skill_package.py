@@ -242,6 +242,18 @@ def validate_skill_package(root: Path) -> list[str]:
         # subtree during the deeper schema/link/runtime passes below.
         return errors
 
+    license_path = root / "LICENSE"
+    if not license_path.is_file() or license_path.is_symlink():
+        errors.append("LICENSE is missing or unsafe")
+    else:
+        try:
+            license_text = license_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            errors.append(f"LICENSE is not readable UTF-8: {exc}")
+        else:
+            if not license_text.strip():
+                errors.append("LICENSE must not be empty")
+
     skill_path = root / "SKILL.md"
     if not skill_path.is_file() or skill_path.is_symlink():
         return errors + ["SKILL.md is missing or unsafe"]

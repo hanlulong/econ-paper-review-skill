@@ -16,8 +16,8 @@ import {
 } from "../lib/review-actions";
 import {
   clearBrowserReviewActions,
-  persistBrowserReviewActions,
   restoreBrowserReviewActions,
+  saveBrowserReviewActionSnapshot,
 } from "../lib/review-action-storage";
 import {
   discoverReviewDocuments,
@@ -155,6 +155,7 @@ type DetailMode = "overview" | "comment" | "plan";
 type QueueOrder = "priority" | "importance" | "paper";
 type WorkflowDecision = "open" | "ready_for_recheck" | "deferred";
 type WorkflowStatusFilter = "all" | WorkflowDecision;
+type PersistenceState = "idle" | "pending" | "saved" | "error";
 type ExhibitAsset = { key: string; label: string; kind: "figure" | "table"; pages: number[]; renders: ExhibitRender[]; missingPaths: string[] };
 type ExhibitManifest = { figures?: unknown[]; tables?: unknown[] };
 type LoadedReviewDocument = ReviewDocument & { content: string };
@@ -579,6 +580,17 @@ function readableState(value: string | undefined) {
   return (value || "not available").replaceAll("_", " ");
 }
 
+/**
+ * The saved would_change_my_mind field is written either as a noun phrase or as
+ * a full sentence ending in "would change this assessment"; normalize it so the
+ * displayed line stays grammatical after the "What would change…" label.
+ */
+function confidenceChangeText(value: string) {
+  const trimmed = value.trim().replace(/\s*would change (?:this|my) (?:assessment|conclusion|mind)\.?$/i, "").trim();
+  if (!trimmed) return "";
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
 const READY_FOR_REVIEW_DISPOSITIONS = new Set<LocalStatus>(["ready_for_recheck", "challenged"]);
 const SET_ASIDE_DISPOSITIONS = new Set<LocalStatus>(["deferred", "not_relevant", "not_addressable"]);
 
@@ -762,6 +774,7 @@ export function ReviewWorkspace() {
   const [isBundleLoading, setIsBundleLoading] = useState(false);
   const [isLocalLoading, setIsLocalLoading] = useState(false);
   const [persistenceWarning, setPersistenceWarning] = useState("");
+  const [persistenceState, setPersistenceState] = useState<PersistenceState>("idle");
   const [handoffWarning, setHandoffWarning] = useState("");
   const [finalizationTrust, setFinalizationTrust] = useState<FinalizationTrust>({ ...NO_FINALIZATION_RECEIPT });
   const [persistenceMode, setPersistenceMode] = useState<"local" | "session">("local");
@@ -783,6 +796,7 @@ export function ReviewWorkspace() {
   const commentHeading = useRef<HTMLHeadingElement>(null);
   const evidenceHeading = useRef<HTMLHeadingElement>(null);
   const commentPane = useRef<HTMLElement>(null);
+  const commentScroll = useRef<HTMLDivElement>(null);
   const documentPane = useRef<HTMLElement>(null);
   const noResultsRef = useRef<HTMLElement>(null);
   const findingRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -790,6 +804,13 @@ export function ReviewWorkspace() {
   const loadedReviewSlug = useRef("");
   const localLoadSequence = useRef(0);
   const localStateRef = useRef<LocalState>({});
+  const noteDraftsRef = useRef<Record<string, string>>({});
+  const persistenceModeRef = useRef<"local" | "session">("local");
+  const persistenceContextRef = useRef<{
+    reviewId: string;
+    reviewFingerprint: string;
+    sourceManuscripts: ReturnType<typeof privacySafeSourceManuscripts>;
+  } | null>(null);
   const focusAfterFilter = useRef(false);
   const persistenceWarningRef = useRef("");
   const applyingHistoryState = useRef(false);
@@ -797,6 +818,55 @@ export function ReviewWorkspace() {
   const showActionNotice = useCallback((message: string, undo: UndoStatusChange | null = null) => {
     setActionNotice(message);
     setUndoStatusChange(undo);
+  }, []);
+
+  const replaceNoteDrafts = useCallback((next: Record<string, string>) => {
+    noteDraftsRef.current = next;
+    setNoteDrafts(next);
+  }, []);
+
+  const updateNoteDraft = useCallback((id: string, value: string) => {
+    const next = { ...noteDraftsRef.current, [id]: value.slice(0, MAX_NOTE_CHARS) };
+    noteDraftsRef.current = next;
+    setNoteDrafts(next);
+    if (persistenceModeRef.current === "local") setPersistenceState("pending");
+  }, []);
+
+  const flushBrowserActions = useCallback(() => {
+    const context = persistenceContextRef.current;
+    if (!context) return false;
+    const draftSnapshot = noteDraftsRef.current;
+    try {
+      const result = saveBrowserReviewActionSnapshot(window.localStorage, {
+        persistence_mode: persistenceModeRef.current,
+        source_review_id: context.reviewId,
+        source_review_fingerprint: context.reviewFingerprint,
+        source_manuscripts: context.sourceManuscripts,
+        entries: localStateRef.current,
+        draft_notes: draftSnapshot,
+      });
+      if (!result.persisted) return false;
+      if (Object.keys(draftSnapshot).length) {
+        localStateRef.current = result.entries;
+        noteDraftsRef.current = {};
+        setLocalState(result.entries);
+        setNoteDrafts({});
+      }
+      if (persistenceWarningRef.current) {
+        persistenceWarningRef.current = "";
+        setPersistenceWarning("");
+      }
+      setPersistenceState("saved");
+      return true;
+    } catch {
+      const warning = "Progress is available for this tab, but the browser could not save it locally.";
+      if (warning !== persistenceWarningRef.current) {
+        persistenceWarningRef.current = warning;
+        setPersistenceWarning(warning);
+      }
+      setPersistenceState("error");
+      return false;
+    }
   }, []);
 
   useEffect(() => {
@@ -841,6 +911,7 @@ export function ReviewWorkspace() {
       setIsBundleLoading(false);
       return;
     }
+    flushBrowserActions();
     let cancelled = false;
     const sequence = ++localLoadSequence.current;
     setIsLocalLoading(false);
@@ -999,7 +1070,13 @@ export function ReviewWorkspace() {
         });
         localStateRef.current = restoredActions.entries;
         setLocalState(restoredActions.entries);
-        setNoteDrafts({});
+        replaceNoteDrafts({});
+        persistenceContextRef.current = {
+          reviewId: checkedLedger.review_id,
+          reviewFingerprint: nextLedgerFingerprint,
+          sourceManuscripts: privacySafeSourceManuscripts(checkedRun.assessment_boundary?.sources || []),
+        };
+        setPersistenceState("saved");
         setHandoffWarning(restoredActions.warning);
         setQuery("");
         setSeverity((["critical", "major", "minor", "info"] as string[]).includes(urlState.severity) ? urlState.severity as Severity : "all");
@@ -1049,30 +1126,26 @@ export function ReviewWorkspace() {
         }
       });
     return () => { cancelled = true; };
-  }, [ledger, registry, reviewSlug, run]);
+  }, [flushBrowserActions, ledger, registry, replaceNoteDrafts, reviewSlug, run]);
 
   useEffect(() => {
     if (!ledger?.review_id || !ledgerFingerprint || persistenceMode !== "local") return;
-    const timeout = window.setTimeout(() => {
-      let nextWarning = "";
-      try {
-        persistBrowserReviewActions(window.localStorage, generateReviewActionsPayload({
-          source_review_id: ledger.review_id,
-          source_review_fingerprint: ledgerFingerprint,
-          source_manuscripts: privacySafeSourceManuscripts(run?.assessment_boundary?.sources || []),
-          exported_at: actionExportTime(localState),
-          entries: localState,
-        }));
-      } catch {
-        nextWarning = "Progress is available for this tab, but the browser could not save it locally.";
-      }
-      if (nextWarning !== persistenceWarningRef.current) {
-        persistenceWarningRef.current = nextWarning;
-        setPersistenceWarning(nextWarning);
-      }
-    }, 300);
+    const timeout = window.setTimeout(() => flushBrowserActions(), 300);
     return () => window.clearTimeout(timeout);
-  }, [ledger, ledgerFingerprint, localState, persistenceMode, run]);
+  }, [flushBrowserActions, ledger, ledgerFingerprint, localState, noteDrafts, persistenceMode]);
+
+  useEffect(() => {
+    const onPageHide = () => { flushBrowserActions(); };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flushBrowserActions();
+    };
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [flushBrowserActions]);
 
   useEffect(() => {
     if (!loadedReviewSlug.current || !ledger || applyingHistoryState.current) return;
@@ -1142,9 +1215,11 @@ export function ReviewWorkspace() {
   const selectedNoteIsDraft = Boolean(selected && Object.prototype.hasOwnProperty.call(noteDrafts, selected.id)
     && noteDrafts[selected.id] !== selectedEntry.response_note);
   const selectedNoteState = selectedNoteIsDraft
-    ? "Unsaved"
+    ? persistenceMode === "local" && persistenceState === "pending" ? "Saving…" : "Unsaved"
     : selectedEntry.response_note.trim()
-      ? persistenceMode === "session" ? "Saved in this tab" : "Saved"
+      ? persistenceMode === "session"
+        ? "Saved in this tab"
+        : persistenceState === "saved" ? "Saved" : persistenceState === "error" ? "Not saved in browser" : "Saving…"
       : "Required for handoff";
   const selectedIsSetAside = SET_ASIDE_DISPOSITIONS.has(selectedEntry.disposition);
   const selectedIsPersistentSetAside = ["not_relevant", "not_addressable"].includes(selectedEntry.disposition);
@@ -1248,20 +1323,19 @@ export function ReviewWorkspace() {
     const nextState = { ...current, [id]: nextEntry };
     localStateRef.current = nextState;
     setLocalState(nextState);
+    if (persistenceModeRef.current === "local") setPersistenceState("pending");
   }, []);
 
   const commitNote = useCallback((id: string) => {
-    const draft = noteDrafts[id];
+    const draft = noteDraftsRef.current[id];
     if (draft === undefined) return;
     const current = localStateRef.current[id] || defaultEntry(id);
     if (draft !== current.response_note) updateLocal(id, { response_note: draft });
-    setNoteDrafts((values) => {
-      if (!(id in values)) return values;
-      const next = { ...values };
-      delete next[id];
-      return next;
-    });
-  }, [noteDrafts, updateLocal]);
+    if (!(id in noteDraftsRef.current)) return;
+    const next = { ...noteDraftsRef.current };
+    delete next[id];
+    replaceNoteDrafts(next);
+  }, [replaceNoteDrafts, updateLocal]);
 
   const markFindingStatus = useCallback((id: string, nextStatus: LocalStatus) => {
     const entry = localStateRef.current[id] || defaultEntry(id);
@@ -1331,6 +1405,7 @@ export function ReviewWorkspace() {
     const nextState = { ...currentState, [undoStatusChange.findingId]: reversed };
     localStateRef.current = nextState;
     setLocalState(nextState);
+    if (persistenceModeRef.current === "local") setPersistenceState("pending");
     const label = commentLabel(findings, undoStatusChange.findingId);
     const restoredLabel = dispositionDetailLabel(undoStatusChange.previous);
     setAnnouncement(`${label} restored to ${restoredLabel}`);
@@ -1507,8 +1582,11 @@ export function ReviewWorkspace() {
   }, [documents, findings, openFinding, registry, reviewSlug]);
 
   useEffect(() => {
+    // The comment pane clips overflow; its inner scroll container is what moves.
+    commentScroll.current?.scrollTo({ top: 0 });
     commentPane.current?.scrollTo({ top: 0 });
     documentPane.current?.scrollTo({ top: 0 });
+    (documentPane.current?.querySelector(".evidence-sheet") as HTMLElement | null)?.scrollTo({ top: 0 });
   }, [selected?.id]);
 
   useEffect(() => {
@@ -1630,6 +1708,7 @@ export function ReviewWorkspace() {
 
   async function loadSelectedFiles(files: File[]) {
     if (!files.length) return;
+    flushBrowserActions();
     const sequence = ++localLoadSequence.current;
     const stagedObjectUrls: string[] = [];
     setIsLocalLoading(true);
@@ -1847,7 +1926,13 @@ export function ReviewWorkspace() {
       });
       localStateRef.current = restoredActions.entries;
       setLocalState(restoredActions.entries);
-      setNoteDrafts({});
+      replaceNoteDrafts({});
+      persistenceContextRef.current = {
+        reviewId: nextLedger.review_id,
+        reviewFingerprint: nextLedgerFingerprint,
+        sourceManuscripts: privacySafeSourceManuscripts(nextRun.assessment_boundary?.sources || []),
+      };
+      setPersistenceState("saved");
       setHandoffWarning(restoredActions.warning);
       setQuery("");
       setSeverity("all");
@@ -1890,11 +1975,13 @@ export function ReviewWorkspace() {
   }
 
   function commitAllNoteDrafts() {
-    const committed = commitRevisionNoteDrafts(localStateRef.current, noteDrafts);
-    if (Object.keys(noteDrafts).length) {
+    const drafts = noteDraftsRef.current;
+    const committed = commitRevisionNoteDrafts(localStateRef.current, drafts);
+    if (Object.keys(drafts).length) {
       localStateRef.current = committed;
       setLocalState(committed);
-      setNoteDrafts({});
+      replaceNoteDrafts({});
+      if (persistenceModeRef.current === "local") setPersistenceState("pending");
     }
     return committed;
   }
@@ -2010,7 +2097,8 @@ export function ReviewWorkspace() {
         .filter((findingId) => merged.applied_finding_ids.includes(findingId)).length;
       localStateRef.current = entriesWithProvenance;
       setLocalState(entriesWithProvenance);
-      setNoteDrafts({});
+      replaceNoteDrafts({});
+      if (persistenceModeRef.current === "local") setPersistenceState("pending");
       const details = [
         `${merged.applied_finding_ids.length} applied`,
         merged.stale_finding_ids.length ? `${merged.stale_finding_ids.length} stale` : "",
@@ -2115,10 +2203,32 @@ export function ReviewWorkspace() {
   ].filter(Boolean);
   const activeDocument = documents.find((document) => document.id === reportView) || documents[0];
   const activeReport = activeDocument?.content || "";
-  const reportComponents: MarkdownComponents = {
+  const refereeReport = documents.find((document) => document.path === "report.md");
+  /** Turn generator "Linked findings" lines into buttons that open the matching detailed comments. */
+  const withCommentJumpLinks = (markdown: string) => markdown.split("\n").map((line) => {
+    if (!line.startsWith("Linked findings:")) return line;
+    const body = line.slice("Linked findings:".length);
+    const idList = body.match(/^\s*(?:`[^`]+`[,\s]*)+\.?/)?.[0] || "";
+    const ids = Array.from(idList.matchAll(/`([^`]+)`/g), (token) => token[1])
+      .filter((id) => findings.some((finding) => finding.id === id));
+    if (!ids.length) return line;
+    const buttons = ids.map((id) => `[Go to comment ${findings.findIndex((finding) => finding.id === id) + 1} →](#finding=${id})`).join(" ");
+    const remainder = body.slice(idList.length).trim();
+    return remainder ? `${buttons}\n\n*${remainder}*` : buttons;
+  }).join("\n");
+  const reportComponentsFor = (sourceDocument: ReviewDocument | undefined): MarkdownComponents => ({
     img: ({ alt }) => <span className="blocked-report-image">[Image omitted from report view{alt ? `: ${alt}` : ""}]</span>,
     a: ({ children, href }) => {
-      const linked = resolveReviewDocumentLink(activeDocument?.path, href, documents);
+      if (href?.startsWith("#finding=")) {
+        const target = findings.find((finding) => finding.id === decodeURIComponent(href.slice("#finding=".length)));
+        if (target) {
+          return <button type="button" className="report-jump-link" title={shortTitle(target)} onClick={() => openFinding(
+            target.id,
+            `Opened ${commentLabel(findings, target.id)} from ${sourceDocument?.title || "review document"}`,
+          )}>{children}</button>;
+        }
+      }
+      const linked = resolveReviewDocumentLink(sourceDocument?.path, href, documents);
       if (linked) {
         return <button type="button" className="report-document-link" onClick={() => {
           setReportView(linked.document.id);
@@ -2143,10 +2253,11 @@ export function ReviewWorkspace() {
       const linkedFinding = findings.find((finding) => finding.id === token);
       return linkedFinding ? <button type="button" className="report-finding-link" onClick={() => openFinding(
         linkedFinding.id,
-        `Opened ${commentLabel(findings, linkedFinding.id)} from ${activeDocument?.title || "review document"}`,
+        `Opened ${commentLabel(findings, linkedFinding.id)} from ${sourceDocument?.title || "review document"}`,
       )}>{token}</button> : <code>{children}</code>;
     },
-  };
+  });
+  const reportComponents = reportComponentsFor(activeDocument);
   const documentGroups = Object.entries(REVIEW_DOCUMENT_GROUP_LABELS).map(([group, label]) => ({
     group,
     label,
@@ -2334,17 +2445,30 @@ export function ReviewWorkspace() {
             <button disabled={isReviewLoading} onClick={() => { if (topMenu.current) topMenu.current.open = false; exportSession(); }}>Export actions</button>
             <div className="privacy-controls" role="group" aria-label="Browser storage for actions">
               <strong>Action storage</strong>
-              <button aria-pressed={persistenceMode === "local"} onClick={() => { setPersistenceMode("local"); setPersistenceWarning(""); showActionNotice("Actions will be saved in this browser after changes."); }}>Save in this browser</button>
-              <button aria-pressed={persistenceMode === "session"} onClick={() => {
-                setPersistenceMode("session");
+              <button aria-pressed={persistenceMode === "local"} onClick={() => {
+                persistenceModeRef.current = "local";
+                setPersistenceMode("local");
+                persistenceWarningRef.current = "";
                 setPersistenceWarning("");
+                setPersistenceState("pending");
+                flushBrowserActions();
+                showActionNotice("Actions will be saved in this browser after changes.");
+              }}>Save in this browser</button>
+              <button aria-pressed={persistenceMode === "session"} onClick={() => {
+                persistenceModeRef.current = "session";
+                setPersistenceMode("session");
+                persistenceWarningRef.current = "";
+                setPersistenceWarning("");
+                setPersistenceState("idle");
                 showActionNotice("Future changes will stay in this tab. Existing browser snapshots are unchanged.");
               }}>This tab only</button>
               <button className="danger-text" onClick={() => {
                 if (!ledger || !window.confirm(`Clear every saved action snapshot for ${ledger.review_id}? The current tab will keep its present actions until closed.`)) return;
                 const removed = clearBrowserReviewActions(window.localStorage, ledger.review_id);
                 window.localStorage.removeItem(`review-desk:queue-order:${ledger.review_id}`);
+                persistenceModeRef.current = "session";
                 setPersistenceMode("session");
+                setPersistenceState("idle");
                 setHandoffWarning("");
                 showActionNotice(`Cleared ${removed} saved action snapshot${removed === 1 ? "" : "s"}. Current actions remain in this tab.`);
               }}>Clear saved snapshots</button>
@@ -2375,7 +2499,7 @@ export function ReviewWorkspace() {
           <button aria-pressed={mobilePane === "comment"} onClick={() => openMobilePane("comment")}>{reportView !== "none" ? "Document" : detailMode === "overview" ? "Overview" : detailMode === "plan" ? "Plan" : "Comment"}</button>
           <button aria-pressed={mobilePane === "evidence"} disabled={!filtered.length || detailMode !== "comment" || reportView !== "none"} onClick={() => openMobilePane("evidence")}>Evidence</button>
         </nav>
-        <aside id="findings-panel" className={`finding-rail ${mobilePane !== "queue" ? "mobile-hidden" : ""}`} aria-label="Review findings">
+        <aside id="findings-panel" className={`finding-rail ${mobilePane !== "queue" ? "mobile-hidden" : ""}`} aria-label="Review findings" tabIndex={-1}>
           <div className="rail-controls">
           {synthesis && (
             <button className="overview-link" onClick={openOverview} aria-current={detailMode === "overview" && reportView === "none" ? "page" : undefined}>
@@ -2498,7 +2622,7 @@ export function ReviewWorkspace() {
             </label>
           </div>
           <article className="report-document">
-            <RenderedMarkdown components={reportComponents}>{authorReportDisplayMarkdown(activeReport || "This report file was not included in the selected review bundle.")}</RenderedMarkdown>
+            <RenderedMarkdown components={reportComponents}>{withCommentJumpLinks(authorReportDisplayMarkdown(activeReport || "This report file was not included in the selected review bundle."))}</RenderedMarkdown>
           </article>
         </section>
         ) : detailMode === "plan" ? (
@@ -2582,10 +2706,39 @@ export function ReviewWorkspace() {
         <article id="review-detail" className={`comment-pane overview-pane ${mobilePane !== "comment" ? "mobile-hidden" : ""}`} aria-labelledby="overview-title" tabIndex={-1}>
           <div className="overview-scroll">
             <div className="overview-heading">
-              {synthesis && synthesis.review_posture !== "not_assessed" && <div className="overview-posture"><span>Publication recommendation</span><strong>{POSTURE_LABELS[synthesis.review_posture]}</strong><p>{synthesis.posture_rationale}</p></div>}
-              <h2 id="overview-title" ref={overviewHeading} tabIndex={-1}>Review overview</h2>
-              <p>{synthesis?.overall_assessment || "Start with the referee report, then work through the detailed comments."}</p>
+              <span className="eyebrow">Referee report · {run.mode === "quick" ? "Quick review" : "Full review"}{(() => { const venue = typeof run.target === "string" ? run.target : run.target?.venue; return venue ? ` · Prepared for ${venue}` : ""; })()}</span>
+              <h2 id="overview-title" ref={overviewHeading} tabIndex={-1}>{registry?.reviews.find((entry) => entry.slug === reviewSlug)?.title || "Review overview"}</h2>
+              <div className="masthead-meta">
+                {synthesis && synthesis.review_posture !== "not_assessed" && <span className={`posture-chip posture-${synthesis.review_posture}`}>{POSTURE_LABELS[synthesis.review_posture]}</span>}
+                <span>{substanceCount} substantive {substanceCount === 1 ? "comment" : "comments"}{editingCount ? ` · ${editingCount} editing ${editingCount === 1 ? "comment" : "comments"}` : ""}</span>
+                <span>{reviewedCount}/{findings.length} reviewed</span>
+              </div>
+              <div className="overview-actions masthead-actions">
+                <button className="overview-primary" onClick={() => { const first = filtered[0] || findings[0]; if (first) openFinding(first.id, `Started with ${commentLabel(findings, first.id)}`); }}>Start with the first comment →</button>
+                <button onClick={openRevisionPlan}>{handoffReady ? "My revision plan" : "Draft revision plan"}</button>
+              </div>
             </div>
+            {refereeReport ? (
+              <article className="report-document overview-report">
+                <RenderedMarkdown components={reportComponentsFor(refereeReport)}>{(() => {
+                  // The landing shows the assessment letter; the detailed comments
+                  // live in the interactive queue instead of being repeated here.
+                  const cleaned = withCommentJumpLinks(authorReportDisplayMarkdown(refereeReport.content));
+                  const detailedStart = cleaned.search(/^##\s+Detailed Comments/im);
+                  const letter = detailedStart > 0 ? cleaned.slice(0, detailedStart) : cleaned;
+                  return letter.replace(/^\s*#(?!#)[^\n]*\n+/, "").trimEnd();
+                })()}</RenderedMarkdown>
+                <div className="report-continuation">
+                  <div className="report-continuation-copy">
+                    <strong>Detailed comments ({substanceCount})</strong>
+                    <span>Every comment continues in the queue with its manuscript evidence, suggested fix, and your decision controls{editingCount ? `, followed by ${editingCount} editing ${editingCount === 1 ? "comment" : "comments"}` : ""}.</span>
+                  </div>
+                  <button className="overview-primary" onClick={() => { const first = filtered[0] || findings[0]; if (first) openFinding(first.id, `Started with ${commentLabel(findings, first.id)}`); }}>Start with the first comment →</button>
+                </div>
+              </article>
+            ) : <>
+            {synthesis && synthesis.review_posture !== "not_assessed" && <div className="overview-posture"><span>Publication recommendation</span><strong>{POSTURE_LABELS[synthesis.review_posture]}</strong><p>{synthesis.posture_rationale}</p></div>}
+            <p className="overview-assessment">{synthesis?.overall_assessment || "Start with the referee report, then work through the detailed comments."}</p>
             {synthesis?.principal_concerns.length ? <section className="overview-concerns" aria-labelledby="principal-concerns-title">
               <h3 id="principal-concerns-title">Principal concerns</h3>
               <ol className="concern-list">{synthesis.principal_concerns.map((concern, index) => <li key={concern.id}><button onClick={() => openPrincipalConcern(concern)}><span className="concern-index" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span><span className="concern-copy"><strong>{concern.title}</strong><small>{concern.finding_ids.length} linked {concern.finding_ids.length === 1 ? "comment" : "comments"}</small></span><span className="concern-chevron" aria-hidden="true">›</span></button></li>)}</ol>
@@ -2594,6 +2747,7 @@ export function ReviewWorkspace() {
               <h3 id="reading-order-title">Recommended path</h3>
               <ol><li>Read the assessment and principal concerns.</li><li>Resolve critical comments first, then major comments, before editing details.</li><li>Export actions for the next review round.</li></ol>
             </section>
+            </>}
             <section className="overview-scope" aria-labelledby="reviewed-scope-title">
               <h3 id="reviewed-scope-title">What was reviewed</h3>
               <p>{reviewedScope}</p>
@@ -2602,14 +2756,14 @@ export function ReviewWorkspace() {
               <h3 id="unchecked-scope-title">What could not be checked</h3>
               <ul>{uncheckedScope.map((item) => <li key={item}>{item}</li>)}</ul>
             </section> : null}
-            <div className="overview-actions">
+            {!refereeReport && <div className="overview-actions">
               <button className="overview-primary" onClick={() => { const first = filtered[0] || findings[0]; if (first) openFinding(first.id, `Started with ${commentLabel(findings, first.id)}`); }}>Start with the first comment →</button>
-              {documents.find((document) => document.path === "report.md") && <button onClick={() => { const id = documents.find((document) => document.path === "report.md")!.id; setReportView(id); setMobilePane("comment"); pushViewState({ view: "document", document: id, finding: null, evidence: 0 }); }}>Read the full referee report</button>}
               <button onClick={openRevisionPlan}>{handoffReady ? "Open my revision plan" : "Open draft revision plan"}</button>
-            </div>
+            </div>}
           </div>
         </article>
         ) : filtered.length ? <>
+        {mobilePane === "evidence" && <div className="evidence-backdrop" aria-hidden="true" onClick={() => openMobilePane("comment")} />}
         <section id="evidence-panel" ref={documentPane} data-testid="evidence-context" className={`document-pane ${mobilePane !== "evidence" ? "mobile-hidden" : ""}`} aria-labelledby="evidence-heading">
           <div className="pane-heading">
             <div>
@@ -2664,16 +2818,19 @@ export function ReviewWorkspace() {
                 <div><dt>Location</dt><dd>{locator(selected, activeEvidenceIndex)}</dd></div>
                 <div><dt>Evidence type</dt><dd>{readableState(evidence?.type)}</dd></div>
               </dl>
-              {selected.evidence_boundary && <p className="evidence-boundary"><strong>What this evidence establishes</strong>{selected.evidence_boundary}</p>}
+              {selected.evidence_boundary && <div className="evidence-boundary"><strong>What this evidence establishes</strong><RenderedMarkdown>{selected.evidence_boundary}</RenderedMarkdown></div>}
             </div>
           ) : (
-            <pre className="manuscript-sheet">{manuscriptExcerpt.message || <>{manuscriptExcerpt.before}{manuscriptExcerpt.highlight && <mark title="Matched manuscript passage">{manuscriptExcerpt.highlight}</mark>}{manuscriptExcerpt.after}{manuscriptExcerpt.exact && <span className="visually-hidden"> Exact manuscript passage matched.</span>}</>}</pre>
+            <>
+              <div className="manuscript-extraction-note">Plain-text reading copy of the manuscript source. Equations and symbols may not read as typeset; the Evidence view shows the checked excerpt.</div>
+              <pre className="manuscript-sheet">{manuscriptExcerpt.message || <>{manuscriptExcerpt.before}{manuscriptExcerpt.highlight && <mark title="Matched manuscript passage">{manuscriptExcerpt.highlight}</mark>}{manuscriptExcerpt.after}{manuscriptExcerpt.exact && <span className="visually-hidden"> Exact manuscript passage matched.</span>}</>}</pre>
+            </>
           )}
           <div className="document-footnote">The review text stays unchanged. Your progress and notes stay in this browser.</div>
         </section>
 
         <article id="review-detail" ref={commentPane} className={`comment-pane ${mobilePane !== "comment" ? "mobile-hidden" : ""}`} aria-labelledby="selected-comment-title" tabIndex={-1}>
-          <div className="comment-scroll" data-testid="comment-scroll">
+          <div className="comment-scroll" data-testid="comment-scroll" ref={commentScroll}>
           <button className="overview-crumb" onClick={openOverview}>← Overview</button>
           <div className="comment-heading">
             <div className="comment-tags">
@@ -2691,7 +2848,7 @@ export function ReviewWorkspace() {
               <button aria-label="Next comment" onClick={() => moveDetailSelection(1)}>→</button>
             </div>
           </div>
-          {selected.confidence && <p className="confidence-note"><strong>Confidence: {selected.confidence.level}.</strong> Would change if {selected.confidence.would_change_my_mind.replace(/^[A-Z]/, (letter) => letter.toLowerCase())}</p>}
+          {selected.confidence && <p className="confidence-note"><strong>Confidence: {selected.confidence.level}.</strong>{confidenceChangeText(selected.confidence.would_change_my_mind) && <> What would change the assessment: {confidenceChangeText(selected.confidence.would_change_my_mind)}</>}</p>}
 
           <section className="decision-block question-block">
             <span className="section-number">01</span>
@@ -2721,17 +2878,24 @@ export function ReviewWorkspace() {
           </section>
           <section className="author-workspace">
             {!selectedIsSetAside && <div className="personal-priority-control" role="group" aria-label={`My priority for ${shortTitle(selected)}`}>
-              <span>My priority <small>Does not change reviewer severity</small></span>
+              <span>My priority <small>Orders my revision plan · does not change reviewer severity</small></span>
               <div>
-                {[null, "P0", "P1", "P2"].map((value) => <button
-                  key={value || "unassigned"}
+                {(["P0", "P1", "P2"] as const).map((value) => <button
+                  key={value}
                   type="button"
-                  title={value === "P0" ? "Do first" : value === "P1" ? "Important next step" : value === "P2" ? "Address after higher-priority work" : "No personal priority assigned"}
-                  aria-label={value === "P0" ? "Set my priority to P0, do first" : value === "P1" ? "Set my priority to P1, important next step" : value === "P2" ? "Set my priority to P2, address later" : "Clear my personal priority"}
+                  title={value === "P0" ? "Do first" : value === "P1" ? "Important next step" : "Address after higher-priority work"}
+                  aria-label={value === "P0" ? "Set my priority to P0, do first" : value === "P1" ? "Set my priority to P1, important next step" : "Set my priority to P2, address later"}
                   aria-pressed={selectedEntry.user_priority === value}
                   className={selectedEntry.user_priority === value ? "active" : ""}
-                  onClick={() => setPersonalPriority(selected.id, value as LocalEntry["user_priority"])}
-                >{value || "Unassigned"}</button>)}
+                  onClick={() => setPersonalPriority(selected.id, value)}
+                ><strong>{value}</strong><small>{value === "P0" ? "Do first" : value === "P1" ? "Next" : "Later"}</small></button>)}
+                <button
+                  type="button"
+                  className="priority-clear"
+                  aria-label="Clear my personal priority"
+                  disabled={!selectedEntry.user_priority}
+                  onClick={() => setPersonalPriority(selected.id, null)}
+                >Clear</button>
               </div>
             </div>}
             <button
@@ -2741,13 +2905,19 @@ export function ReviewWorkspace() {
               disabled={selectedIsPersistentSetAside}
               title={selectedIsPersistentSetAside ? "Reopen this comment before reconsidering the decision" : undefined}
               onClick={() => toggleReviewed(selected.id)}
-            >{selectedIsPersistentSetAside ? "Reviewed by decision" : selectedEntry.reviewed ? "Read and decided" : "Mark as read and decided"}</button>
+            >
+              <span className="reviewed-box" aria-hidden="true">{selectedEntry.reviewed || selectedIsPersistentSetAside ? "✓" : ""}</span>
+              <span className="reviewed-copy">
+                {selectedIsPersistentSetAside ? "Reviewed by decision" : selectedEntry.reviewed ? "Read and decided" : "Mark as read and decided"}
+                <small>Counts toward review progress · set automatically when you choose Ready for review or Set aside</small>
+              </span>
+            </button>
             {selectedIsSetAside && <p className="plan-exclusion-note" role="status">{selectedEntry.disposition === "deferred"
               ? "Revisit later keeps this comment out of the current plan and brings it back for consideration next round."
               : "This comment stays outside later active rounds unless you reopen it. Record the reason below."}</p>}
             <label>
-              <span>{selectedIsSetAside ? "Reason for setting aside" : "Instruction or response"} <small className={selectedNoteIsDraft ? "note-unsaved" : ""}>{selectedNoteState}</small></span>
-              <textarea id="author-note" name="author-note" ref={noteInput} maxLength={MAX_NOTE_CHARS} value={selectedNote} onChange={(event) => setNoteDrafts((values) => ({ ...values, [selected.id]: event.target.value.slice(0, MAX_NOTE_CHARS) }))} onBlur={() => commitNote(selected.id)} placeholder={selectedIsSetAside ? "Explain this decision for the next review round…" : "Tell the editing agent what to change, or give a reasoned no-change response…"} />
+              <span>{selectedIsSetAside ? "Reason for setting aside" : "Instruction or response"} <small className={selectedNoteIsDraft || (persistenceMode === "local" && persistenceState !== "saved" && Boolean(selectedEntry.response_note.trim())) ? "note-unsaved" : ""}>{selectedNoteState}</small></span>
+              <textarea id="author-note" name="author-note" ref={noteInput} maxLength={MAX_NOTE_CHARS} value={selectedNote} onChange={(event) => updateNoteDraft(selected.id, event.target.value)} onBlur={() => commitNote(selected.id)} placeholder={selectedIsSetAside ? "Explain this decision for the next review round…" : "Tell the editing agent what to change, or give a reasoned no-change response…"} />
               {selectedNote.length >= 9000 && <small id="note-character-limit" className="note-limit">{selectedNote.length.toLocaleString()} / {MAX_NOTE_CHARS.toLocaleString()}</small>}
             </label>
             <div className="handoff-actions">
@@ -2760,13 +2930,14 @@ export function ReviewWorkspace() {
               {selectedActionEvents.length ? <ol>{selectedActionEvents.map((event) => (
                 <li key={event.event_id}>
                   <span>{actionEventLabel(event)}</span>
-                  <time dateTime={event.at}>{event.at}</time>
+                  <time dateTime={event.at}>{new Date(event.at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</time>
                 </li>
               ))}</ol> : <p>No author actions have been recorded for this comment.</p>}
             </details>
           </section>
           </div>
           <section className="author-action-bar" data-testid="author-action-dock" aria-label="Author action for selected comment">
+            <span className="dock-label" aria-hidden="true">My decision</span>
             <div className="workspace-actions" role="group" aria-label="Decision for this comment">
               <button title="This comment still needs work" aria-pressed={workflowDecision(selectedEntry.disposition) === "open"} className={workflowDecision(selectedEntry.disposition) === "open" ? "active" : ""} onClick={() => markFindingStatus(selected.id, "open")}>Open</button>
               <details ref={readyDecisionMenu} className={`decision-menu ${workflowDecision(selectedEntry.disposition) === "ready_for_recheck" ? "active" : ""}`} onToggle={(event) => { if (event.currentTarget.open && setAsideDecisionMenu.current) setAsideDecisionMenu.current.open = false; }}>

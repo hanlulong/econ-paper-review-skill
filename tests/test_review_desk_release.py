@@ -46,6 +46,20 @@ class ReviewDeskReleaseTests(unittest.TestCase):
                 dry_run=False,
             )
 
+    def test_builder_embeds_synchronized_first_party_license(self) -> None:
+        data = BUILDER.build_bytes()
+        BUILDER.verify_bundle_bytes(data)
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / "review-desk.zip"
+            bundle.write_bytes(data)
+            _manifest, records, _digest = INSTALLER.verify_review_desk_bundle(bundle)
+            self.assertIn("app/LICENSE.txt", {record["path"] for record in records})
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            self.assertEqual(
+                archive.read("app/LICENSE.txt"),
+                (ROOT / "review-viewer" / "LICENSE").read_bytes(),
+            )
+
     def test_checked_in_bundle_is_deterministic_and_runtime_free(self) -> None:
         expected = (ROOT / "review-viewer" / "release" / "review-desk.zip").read_bytes()
         BUILDER.verify_bundle_bytes(expected)
@@ -58,6 +72,7 @@ class ReviewDeskReleaseTests(unittest.TestCase):
         self.assertTrue(manifest.endswith(b"\n"))
         paths = {record["path"] for record in records}
         self.assertIn("app/index.html", paths)
+        self.assertIn("app/LICENSE.txt", paths)
         self.assertIn("app/THIRD_PARTY_NOTICES.txt", paths)
         self.assertIn("app/third-party-licenses/manifest.json", paths)
         self.assertIn("app/third-party-licenses/katex-fonts/KATEX-FONTS-OFL-1.1.txt", paths)
@@ -66,6 +81,10 @@ class ReviewDeskReleaseTests(unittest.TestCase):
         self.assertFalse(any(str(path).endswith(".map") for path in paths))
         self.assertFalse(any("node_modules" in str(path) or "/reviews/" in str(path) for path in paths))
         with zipfile.ZipFile(ROOT / "review-viewer" / "release" / "review-desk.zip") as archive:
+            self.assertEqual(
+                archive.read("app/LICENSE.txt"),
+                (ROOT / "review-viewer" / "LICENSE").read_bytes(),
+            )
             licenses = json.loads(archive.read("app/third-party-licenses/manifest.json"))
             package_names = {package["name"] for package in licenses["packages"]}
             self.assertGreater(len(licenses["packages"]), 20)

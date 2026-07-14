@@ -27,6 +27,18 @@ class SkillPackageValidationTests(unittest.TestCase):
     def test_current_skill_package_passes(self) -> None:
         self.assertEqual(MODULE.validate_skill_package(ROOT / "econ-review"), [])
 
+    def test_license_is_required_and_nonempty(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.copy_skill(temporary)
+            (target / "LICENSE").unlink()
+            errors = MODULE.validate_skill_package(target)
+            self.assertTrue(any("LICENSE is missing" in error for error in errors), errors)
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.copy_skill(temporary)
+            (target / "LICENSE").write_text("\n", encoding="utf-8")
+            errors = MODULE.validate_skill_package(target)
+            self.assertTrue(any("LICENSE must not be empty" in error for error in errors), errors)
+
     def test_frontmatter_rejects_unsupported_keys(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             target = self.copy_skill(temporary)

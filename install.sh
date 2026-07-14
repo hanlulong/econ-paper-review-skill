@@ -166,6 +166,15 @@ except UnicodeDecodeError as exc:
     raise SystemExit(f"SKILL.md is not UTF-8: {exc}")
 if "\nname: econ-review\n" not in f"\n{text}":
     raise SystemExit("SKILL.md has the wrong name")
+license_path = root / "LICENSE"
+if not license_path.is_file() or license_path.is_symlink():
+    raise SystemExit("source econ-review tree is missing a safe LICENSE")
+try:
+    license_text = license_path.read_text(encoding="utf-8")
+except UnicodeDecodeError as exc:
+    raise SystemExit(f"LICENSE is not UTF-8: {exc}")
+if not license_text.strip():
+    raise SystemExit("LICENSE must not be empty")
 for current, directories, files in os.walk(root, followlinks=False):
     for name in [*directories, *files]:
         path = Path(current, name)
@@ -332,6 +341,8 @@ with zipfile.ZipFile(archive_path) as archive:
         raise SystemExit(f"archive entries differ from manifest; unexpected={unexpected}, missing={missing}")
     if "econ-paper-review-skill/econ-review/SKILL.md" not in records:
         raise SystemExit("release manifest does not contain econ-review/SKILL.md")
+    if "econ-paper-review-skill/econ-review/LICENSE" not in records:
+        raise SystemExit("release manifest does not contain econ-review/LICENSE")
     contract_name = "econ-paper-review-skill/scripts/public-release-files.json"
     if contract_name not in records or records[contract_name]["sha256"] != contract_digest:
         raise SystemExit("release manifest file-contract hash does not match its file record")

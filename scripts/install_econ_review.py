@@ -38,6 +38,7 @@ GENERATED_FILES = {".econ-review-install.json", ".econ-review-runtime.json"}
 REQUIRED_POPPLER_COMMANDS = ("pdfinfo", "pdftotext", "pdftoppm")
 REVIEW_DESK_BUNDLE = Path("review-viewer/release/review-desk.zip")
 REVIEW_DESK_MANIFEST_NAME = "bundle-manifest.json"
+REVIEW_DESK_FIRST_PARTY_LICENSE = "app/LICENSE.txt"
 REVIEW_DESK_THIRD_PARTY_NOTICE = "app/THIRD_PARTY_NOTICES.txt"
 REVIEW_DESK_THIRD_PARTY_MANIFEST = "app/third-party-licenses/manifest.json"
 REVIEW_DESK_KATEX_FONT_LICENSE = "app/third-party-licenses/katex-fonts/KATEX-FONTS-OFL-1.1.txt"
@@ -121,6 +122,15 @@ def validate_source(root: Path) -> list[Path]:
         raise InstallError(f"could not read SKILL.md as UTF-8: {exc}") from exc
     if "\nname: econ-review\n" not in f"\n{text}":
         raise InstallError("SKILL.md has the wrong skill name")
+    license_path = root / "LICENSE"
+    if not license_path.is_file() or _is_link_or_junction(license_path):
+        raise InstallError("skill source is missing a safe LICENSE")
+    try:
+        license_text = license_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise InstallError(f"could not read LICENSE as UTF-8: {exc}") from exc
+    if not license_text.strip():
+        raise InstallError("skill source LICENSE must not be empty")
     return _source_files(root)
 
 
@@ -477,6 +487,15 @@ def _safe_bundle_path(raw: object) -> PurePosixPath:
 
 
 def _verify_review_desk_licenses(archive: zipfile.ZipFile, expected: set[str]) -> None:
+    if REVIEW_DESK_FIRST_PARTY_LICENSE not in expected:
+        raise InstallError("Review Desk bundle lacks its first-party license")
+    try:
+        first_party_license = archive.read(REVIEW_DESK_FIRST_PARTY_LICENSE).decode("utf-8")
+    except UnicodeError as exc:
+        raise InstallError(f"Review Desk first-party license is not UTF-8: {exc}") from exc
+    if not first_party_license.strip():
+        raise InstallError("Review Desk first-party license must not be empty")
+
     required = {
         REVIEW_DESK_THIRD_PARTY_NOTICE,
         REVIEW_DESK_THIRD_PARTY_MANIFEST,

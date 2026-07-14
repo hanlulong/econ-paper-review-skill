@@ -26,7 +26,7 @@ command.
 ## Recommended direct setup
 
 Python 3.10 or newer is required. The managed setup creates or reuses one
-virtual environment, installs the pinned core requirements, copies the skill to
+virtual environment, installs the version-constrained core requirements, copies the skill to
 both agent locations, runs the PDF-ingestion doctor, and installs Review Desk.
 It does not install administrator-managed packages, TeX, or Pandoc.
 

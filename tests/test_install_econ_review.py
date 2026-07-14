@@ -34,6 +34,7 @@ class InstallerFixture:
             "---\nname: econ-review\ndescription: Synthetic installer fixture.\n---\n\n# Fixture\n",
             encoding="utf-8",
         )
+        (self.skill / "LICENSE").write_text("Synthetic license fixture.\n", encoding="utf-8")
         (self.skill / "requirements-core.txt").write_text("", encoding="utf-8")
         (scripts / "dependency_versions.py").write_text(
             "def require_compatible(path):\n    return []\n",
@@ -202,6 +203,10 @@ class ManagedInstallerTests(unittest.TestCase):
                 )
                 self.assertEqual(metadata["python"], str(runtime_python))
                 self.assertTrue((destination / "SKILL.md").is_file())
+                self.assertEqual(
+                    (destination / "LICENSE").read_bytes(),
+                    (fixture.skill / "LICENSE").read_bytes(),
+                )
             marker = runtime / "preserve-on-reuse.txt"
             marker.write_text("keep", encoding="utf-8")
             second = self.run_installer(*arguments, env=env)
@@ -226,6 +231,10 @@ class ManagedInstallerTests(unittest.TestCase):
             self.assertIn("Lightweight copy-only installation complete", result.stdout)
             destination = project / ".agents" / "skills" / "econ-review"
             self.assertTrue((destination / "SKILL.md").is_file())
+            self.assertEqual(
+                (destination / "LICENSE").read_bytes(),
+                (fixture.skill / "LICENSE").read_bytes(),
+            )
             self.assertFalse((destination / ".econ-review-runtime.json").exists())
             self.assertFalse((project / ".econ-review").exists())
 
@@ -259,6 +268,10 @@ class ManagedInstallerTests(unittest.TestCase):
             manifest = installed / "bundle-manifest.json"
             self.assertEqual(installed.name, hashlib.sha256(manifest.read_bytes()).hexdigest())
             self.assertTrue((installed / "app" / "index.html").is_file())
+            self.assertEqual(
+                (installed / "app" / "LICENSE.txt").read_bytes(),
+                (ROOT / "review-viewer" / "LICENSE").read_bytes(),
+            )
             self.assertTrue((installed / "app" / "THIRD_PARTY_NOTICES.txt").is_file())
             self.assertTrue((installed / "app" / "third-party-licenses" / "manifest.json").is_file())
             self.assertTrue(
@@ -483,6 +496,22 @@ class ManagedInstallerTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("credential-bearing file", result.stderr)
             self.assertNotIn("TOKEN=synthetic", result.stderr)
+
+    def test_source_license_is_required(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            (fixture.skill / "LICENSE").unlink()
+            result = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--copy-only",
+                "--codex",
+                env={"HOME": str(root / "home"), "CODEX_HOME": str(root / "codex")},
+                check=False,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("missing a safe LICENSE", result.stderr)
 
     def test_bash_setup_flag_delegates_to_cross_platform_installer(self) -> None:
         if os.name == "nt":

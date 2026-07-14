@@ -20,6 +20,8 @@ LAUNCHER = ROOT / "scripts" / "launch_review_desk.py"
 INSTALLED_LAUNCHER = ROOT / "scripts" / "launch_installed_review_desk.py"
 OUTPUT = ROOT / "release" / "review-desk.zip"
 FIXED_TIME = (2020, 1, 1, 0, 0, 0)
+FIRST_PARTY_LICENSE_SOURCE = ROOT / "LICENSE"
+FIRST_PARTY_LICENSE = "app/LICENSE.txt"
 THIRD_PARTY_NOTICE = "app/THIRD_PARTY_NOTICES.txt"
 THIRD_PARTY_MANIFEST = "app/third-party-licenses/manifest.json"
 KATEX_FONT_LICENSE = "app/third-party-licenses/katex-fonts/KATEX-FONTS-OFL-1.1.txt"
@@ -53,10 +55,19 @@ EXPECTED_KATEX_RESERVED_NAMES = (
 def source_files() -> list[tuple[str, Path]]:
     if not STATIC_ROOT.is_dir() or STATIC_ROOT.is_symlink():
         raise ValueError("static-dist is missing; run the static Vite build first")
+    if not FIRST_PARTY_LICENSE_SOURCE.is_file() or FIRST_PARTY_LICENSE_SOURCE.is_symlink():
+        raise ValueError("Review Desk first-party LICENSE is missing or unsafe")
+    try:
+        license_text = FIRST_PARTY_LICENSE_SOURCE.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise ValueError(f"Review Desk first-party LICENSE is not readable UTF-8: {exc}") from exc
+    if not license_text.strip():
+        raise ValueError("Review Desk first-party LICENSE must not be empty")
     for launcher in (LAUNCHER, INSTALLED_LAUNCHER):
         if not launcher.is_file() or launcher.is_symlink():
             raise ValueError(f"a Review Desk launcher is missing or unsafe: {launcher.name}")
     files: list[tuple[str, Path]] = [
+        (FIRST_PARTY_LICENSE, FIRST_PARTY_LICENSE_SOURCE),
         ("launch_installed_review_desk.py", INSTALLED_LAUNCHER),
         ("launch_review_desk.py", LAUNCHER),
     ]
@@ -152,6 +163,22 @@ def verify_embedded_licenses(
     expected: set[str],
 ) -> None:
     """Validate the complete, generated runtime-license inventory."""
+
+    if FIRST_PARTY_LICENSE not in expected:
+        raise ValueError("release bundle is missing its first-party license")
+    embedded_license = archive.read(FIRST_PARTY_LICENSE)
+    try:
+        embedded_license_text = embedded_license.decode("utf-8")
+    except UnicodeError as exc:
+        raise ValueError(f"first-party license is not UTF-8: {exc}") from exc
+    if not embedded_license_text.strip():
+        raise ValueError("first-party license must not be empty")
+    try:
+        source_license = FIRST_PARTY_LICENSE_SOURCE.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"could not read the Review Desk first-party LICENSE: {exc}") from exc
+    if embedded_license != source_license:
+        raise ValueError("release bundle first-party license is stale")
 
     required = {THIRD_PARTY_NOTICE, THIRD_PARTY_MANIFEST, KATEX_FONT_LICENSE}
     if not required.issubset(expected):

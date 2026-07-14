@@ -32,6 +32,7 @@ EXCLUDED_RELATIVE_PREFIXES = {Path("benchmarks/reviews")}
 ROOT_FILES = {
     Path(".gitattributes"),
     Path(".gitignore"),
+    Path("CONTRIBUTING.md"),
     Path("LICENSE"),
     Path("README.md"),
     Path("THIRD_PARTY_NOTICES.md"),
@@ -41,6 +42,11 @@ ROOT_FILES = {
     Path("requirements-mathpix.txt"),
     Path("requirements.txt"),
 }
+FIRST_PARTY_LICENSES = (
+    Path("LICENSE"),
+    Path("econ-review/LICENSE"),
+    Path("review-viewer/LICENSE"),
+)
 EXCLUDED_DIRECTORY_NAMES = {
     ".mypy_cache",
     ".next",
@@ -105,6 +111,7 @@ WINDOWS_RESERVED_BASENAMES = frozenset(
     | {f"com{number}" for number in range(1, 10)}
     | {f"lpt{number}" for number in range(1, 10)}
 )
+REVIEW_DESK_FIRST_PARTY_LICENSE = "app/LICENSE.txt"
 REVIEW_DESK_THIRD_PARTY_NOTICE = "app/THIRD_PARTY_NOTICES.txt"
 REVIEW_DESK_THIRD_PARTY_MANIFEST = "app/third-party-licenses/manifest.json"
 REVIEW_DESK_KATEX_FONT_LICENSE = "app/third-party-licenses/katex-fonts/KATEX-FONTS-OFL-1.1.txt"
@@ -252,7 +259,23 @@ def _scan_content(root: Path, files: list[Path]) -> None:
         raise ValueError("privacy scan failed:\n  " + "\n  ".join(sorted(findings)))
 
 
-def _scan_review_desk_licenses(archive: zipfile.ZipFile, expected: set[str]) -> None:
+def _scan_review_desk_licenses(
+    archive: zipfile.ZipFile,
+    expected: set[str],
+    first_party_license: bytes,
+) -> None:
+    if REVIEW_DESK_FIRST_PARTY_LICENSE not in expected:
+        raise ValueError("Review Desk release is missing its first-party license")
+    embedded_license = archive.read(REVIEW_DESK_FIRST_PARTY_LICENSE)
+    try:
+        embedded_license_text = embedded_license.decode("utf-8")
+    except UnicodeError as exc:
+        raise ValueError(f"Review Desk first-party license is not UTF-8: {exc}") from exc
+    if not embedded_license_text.strip():
+        raise ValueError("Review Desk first-party license must not be empty")
+    if embedded_license != first_party_license:
+        raise ValueError("Review Desk first-party license differs from the project license")
+
     required = {
         REVIEW_DESK_THIRD_PARTY_NOTICE,
         REVIEW_DESK_THIRD_PARTY_MANIFEST,
@@ -356,7 +379,7 @@ def _scan_review_desk_licenses(archive: zipfile.ZipFile, expected: set[str]) -> 
         raise ValueError("Review Desk license files differ from its embedded third-party inventory")
 
 
-def _scan_review_desk_bundle(path: Path) -> None:
+def _scan_review_desk_bundle(path: Path, first_party_license: bytes) -> None:
     """Fail closed if the distributable viewer is stale, unsafe, or private."""
 
     with zipfile.ZipFile(path) as archive:
@@ -451,7 +474,35 @@ def _scan_review_desk_bundle(path: Path) -> None:
             "launch_review_desk.py",
         }.issubset(expected):
             raise ValueError("Review Desk release is missing a required entry point")
-        _scan_review_desk_licenses(archive, expected)
+        _scan_review_desk_licenses(archive, expected, first_party_license)
+
+
+def _first_party_license_bytes(root: Path, declared: set[Path]) -> bytes | None:
+    """Require all distributed first-party license copies to be byte-identical."""
+
+    required = set(FIRST_PARTY_LICENSES)
+    present = required & declared
+    if not present:
+        return None
+    if present != required:
+        missing = ", ".join(path.as_posix() for path in sorted(required - present))
+        raise ValueError(f"public release contract omits first-party license copy: {missing}")
+    payloads: list[bytes] = []
+    for relative in FIRST_PARTY_LICENSES:
+        path = root / relative
+        if not path.is_file() or path.is_symlink():
+            raise ValueError(f"first-party license is missing or unsafe: {relative.as_posix()}")
+        data = path.read_bytes()
+        try:
+            text = data.decode("utf-8")
+        except UnicodeError as exc:
+            raise ValueError(f"first-party license is not UTF-8: {relative.as_posix()}: {exc}") from exc
+        if not text.strip():
+            raise ValueError(f"first-party license is empty: {relative.as_posix()}")
+        payloads.append(data)
+    if len(set(payloads)) != 1:
+        raise ValueError("distributed first-party license copies are not synchronized")
+    return payloads[0]
 
 
 def public_files(root: Path) -> list[Path]:
@@ -459,6 +510,7 @@ def public_files(root: Path) -> list[Path]:
     root = root.resolve()
     _, files = load_file_contract(root)
     declared = set(files)
+    first_party_license = _first_party_license_bytes(root, declared)
     discovered = _discover_release_candidates(root)
     discovered.update(relative for relative in ROOT_FILES if (root / relative).is_file())
     unknown = sorted(discovered - declared)
@@ -478,7 +530,9 @@ def public_files(root: Path) -> list[Path]:
     _scan_content(root, files)
     viewer_bundle = Path("review-viewer/release/review-desk.zip")
     if viewer_bundle in declared:
-        _scan_review_desk_bundle(root / viewer_bundle)
+        if first_party_license is None:
+            raise ValueError("Review Desk release requires the project first-party license")
+        _scan_review_desk_bundle(root / viewer_bundle, first_party_license)
     return files
 
 

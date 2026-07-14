@@ -37,7 +37,14 @@ export function evidenceDisplayText(
 
 /** Clean old generated report blocks without changing their stored Markdown. */
 export function authorReportDisplayMarkdown(markdown: string): string {
-  const lines = markdown.split("\n");
+  const lines = markdown
+    // The review-package navigation block is for people reading the files
+    // directly; Review Desk provides its own navigation.
+    .replace(/<!-- review-navigation:start -->[\s\S]*?<!-- review-navigation:end -->\n?/g, "")
+    .split("\n")
+    // Per-comment "[Pending]" status lines are workflow boilerplate; Review Desk
+    // tracks each comment's real decision state itself.
+    .filter((line) => !/^\*\*Status\*\*:\s*\[Pending\]\s*$/.test(line));
   let derivedBlock = false;
   return lines.map((line) => {
     const derived = line.match(

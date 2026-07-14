@@ -6,6 +6,7 @@ import {
   persistBrowserReviewActions,
   restoreBrowserReviewActions,
   reviewActionStorageKey,
+  saveBrowserReviewActionSnapshot,
 } from "../lib/review-action-storage.ts";
 import { generateReviewActionsPayload, updateReviewAction } from "../lib/review-actions.ts";
 
@@ -183,4 +184,96 @@ test("review-ID-only legacy storage is conservatively rolled into a new round", 
   assert.equal(restored.entries["ITEM-01"].response_note, "Keep the response.");
   assert.deepEqual(restored.rereview_required_finding_ids, ["ITEM-01"]);
   assert.ok(storage.getItem("review-desk:v2:review-legacy"), "legacy source data remains archived");
+});
+
+test("a synchronous browser snapshot commits and restores an unblurred note draft", () => {
+  const storage = new MemoryStorage();
+  const entries = { "ITEM-01": action("ITEM-01", "Earlier note", "2026-07-12T11:00:00Z") };
+  const drafts = { "ITEM-01": "Typed but not blurred" };
+  const originalEntries = structuredClone(entries);
+  const originalDrafts = structuredClone(drafts);
+
+  const saved = saveBrowserReviewActionSnapshot(storage, {
+    persistence_mode: "local",
+    source_review_id: "review-draft",
+    source_review_fingerprint: "current-ledger",
+    entries,
+    draft_notes: drafts,
+    at: "2026-07-12T12:00:00Z",
+  });
+
+  assert.equal(saved.persisted, true);
+  assert.equal(saved.entries["ITEM-01"].response_note, "Typed but not blurred");
+  assert.deepEqual(entries, originalEntries, "saving must not mutate the live action map");
+  assert.deepEqual(drafts, originalDrafts, "saving must not mutate the live draft map");
+  const restored = restoreBrowserReviewActions(storage, {
+    review_id: "review-draft",
+    review_fingerprint: "current-ledger",
+    finding_ids: ["ITEM-01"],
+  });
+  assert.equal(restored.entries["ITEM-01"].response_note, "Typed but not blurred");
+});
+
+test("a synchronous browser snapshot preserves the latest decision state before a debounce", () => {
+  const storage = new MemoryStorage();
+  const latest = updateReviewAction(
+    action("ITEM-01", "Response", "2026-07-12T11:00:00Z"),
+    "ITEM-01",
+    { disposition: "ready_for_recheck", user_priority: "P0", reviewed: true },
+    "2026-07-12T11:30:00Z",
+  );
+  saveBrowserReviewActionSnapshot(storage, {
+    persistence_mode: "local",
+    source_review_id: "review-latest",
+    source_review_fingerprint: "current-ledger",
+    entries: { "ITEM-01": latest },
+    at: "2026-07-12T12:00:00Z",
+  });
+
+  const restored = restoreBrowserReviewActions(storage, {
+    review_id: "review-latest",
+    review_fingerprint: "current-ledger",
+    finding_ids: ["ITEM-01"],
+  });
+  assert.equal(restored.entries["ITEM-01"].disposition, "ready_for_recheck");
+  assert.equal(restored.entries["ITEM-01"].user_priority, "P0");
+  assert.equal(restored.entries["ITEM-01"].reviewed, true);
+});
+
+test("session-only snapshots never write browser storage", () => {
+  const storage = new MemoryStorage();
+  const result = saveBrowserReviewActionSnapshot(storage, {
+    persistence_mode: "session",
+    source_review_id: "review-session",
+    source_review_fingerprint: "current-ledger",
+    entries: { "ITEM-01": action("ITEM-01", "Current", "2026-07-12T11:00:00Z") },
+    draft_notes: { "ITEM-01": "Session draft" },
+    at: "2026-07-12T12:00:00Z",
+  });
+  assert.equal(result.persisted, false);
+  assert.equal(result.entries["ITEM-01"].response_note, "Session draft");
+  assert.equal(storage.length, 0);
+});
+
+test("a failed browser write leaves current action and draft maps untouched", () => {
+  class FailingStorage extends MemoryStorage {
+    setItem() { throw new Error("quota exceeded"); }
+  }
+  const storage = new FailingStorage();
+  const entries = { "ITEM-01": action("ITEM-01", "Current", "2026-07-12T11:00:00Z") };
+  const drafts = { "ITEM-01": "Unsaved draft" };
+  const originalEntries = structuredClone(entries);
+  const originalDrafts = structuredClone(drafts);
+
+  assert.throws(() => saveBrowserReviewActionSnapshot(storage, {
+    persistence_mode: "local",
+    source_review_id: "review-failure",
+    source_review_fingerprint: "current-ledger",
+    entries,
+    draft_notes: drafts,
+    at: "2026-07-12T12:00:00Z",
+  }), /quota exceeded/);
+  assert.deepEqual(entries, originalEntries);
+  assert.deepEqual(drafts, originalDrafts);
+  assert.equal(storage.length, 0);
 });

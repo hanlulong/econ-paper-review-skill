@@ -26,7 +26,12 @@ SPEC.loader.exec_module(MODULE)
 class PublicReleaseTests(unittest.TestCase):
     def test_exact_contract_excludes_private_and_generated_material(self) -> None:
         paths = {path.as_posix() for path in MODULE.public_files(ROOT)}
+        self.assertIn("CONTRIBUTING.md", paths)
+        self.assertIn(".github/PULL_REQUEST_TEMPLATE.md", paths)
+        self.assertIn("docs/CONTRIBUTOR_LICENSE_AGREEMENT.md", paths)
+        self.assertIn("econ-review/LICENSE", paths)
         self.assertIn("econ-review/SKILL.md", paths)
+        self.assertIn("review-viewer/LICENSE", paths)
         self.assertIn("review-viewer/package.json", paths)
         self.assertIn("review-viewer/release/review-desk.zip", paths)
         self.assertIn("review-viewer/scripts/launch_review_desk.py", paths)
@@ -156,6 +161,22 @@ class PublicReleaseTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, label):
                     MODULE.public_files(root)
 
+    def test_first_party_license_copies_must_match(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self.make_contract_root(
+                Path(tmp),
+                {
+                    "LICENSE": b"same license\n",
+                    "econ-review/LICENSE": b"same license\n",
+                    "review-viewer/LICENSE": b"same license\n",
+                    "scripts/public-release-files.json": b"",
+                },
+            )
+            self.assertEqual(MODULE.public_files(root)[0], Path("LICENSE"))
+            (root / "review-viewer" / "LICENSE").write_text("different\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "not synchronized"):
+                MODULE.public_files(root)
+
     def test_archive_has_exact_hashed_manifest_and_is_deterministic(self) -> None:
         files = MODULE.public_files(ROOT)
         with tempfile.TemporaryDirectory() as tmp:
@@ -171,6 +192,16 @@ class PublicReleaseTests(unittest.TestCase):
                 expected.add("econ-paper-review-skill/RELEASE-MANIFEST.json")
                 self.assertEqual(names, expected)
                 self.assertEqual(embedded, metadata)
+                prefix = "econ-paper-review-skill/"
+                root_license = archive.read(prefix + "LICENSE")
+                self.assertEqual(root_license, archive.read(prefix + "econ-review/LICENSE"))
+                self.assertEqual(root_license, archive.read(prefix + "review-viewer/LICENSE"))
+                for required in (
+                    "CONTRIBUTING.md",
+                    ".github/PULL_REQUEST_TEMPLATE.md",
+                    "docs/CONTRIBUTOR_LICENSE_AGREEMENT.md",
+                ):
+                    self.assertIn(prefix + required, names)
                 for record in embedded["files"]:
                     data = archive.read(f"econ-paper-review-skill/{record['path']}")
                     self.assertEqual(len(data), record["size"])
@@ -195,7 +226,7 @@ class PublicReleaseTests(unittest.TestCase):
                 for _name, (info, data) in payloads.items():
                     output.writestr(info, data)
             with self.assertRaisesRegex(ValueError, "third-party notices"):
-                MODULE._scan_review_desk_bundle(rewritten)
+                MODULE._scan_review_desk_bundle(rewritten, (ROOT / "LICENSE").read_bytes())
 
     def test_builder_refuses_existing_or_symlink_output(self) -> None:
         files = MODULE.public_files(ROOT)
@@ -251,6 +282,7 @@ class InstallerTests(unittest.TestCase):
             result = self.run_installer(ROOT / "install.sh", "--global", "--codex", env={"HOME": str(home)})
             self.assertIn("installation complete", result.stdout)
             self.assertTrue((destination / "SKILL.md").is_file())
+            self.assertEqual((destination / "LICENSE").read_bytes(), (ROOT / "econ-review" / "LICENSE").read_bytes())
             self.assertFalse((destination / "old.txt").exists())
             self.assertFalse((destination / ".DS_Store").exists())
             self.assertFalse((destination / "scripts" / "__pycache__").exists())
@@ -283,6 +315,10 @@ class InstallerTests(unittest.TestCase):
             ]
             for destination in global_destinations:
                 self.assertTrue((destination / "SKILL.md").is_file())
+                self.assertEqual(
+                    (destination / "LICENSE").read_bytes(),
+                    (ROOT / "econ-review" / "LICENSE").read_bytes(),
+                )
                 self.assertTrue((destination / "references" / "workflow.md").is_file())
                 self.assertTrue((destination / "requirements-core.txt").is_file())
                 self.assertTrue((destination / "requirements-docling.txt").is_file())
@@ -302,6 +338,10 @@ class InstallerTests(unittest.TestCase):
             ]
             for destination in project_destinations:
                 self.assertTrue((destination / "SKILL.md").is_file())
+                self.assertEqual(
+                    (destination / "LICENSE").read_bytes(),
+                    (ROOT / "econ-review" / "LICENSE").read_bytes(),
+                )
                 self.assertTrue((destination / "scripts" / "pdf_ingestion.py").is_file())
 
     def test_platform_specific_config_directory_overrides(self) -> None:

@@ -4,8 +4,10 @@ import {
   parseReviewActions,
   reconcileReviewActions,
   type ReviewActionEntry,
+  type ReviewActionSourceManuscript,
   type ReviewActionsPayload,
 } from "./review-actions.ts";
+import { commitRevisionNoteDrafts } from "./revision-plan.ts";
 import { parseStrictJson } from "./strict-json.ts";
 
 export const REVIEW_ACTION_STORAGE_VERSION = 4;
@@ -18,6 +20,11 @@ export type StoredActionRestore = {
   entries: Record<string, ReviewActionEntry>;
   warning: string;
   rereview_required_finding_ids: string[];
+};
+export type BrowserReviewActionPersistenceMode = "local" | "session";
+export type BrowserReviewActionSnapshot = {
+  entries: Record<string, ReviewActionEntry>;
+  persisted: boolean;
 };
 
 export function reviewActionStoragePrefix(reviewId: string) {
@@ -218,6 +225,45 @@ export function persistBrowserReviewActions(
     reviewActionStorageKey(payload.source_review_id, payload.source_review_fingerprint),
     JSON.stringify(payload),
   );
+}
+
+/**
+ * Persist one coherent action snapshot, including note text that has not yet
+ * blurred into the React action ledger. The function is deliberately
+ * synchronous so callers can use it from pagehide/visibilitychange without
+ * leaving a final debounced write behind.
+ *
+ * The input maps are never mutated. A failed storage write throws before the
+ * caller receives or adopts the committed snapshot.
+ */
+export function saveBrowserReviewActionSnapshot(
+  storage: ReviewActionStorage,
+  options: {
+    persistence_mode: BrowserReviewActionPersistenceMode;
+    source_review_id: string;
+    source_review_fingerprint: string;
+    source_manuscripts?: ReviewActionSourceManuscript[];
+    entries: Readonly<Record<string, ReviewActionEntry>>;
+    draft_notes?: Readonly<Record<string, string>>;
+    at?: string;
+  },
+): BrowserReviewActionSnapshot {
+  const at = options.at || new Date().toISOString();
+  const entries = commitRevisionNoteDrafts(options.entries, options.draft_notes || {}, at);
+  if (options.persistence_mode === "session") return { entries, persisted: false };
+
+  const newestEntryTime = Object.values(entries).reduce(
+    (maximum, entry) => Math.max(maximum, Date.parse(entry.updated_at)),
+    Date.parse(at),
+  );
+  persistBrowserReviewActions(storage, generateReviewActionsPayload({
+    source_review_id: options.source_review_id,
+    source_review_fingerprint: options.source_review_fingerprint,
+    source_manuscripts: options.source_manuscripts,
+    exported_at: new Date(newestEntryTime).toISOString(),
+    entries,
+  }));
+  return { entries, persisted: true };
 }
 
 /** Delete every browser-side action snapshot for one review, including legacy formats. */

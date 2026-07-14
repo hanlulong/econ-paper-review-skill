@@ -99,6 +99,15 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(workspace, /MAX_NOTE_CHARS = 10_000/);
   assert.match(workspace, /maxLength=\{MAX_NOTE_CHARS\}/);
   assert.match(workspace, /setPersistenceWarning/);
+  assert.match(workspace, /saveBrowserReviewActionSnapshot/);
+  assert.match(workspace, /draft_notes: draftSnapshot/);
+  assert.match(workspace, /window\.addEventListener\("pagehide", onPageHide\)/);
+  assert.match(workspace, /document\.addEventListener\("visibilitychange", onVisibilityChange\)/);
+  assert.match(workspace, /document\.visibilityState === "hidden"/);
+  assert.match(workspace, /noteDraftsRef\.current = next/);
+  assert.match(actionStorage, /options\.persistence_mode === "session"/);
+  const persistenceFlush = workspace.slice(workspace.indexOf("const flushBrowserActions"), workspace.indexOf("useEffect(() => {", workspace.indexOf("const flushBrowserActions")));
+  assert.ok(persistenceFlush.indexOf("saveBrowserReviewActionSnapshot") < persistenceFlush.indexOf('setPersistenceState("saved")'), "Saved must be reported only after the synchronous storage write succeeds");
   assert.match(workspace, /Export actions/);
   assert.match(workspace, /reconcileReviewActions/);
   assert.match(workspace, /mergeReviewActionEntries/);
@@ -333,7 +342,10 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(css, /@media \(max-width:\s*760px\)[\s\S]*\.document-pane\s*\{[^}]*position:\s*static/);
   assert.match(css, /@media \(max-width:\s*760px\)[\s\S]*\.compact-review-summary\s*\{[^}]*display:\s*none/);
   assert.match(css, /@media \(max-width:\s*760px\)[\s\S]*\.comment-heading\s*\{[^}]*flex-direction:\s*column/);
-  assert.match(css, /\.decision-block p[^}]*max-width:\s*68ch/);
+  // The working column adapts to the window; per-paragraph width caps were removed
+  // so text always spans the column (matches the landing report card).
+  assert.match(css, /\.comment-scroll > \*\s*\{[^}]*max-width:\s*min\(clamp\(660px, 68%, 840px\), 100%\)/);
+  assert.doesNotMatch(css, /\.decision-block p[^}]*max-width:\s*68ch/);
   assert.match(css, /\.severity-pill\.severity-critical\s*\{[^}]*background:\s*var\(--critical\)/);
   assert.match(css, /\.severity-pill\.severity-major\s*\{[^}]*background:\s*var\(--coral-soft\)/);
   assert.match(css, /\.status-dot\s*\{[^}]*border:\s*2px solid #737e83/);
