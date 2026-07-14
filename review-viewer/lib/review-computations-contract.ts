@@ -3,6 +3,10 @@ import type { Ledger } from "./review-ledger-contract.ts";
 export type ReviewComputation = {
   id: string;
   finding_ids: string[];
+  audit_links?: Array<{
+    kind: "analytical_entry" | "magnitude_assessment";
+    id: string;
+  }>;
   input_anchor_ids: string[];
   tool: string;
   method: string;
@@ -13,7 +17,7 @@ export type ReviewComputation = {
 };
 
 export type ReviewComputationsLedger = {
-  schema_version: "0.1";
+  schema_version: "0.1" | "0.2";
   review_id: string;
   computations: ReviewComputation[];
 };
@@ -31,11 +35,32 @@ function nonemptyText(value: unknown): value is string {
   return typeof value === "string" && Boolean(value.trim());
 }
 
-function uniqueStringArray(value: unknown, pattern: RegExp): value is string[] {
+function uniqueStringArray(value: unknown, pattern: RegExp, allowEmpty = false): value is string[] {
   return Array.isArray(value)
-    && value.length > 0
+    && (allowEmpty || value.length > 0)
     && value.every((item) => nonemptyText(item) && pattern.test(item))
     && new Set(value).size === value.length;
+}
+
+function validAuditLinks(value: unknown, allowEmpty = true): value is ReviewComputation["audit_links"] {
+  if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) return false;
+  const keys = new Set<string>();
+  for (const link of value) {
+    if (!isRecord(link) || Object.keys(link).some((key) => key !== "kind" && key !== "id")) return false;
+    const kind = link.kind;
+    const id = link.id;
+    if (
+      !(
+        kind === "analytical_entry" && nonemptyText(id) && /^ANA-[A-Z]+-[0-9]{2,}$/.test(id)
+      ) && !(
+        kind === "magnitude_assessment" && nonemptyText(id) && /^MAG-[0-9]{2,}$/.test(id)
+      )
+    ) return false;
+    const key = `${kind}:${id}`;
+    if (keys.has(key)) return false;
+    keys.add(key);
+  }
+  return true;
 }
 
 /**
@@ -55,19 +80,33 @@ export function isSafeComputationArtifactPath(value: unknown): value is string {
 export function validateReviewComputations(value: unknown): ReviewComputationsLedger | null {
   if (value === null || value === undefined || (isRecord(value) && !Object.keys(value).length)) return null;
   if (
-    !isRecord(value) || value.schema_version !== "0.1"
+    !isRecord(value) || !["0.1", "0.2"].includes(String(value.schema_version))
     || !nonemptyText(value.review_id) || !Array.isArray(value.computations)
   ) throw new Error("computations.json does not have the required review_id and computations array");
 
   const ids = new Set<string>();
+  const schemaVersion = value.schema_version;
   for (const [index, computation] of value.computations.entries()) {
     if (
       !isRecord(computation) || !nonemptyText(computation.id) || !/^CMP-[0-9]{2,}$/.test(computation.id)
       || ids.has(computation.id)
     ) throw new Error(`computations.json has an invalid or duplicate computation at position ${index + 1}`);
-    if (!uniqueStringArray(computation.finding_ids, /^.+$/)) {
+    if (!uniqueStringArray(computation.finding_ids, /^.+$/, schemaVersion === "0.2")) {
       throw new Error(`computation ${computation.id} has invalid or duplicate finding IDs`);
     }
+    if (schemaVersion === "0.1" && computation.audit_links !== undefined && !validAuditLinks(computation.audit_links)) {
+      throw new Error(`computation ${computation.id} has invalid audit links`);
+    }
+    if (schemaVersion === "0.1" && Array.isArray(computation.audit_links) && computation.audit_links.length) {
+      throw new Error(`computation ${computation.id} cannot declare audit links under schema 0.1`);
+    }
+    if (schemaVersion === "0.2" && !validAuditLinks(computation.audit_links)) {
+      throw new Error(`computation ${computation.id} has invalid or duplicate audit links`);
+    }
+    if (
+      schemaVersion === "0.2" && computation.finding_ids.length === 0
+      && Array.isArray(computation.audit_links) && computation.audit_links.length === 0
+    ) throw new Error(`computation ${computation.id} must link a finding or audit row`);
     if (!uniqueStringArray(computation.input_anchor_ids, /^ANC-[0-9]{2,}$/)) {
       throw new Error(`computation ${computation.id} has invalid or duplicate input anchors`);
     }

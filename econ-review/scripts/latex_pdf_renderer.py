@@ -865,12 +865,35 @@ def _toolchains(renderer: str) -> list[_Toolchain]:
     return [selected]
 
 
+def _auto_toolchains() -> list[_Toolchain]:
+    """Return all installed TeX candidates in preference order."""
+
+    latexmk = shutil.which("latexmk")
+    lualatex = shutil.which("lualatex")
+    tectonic = shutil.which("tectonic")
+    candidates: list[_Toolchain] = []
+    if latexmk and lualatex:
+        candidates.append(_Toolchain("latexmk-lualatex", "LuaLaTeX", latexmk))
+    if lualatex:
+        candidates.append(_Toolchain("lualatex", "LuaLaTeX", lualatex))
+    if tectonic:
+        candidates.append(_Toolchain("tectonic", "Tectonic", tectonic))
+    return candidates
+
+
 def _compiler_version(toolchain: _Toolchain) -> str:
     command = [toolchain.executable, "--version"]
     if toolchain.name == "latexmk-lualatex":
         command = [toolchain.executable, "-version"]
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
+        )
     except (OSError, subprocess.TimeoutExpired):
         return "unknown"
     line = (result.stdout or result.stderr).splitlines()
@@ -910,6 +933,73 @@ def _command(toolchain: _Toolchain, build_dir: Path) -> list[str]:
     ]
 
 
+def _renderer_health(toolchain: _Toolchain, *, timeout: int) -> tuple[bool, str]:
+    """Compile a minimal document using the real production command shape."""
+
+    source = (
+        "\\documentclass{article}\n"
+        "\\begin{document}\n"
+        "econ-review renderer health check\n"
+        "\\end{document}\n"
+    )
+    with tempfile.TemporaryDirectory(prefix="econ-review-renderer-health-") as temporary:
+        root = Path(temporary)
+        build_dir = root / "build"
+        build_dir.mkdir()
+        (root / "review.tex").write_text(source, encoding="utf-8", newline="\n")
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "SOURCE_DATE_EPOCH": "946728000",
+                "FORCE_SOURCE_DATE": "1",
+                "TZ": "UTC",
+                "LC_ALL": "C.UTF-8",
+                "LANG": "C.UTF-8",
+            }
+        )
+        try:
+            result = subprocess.run(
+                _command(toolchain, build_dir),
+                cwd=root,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return False, f"timed out after {timeout}s"
+        except OSError as exc:
+            return False, f"could not start ({exc})"
+        pdf_path = build_dir / "review.pdf"
+        if result.returncode:
+            return False, f"minimal compile failed ({result.returncode})"
+        if not pdf_path.is_file() or not pdf_path.read_bytes().startswith(b"%PDF-"):
+            return False, "minimal compile returned no valid PDF"
+        return True, "healthy"
+
+
+def select_healthy_renderer(*, timeout: int = 30) -> tuple[str | None, tuple[str, ...]]:
+    """Select the first installed TeX backend that can actually compile.
+
+    ``None`` tells the caller to use the built-in ReportLab renderer.  The
+    compact diagnostics are suitable for provenance or a doctor command and do
+    not expose compiler logs or local document content.
+    """
+
+    diagnostics: list[str] = []
+    for toolchain in _auto_toolchains():
+        healthy, reason = _renderer_health(toolchain, timeout=timeout)
+        diagnostics.append(f"{toolchain.name}: {reason}")
+        if healthy:
+            return toolchain.name, tuple(diagnostics)
+    if not diagnostics:
+        diagnostics.append("no supported TeX renderer is installed")
+    return None, tuple(diagnostics)
+
+
 def _run_toolchain(
     toolchain: _Toolchain,
     *,
@@ -930,7 +1020,8 @@ def _run_toolchain(
                 cwd=root,
                 env=dict(environment),
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
                 check=False,
             )
@@ -1184,4 +1275,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    from cli_io import configure_utf8_stdio
+
+    configure_utf8_stdio()
     raise SystemExit(main())

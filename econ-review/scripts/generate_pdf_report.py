@@ -30,6 +30,7 @@ from latex_pdf_renderer import (  # noqa: E402
     ReviewDocument,
     SUPPORTED_RENDERERS as LATEX_RENDERERS,
     render_review_pdf,
+    select_healthy_renderer,
 )
 
 try:
@@ -1020,20 +1021,25 @@ def build_professional_pdf(
     renderer: str = "auto",
     assessment_date: date | None = None,
 ) -> tuple[bytes, RenderProfile | None]:
-    """Build the primary PDF, preferring LaTeX and falling back only if absent.
+    """Build the primary PDF, preferring a health-checked LaTeX backend.
 
-    A TeX compilation or content error is never hidden by a ReportLab retry.
-    The fallback is selected only when ``auto`` detects no supported TeX
-    executable at all, or when the caller requests ``reportlab`` explicitly.
+    Auto-selection uses a minimal compile to reject executables that cannot
+    actually run (for example, ``latexmk`` without Perl).  Once a healthy TeX
+    backend is selected, a content error is never hidden by a ReportLab retry.
     """
     if renderer not in SUPPORTED_RENDERERS:
         raise ValueError(f"renderer must be one of {', '.join(SUPPORTED_RENDERERS)}")
     review_dir = review_dir.expanduser().absolute()
     reject_package_links(review_dir)
     review_dir = review_dir.resolve(strict=True)
-    if renderer == "reportlab" or (renderer == "auto" and not _latex_is_available("auto")):
+    if renderer == "reportlab":
         return build_pdf(review_dir, output, page_size=page_size, font_dir=font_dir), None
-    if renderer != "auto" and not _latex_is_available(renderer):
+    if renderer == "auto":
+        selected, _health_diagnostics = select_healthy_renderer()
+        if selected is None:
+            return build_pdf(review_dir, output, page_size=page_size, font_dir=font_dir), None
+        renderer = selected
+    elif not _latex_is_available(renderer):
         raise ValueError(f"requested renderer is unavailable: {renderer}")
     run = _load_object(review_dir / "run.json")
     paper_title, _review_id, raw_date = paper_identity(review_dir, run)
@@ -1133,4 +1139,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from cli_io import configure_utf8_stdio
+
+    configure_utf8_stdio()
     raise SystemExit(main())

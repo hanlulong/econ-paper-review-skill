@@ -25,7 +25,7 @@ import sys
 import tempfile
 import unicodedata
 from collections import Counter, defaultdict
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any, Iterable
 
 from defusedxml import ElementTree as ET
@@ -133,7 +133,12 @@ def regular_file(path: Path, label: str) -> Path:
 
 def safe_relative(value: str | Path) -> str:
     try:
-        return canonical_portable_path(str(value))
+        # ``Path.__str__`` uses backslashes on native Windows, while package
+        # paths are deliberately POSIX-style on every platform.  Convert only
+        # trusted local Path objects; raw strings with backslashes must still
+        # fail closed as non-portable package paths.
+        portable = value.as_posix() if isinstance(value, PurePath) else value
+        return canonical_portable_path(portable)
     except ValueError as exc:
         raise IngestionError(f"path must be safe and relative: {value} ({exc})") from exc
 
@@ -148,14 +153,19 @@ def command_path(name: str, system: str | None = None) -> str | None:
 
 
 def run(command: list[str], *, timeout: int = 300, text: bool = False) -> subprocess.CompletedProcess[Any]:
+    text_options = (
+        {"text": True, "encoding": "utf-8", "errors": "replace"}
+        if text
+        else {"text": False}
+    )
     try:
         return subprocess.run(
             command,
             check=True,
             capture_output=True,
-            text=text,
             timeout=timeout,
             env={**os.environ, "LC_ALL": "C", "TZ": "UTC"},
+            **text_options,
         )
     except FileNotFoundError as exc:
         raise IngestionError(f"required command is unavailable: {command[0]}") from exc
@@ -170,7 +180,14 @@ def command_version(name: str, arguments: list[str]) -> str:
     executable = command_path(name)
     if not executable:
         return "unavailable"
-    result = subprocess.run([executable, *arguments], capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        [executable, *arguments],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
     value = (result.stdout or result.stderr).strip().splitlines()
     return value[0][:160] if value else "available-version-unknown"
 
@@ -436,10 +453,33 @@ def pdf_security_preflight(pdf: Path, *, max_pages: int, max_bytes: int) -> tupl
     return pages, encrypted, warnings
 
 
-def render_pages(pdf: Path, destination: Path, dpi: int, expected_pages: int) -> list[Path]:
+def renderer_stderr_warnings(value: str | bytes | None) -> list[str]:
+    """Preserve distinct successful-renderer diagnostics as bounded warnings."""
+
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", "replace")
+    if not isinstance(value, str):
+        return []
+    messages = dict.fromkeys(line.strip() for line in value.splitlines() if line.strip())
+    return [f"pdftoppm renderer: {message}" for message in messages]
+
+
+def render_pages(
+    pdf: Path,
+    destination: Path,
+    dpi: int,
+    expected_pages: int,
+    *,
+    warnings: list[str] | None = None,
+) -> list[Path]:
     private_mkdir(destination)
     prefix = destination / "raw"
-    run(["pdftoppm", "-png", "-r", str(dpi), str(pdf), str(prefix)], timeout=max(300, expected_pages * 12))
+    completed = run(
+        ["pdftoppm", "-png", "-r", str(dpi), str(pdf), str(prefix)],
+        timeout=max(300, expected_pages * 12),
+    )
+    if warnings is not None:
+        warnings.extend(renderer_stderr_warnings(completed.stderr))
     raw = sorted(destination.glob("raw-*.png"), key=lambda path: int(path.stem.rsplit("-", 1)[1]))
     if len(raw) != expected_pages:
         raise IngestionError(f"renderer produced {len(raw)} pages; PDF declares {expected_pages}")
@@ -629,8 +669,19 @@ def clear_prose_with_incidental_math(text: str, equation_signals: int, alpha_wor
     return sentence_ending and (word_heavy or (prose_opening and prose_verb))
 
 
+def categorical_legend_with_assignments(text: str) -> bool:
+    """Reject plot legends that compare named categories with parenthetical values."""
+
+    assignments = re.findall(r"\([A-Za-z][A-Za-z0-9_]*\s*=", text)
+    title_words = re.findall(r"\b[A-Z][a-z]{2,}\b", text)
+    display_operators = re.search(r"[∑∏∫√≤≥≈≡∂∆∇∞±×÷]", text)
+    return len(assignments) >= 2 and len(title_words) >= 2 and display_operators is None
+
+
 def equation_candidate(text: str) -> bool:
     """Detect display-math candidates while excluding clear prose footnotes."""
+    if categorical_legend_with_assignments(text):
+        return False
     equation_signals = len(re.findall(
         r"[=∑∏∫√≤≥≈≡∂∆∇∞±×÷]|(?:\b(?:argmax|argmin|max|min)\b)", text,
     ))
@@ -650,6 +701,41 @@ def equation_candidate(text: str) -> bool:
     return (equation_label and equation_signals >= 1) or (
         equation_signals >= 2 and alpha_words <= 8 and len(text) <= 500
     )
+
+
+def math_dominated_heading_text(text: str) -> bool:
+    """Reject only strongly equation-dominated extracted heading fragments."""
+
+    text = text.strip()
+    tokens = re.findall(r"[^\W\d_]+", text, flags=re.UNICODE)
+    long_words = [token for token in tokens if len(token) >= 3]
+    variable_tokens = [token for token in tokens if len(token) <= 2]
+    mathematical = sum(
+        1
+        for character in text
+        if unicodedata.category(character) == "Sm"
+        or character in "=<>+-*/^_"
+        or "GREEK" in unicodedata.name(character, "")
+    )
+    indexed_notation = (
+        len(tokens) >= 3
+        and not long_words
+        and any(character in text for character in ",()[]{}")
+    )
+    lone_math_symbol = len(text) == 1 and (
+        unicodedata.category(text) == "Sm"
+        or "GREEK" in unicodedata.name(text, "")
+    )
+    malformed_fragment = bool(re.fullmatch(r"[=+\-*/^_<>]+", text)) or lone_math_symbol
+    math_dominated = (
+        not long_words
+        and (mathematical > 0 or indexed_notation)
+    ) or (
+        mathematical >= 2
+        and len(variable_tokens) >= 2
+        and len(long_words) <= 1
+    )
+    return malformed_fragment or math_dominated or indexed_notation
 
 
 def classify_block(block: dict[str, Any], repeated: set[tuple[str, str]]) -> tuple[str, str]:
@@ -676,6 +762,7 @@ def classify_block(block: dict[str, Any], repeated: set[tuple[str, str]]) -> tup
     if (
         len(text.splitlines()) <= 2
         and not appendix_sentence
+        and not math_dominated_heading_text(first)
         and any(re.match(pattern, first, re.I) for pattern in heading_patterns)
     ):
         return "heading", "high"
@@ -693,7 +780,9 @@ def object_detector_contract() -> dict[str, str]:
         caption_candidate_kind,
         narrative_exhibit_reference,
         clear_prose_with_incidental_math,
+        categorical_legend_with_assignments,
         equation_candidate,
+        math_dominated_heading_text,
         classify_block,
     )
     source = "\n\n".join(inspect.getsource(function) for function in functions)
@@ -1857,7 +1946,15 @@ def ingest(args: argparse.Namespace) -> Path:
             source_copy, max_pages=args.max_pages, max_bytes=args.max_bytes,
         )
         preflight_warnings.extend(inspect_pdf_safety(source_copy))
-        rendered = render_pages(source_copy, stage / "renders", args.dpi, page_count)
+        renderer_warnings: list[str] = []
+        rendered = render_pages(
+            source_copy,
+            stage / "renders",
+            args.dpi,
+            page_count,
+            warnings=renderer_warnings,
+        )
+        preflight_warnings.extend(renderer_warnings)
         pages, raw_blocks, parser_repairs = parse_bbox_layout(source_copy, stage, source_id)
         if len(pages) != page_count:
             raise IngestionError(f"bbox extractor returned {len(pages)} pages; PDF declares {page_count}")
@@ -2183,4 +2280,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from cli_io import configure_utf8_stdio
+
+    configure_utf8_stdio()
     raise SystemExit(main())

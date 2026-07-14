@@ -405,7 +405,19 @@
     "required": true,
     "completed": true,
     "rejected_candidate_count": 0,
+    "bounded_candidate_count": 0,
+    "merged_candidate_count": 0,
     "new_finding_ids": [],
-    "shortfall_explanation": "The fixture is one paragraph with one proposition; a second sweep found no additional defensible issue."
+    "shortfall_explanation": "The fixture is one paragraph with one proposition; a complete saturation sweep found no additional defensible issue.",
+    "saturation_reached": true,
+    "rounds": [
+      {
+        "id": "SWEEP-01",
+        "pass_id": "PASS-04",
+        "scope": "All in-scope units and active burdens after the initial discovery passes.",
+        "coverage_unit_ids": ["paper"],
+        "new_finding_ids": []
+      }
+    ]
   }
 }

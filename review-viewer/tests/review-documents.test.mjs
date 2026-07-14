@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
+import { dirname, relative, sep } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   discoverReviewDocuments,
@@ -14,6 +16,12 @@ import {
 } from "../lib/review-documents.ts";
 
 const FIXTURE = new URL("../../tests/fixtures/valid-review/", import.meta.url);
+
+function relativeEntryPath(baseUrl, entry) {
+  const basePath = fileURLToPath(baseUrl);
+  const parent = relative(basePath, entry.parentPath || dirname(fileURLToPath(new URL(entry.name, baseUrl))));
+  return (parent ? `${parent}/${entry.name}` : entry.name).split(sep).join("/");
+}
 
 test("validates arbitrary review documents and rejects ambiguous manifests", async () => {
   const fixtureManifest = await readFile(new URL("review-manifest.json", FIXTURE), "utf8");
@@ -205,10 +213,7 @@ test("the synthetic manifest exposes every author-facing document and keeps audi
   const entries = await readdir(FIXTURE, { recursive: true, withFileTypes: true });
   const markdown = entries
     .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
-    .map((entry) => {
-      const parent = entry.parentPath.replace(new URL(FIXTURE).pathname.replace(/\/$/, ""), "").replace(/^\//, "");
-      return parent ? `${parent}/${entry.name}` : entry.name;
-    })
+    .map((entry) => relativeEntryPath(FIXTURE, entry))
     .filter((path) => path !== "synthetic-paper.md")
     .sort();
   const authorFacing = markdown.filter((path) => !path.startsWith("evidence/"));
@@ -235,10 +240,7 @@ test("every synced manifest reference exists and remains inside its synthetic bu
     const bundledEntries = await readdir(base, { recursive: true, withFileTypes: true });
     const bundledMarkdown = bundledEntries
       .filter((candidate) => candidate.isFile() && candidate.name.endsWith(".md"))
-      .map((candidate) => {
-        const parent = candidate.parentPath.replace(new URL(base).pathname.replace(/\/$/, ""), "").replace(/^\//, "");
-        return parent ? `${parent}/${candidate.name}` : candidate.name;
-      })
+      .map((candidate) => relativeEntryPath(base, candidate))
       .filter((path) => !sourceMarkdown.has(path) && !path.startsWith("evidence/"))
       .sort();
     assert.deepEqual(

@@ -64,7 +64,7 @@ class CrossPlatformPathTests(unittest.TestCase):
             )
             self.assertEqual(
                 MODULE.runtime_default("global", None, "Windows"),
-                Path(tmp) / "home" / "AppData" / "Local" / "econ-review" / "runtime",
+                Path(tmp) / "home" / ".econ-review" / "runtime",
             )
 
     def test_windows_runtime_executable_and_non_admin_guidance(self) -> None:
@@ -77,6 +77,20 @@ class CrossPlatformPathTests(unittest.TestCase):
         self.assertIn("non-admin", guidance)
         self.assertIn("Conda", guidance)
         self.assertNotIn("administrator access", guidance)
+
+    def test_windows_review_desk_launcher_uses_managed_runtime_and_forwards_args(self) -> None:
+        runtime_python = Path(r"D:\econ-review\runtime\Scripts\python.exe")
+        launcher = MODULE.review_desk_cmd_bytes(runtime_python).decode("utf-8")
+        self.assertIn(f'"{runtime_python}"', launcher)
+        self.assertIn('"%~dp0launch_review_desk.py" %*', launcher)
+        self.assertIn("set PYTHONUTF8=1", launcher)
+        self.assertTrue(launcher.endswith("exit /b %ERRORLEVEL%\r\n"))
+
+    def test_windows_review_desk_launcher_escapes_percent_in_runtime_path(self) -> None:
+        launcher = MODULE.review_desk_cmd_bytes(
+            Path(r"D:\Profiles\100%Reviewer\runtime\Scripts\python.exe")
+        ).decode("utf-8")
+        self.assertIn(r"100%%Reviewer", launcher)
 
     def test_platform_specific_review_desk_locations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
@@ -92,8 +106,29 @@ class CrossPlatformPathTests(unittest.TestCase):
             )
             self.assertEqual(
                 MODULE.review_desk_default("global", None, "Windows"),
-                Path(tmp) / "home" / "AppData" / "Local" / "econ-review" / "review-desk",
+                Path(tmp) / "home" / ".econ-review" / "review-desk",
             )
+
+    def test_windows_store_runtime_redirection_is_resolved(self) -> None:
+        requested = Path("/profiles/reviewer/AppData/Local/econ-review/runtime")
+        actual_python = Path(
+            "/profiles/reviewer/AppData/Local/Packages/Python/LocalCache/Local/"
+            "econ-review/runtime/Scripts/python.exe"
+        )
+        with mock.patch.object(MODULE.os.path, "realpath", return_value=str(actual_python)):
+            actual_runtime, python = MODULE.resolve_runtime_location(requested, "Windows")
+        self.assertEqual(actual_runtime, actual_python.parent.parent)
+        self.assertEqual(python, actual_python)
+
+    def test_windows_store_runtime_redirection_fails_closed_on_unexpected_layout(self) -> None:
+        requested = Path("/profiles/reviewer/AppData/Local/econ-review/runtime")
+        with mock.patch.object(
+            MODULE.os.path,
+            "realpath",
+            return_value="/unexpected/location/interpreter.exe",
+        ):
+            with self.assertRaisesRegex(MODULE.InstallError, "unexpected location"):
+                MODULE.resolve_runtime_location(requested, "Windows")
 
     def test_review_desk_bundle_paths_are_cross_platform_safe(self) -> None:
         for value in (
@@ -148,6 +183,37 @@ class ManagedInstallerTests(unittest.TestCase):
             env=merged,
             check=check,
         )
+
+    def test_managed_runtime_persists_windows_store_actual_interpreter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            requested = root / "LocalAppData" / "econ-review" / "runtime"
+            actual = root / "Packages" / "Python" / "LocalCache" / "Local" / "econ-review" / "runtime"
+            actual_python = actual / "Scripts" / "python.exe"
+            actual_python.parent.mkdir(parents=True)
+            actual_python.write_bytes(b"synthetic executable")
+
+            def redirected(path: object) -> str:
+                if str(path).replace("\\", "/").endswith("/runtime/Scripts/python.exe"):
+                    return str(actual_python)
+                return str(path)
+
+            completed = subprocess.CompletedProcess([], 0, "", "")
+            with mock.patch.object(MODULE.platform, "system", return_value="Windows"), \
+                    mock.patch.object(MODULE.os.path, "realpath", side_effect=redirected), \
+                    mock.patch.object(MODULE.subprocess, "run", return_value=completed), \
+                    mock.patch.object(MODULE, "_run_quiet", return_value=completed), \
+                    mock.patch.object(MODULE, "runtime_is_reusable", return_value=True):
+                python = MODULE.ensure_runtime(
+                    requested,
+                    fixture.skill,
+                    refresh=True,
+                    dry_run=False,
+                )
+
+            self.assertEqual(python, actual_python)
+            self.assertTrue((actual / ".econ-review-runtime.json").is_file())
 
     def test_dry_run_is_write_free_for_project_setup(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -299,6 +365,31 @@ class ManagedInstallerTests(unittest.TestCase):
             self.assertIn("Already current Review Desk", second.stdout)
             self.assertIn("Already current Review Desk launcher", second.stdout)
             self.assertEqual([path.name for path in (desk_root / "versions").iterdir()], [installed.name])
+
+    def test_windows_review_desk_cmd_is_installed_and_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            desk_root = root / "desk"
+            runtime_python = root / "runtime" / "Scripts" / "python.exe"
+            bundle = ROOT / "review-viewer" / "release" / "review-desk.zip"
+            MODULE.install_review_desk(
+                bundle,
+                desk_root,
+                dry_run=False,
+                runtime_python=runtime_python,
+                system="Windows",
+            )
+            launcher = desk_root / MODULE.REVIEW_DESK_WINDOWS_LAUNCHER
+            self.assertEqual(launcher.read_bytes(), MODULE.review_desk_cmd_bytes(runtime_python))
+            before = launcher.stat().st_mtime_ns
+            MODULE.install_review_desk(
+                bundle,
+                desk_root,
+                dry_run=False,
+                runtime_python=runtime_python,
+                system="Windows",
+            )
+            self.assertEqual(launcher.stat().st_mtime_ns, before)
 
     def test_review_desk_dry_run_is_write_free(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

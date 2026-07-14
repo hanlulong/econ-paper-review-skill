@@ -17,6 +17,72 @@
     "prior_round": {"$ref": "#/$defs/prior_round"},
     "status": {"enum": ["draft", "awaiting_checkpoint", "blocked", "verification_failed", "complete"]},
     "mode": {"enum": ["quick", "full"]},
+    "requested_mode": {
+      "enum": ["quick", "full"],
+      "description": "Review depth requested at the start of this review identity."
+    },
+    "delivered_mode": {
+      "enum": ["quick", "full"],
+      "description": "Review depth this package delivers. The legacy mode field must match this value."
+    },
+    "mode_transition": {
+      "enum": ["none", "separate_quick_after_failed_full"],
+      "description": "Explicit mode-history state. A quick replacement for a failed full review must use a new review_id and name the earlier review in transition_source_review_id."
+    },
+    "transition_reason": {"type": ["string", "null"], "minLength": 1},
+    "transition_source_review_id": {"type": ["string", "null"], "minLength": 1},
+    "finding_granularity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy", "consolidation_policy", "occurrence_basis",
+        "unique_defect_count", "occurrence_count", "evidence_record_count"
+      ],
+      "properties": {
+        "policy": {"enum": ["one_per_defect", "one_per_occurrence", "named_consolidation"]},
+        "consolidation_policy": {"type": ["string", "null"], "minLength": 1},
+        "occurrence_basis": {
+          "const": "related_locations",
+          "description": "Every checked occurrence is retained as a distinct related_locations entry even when several occurrences are consolidated into one finding."
+        },
+        "unique_defect_count": {"type": "integer", "minimum": 0},
+        "occurrence_count": {"type": "integer", "minimum": 0},
+        "evidence_record_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "git_commit", "git_dirty", "source_tree_sha256", "operating_system",
+        "python_version", "node_version", "package_versions", "renderer",
+        "semantic_backend", "ocr_backend", "command", "model_identity",
+        "prompt_identity", "agent_count"
+      ],
+      "properties": {
+        "git_commit": {"type": ["string", "null"], "pattern": "^[a-f0-9]{40,64}$"},
+        "git_dirty": {"type": ["boolean", "null"]},
+        "source_tree_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+        "operating_system": {"type": "string", "minLength": 1},
+        "python_version": {"type": "string", "minLength": 1},
+        "node_version": {"type": ["string", "null"], "minLength": 1},
+        "package_versions": {
+          "type": "object",
+          "additionalProperties": {"type": "string", "minLength": 1}
+        },
+        "renderer": {"type": ["string", "null"], "minLength": 1},
+        "semantic_backend": {"type": ["string", "null"], "minLength": 1},
+        "ocr_backend": {"type": ["string", "null"], "minLength": 1},
+        "command": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "model_identity": {"type": ["string", "null"], "minLength": 1},
+        "prompt_identity": {"type": ["string", "null"], "minLength": 1},
+        "agent_count": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Number of review agents used when the orchestration runtime exposes it; null only when unavailable."
+        }
+      }
+    },
     "target": {
       "type": "object",
       "additionalProperties": false,
@@ -165,6 +231,25 @@
           "type": ["integer", "null"],
           "minimum": 0,
           "description": "Observed output-token count, or null when unavailable."
+        },
+        "stage_seconds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "intake", "reconstruction", "frontier", "audit",
+            "counterargument", "synthesis", "verification", "delivery"
+          ],
+          "properties": {
+            "intake": {"type": ["number", "null"], "minimum": 0},
+            "reconstruction": {"type": ["number", "null"], "minimum": 0},
+            "frontier": {"type": ["number", "null"], "minimum": 0},
+            "audit": {"type": ["number", "null"], "minimum": 0},
+            "counterargument": {"type": ["number", "null"], "minimum": 0},
+            "synthesis": {"type": ["number", "null"], "minimum": 0},
+            "verification": {"type": ["number", "null"], "minimum": 0},
+            "delivery": {"type": ["number", "null"], "minimum": 0}
+          },
+          "description": "Observed per-stage elapsed seconds; null only when that timing was unavailable."
         }
       }
     }

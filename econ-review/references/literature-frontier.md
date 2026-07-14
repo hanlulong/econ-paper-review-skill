@@ -7,6 +7,7 @@
 - [2. Search through complementary routes](#2-search-through-complementary-routes)
 - [3. Screen candidates and resolve versions](#3-screen-candidates-and-resolve-versions)
 - [4. Verify sources and author attributions](#4-verify-sources-and-author-attributions)
+  - [Capture exact support safely](#capture-exact-support-safely)
 - [5. Compare contributions fairly](#5-compare-contributions-fairly)
 - [6. Decide whether a missing paper matters](#6-decide-whether-a-missing-paper-matters)
 - [7. Stop only at documented closure](#7-stop-only-at-documented-closure)
@@ -74,6 +75,8 @@ Build a claim-to-search matrix and use several routes that fail differently:
 6. Recent journal and working-paper searches appropriate to the field's publication lag.
 7. Author, title, phrase, and version searches for chronology or duplicate checks only when the outbound policy permits them.
 
+After the claim inventory is stable, batch overlapping claims into shared query families and run independent metadata, repository, citation-chain, and primary-source retrieval routes concurrently when access permits. Reuse a verified work-family record across claims, but keep claim-specific screening, overlap, and disposition rows. Parallel retrieval reduces waiting time; it does not replace the two zero-yield expansion rounds or permit a discovery index to stand in for the primary source.
+
 Search older foundations and the current frontier; do not impose a mechanical date window, journal list, or database quota. For active policies or institutions, distinguish stated or survey outcomes from realized administrative, market, or behavioral outcomes. The latter may change positioning or suggest validation, but does not automatically invalidate a paper about beliefs, communication, measurement, or another mechanism.
 
 For broad contribution, novelty, priority, coverage, contradiction, or replication claims, complete coverage includes the manuscript bibliography, a concept or economic-object route, a mechanism/model/design/evidence route, and a current-frontier route through recent working papers, publications, books, or field syntheses as appropriate. For a named attribution or citation-support claim, complete coverage includes the manuscript bibliography and an author/version route. These are claim-level search burdens, not empirical or theoretical design checklists.
@@ -131,6 +134,47 @@ Bind ordered authors, title, identifiers, source type, venue, publication and fi
 Metadata cannot support a substantive result. An abstract can support only a proposition that it states at the same scope; do not infer that a full paper omits a result from its abstract. A critical or major novelty, contradiction, replication, or mischaracterization finding requires the relevant full text and defensible chronology. If access is insufficient, bound the claim.
 
 Capture only the metadata and shortest exact support span needed for auditability, with its provenance and hash. Respect copyright, licences, repository terms, robots rules, and access controls; do not bypass a paywall or redistribute a full copyrighted work merely to preserve evidence.
+
+### Capture exact support safely
+
+Use `scripts/capture_external_source.py` to build a source record instead of calculating snapshot offsets by hand. Give it a JSON spec containing the review policy, the source fields, and one or more exact captures. For example:
+
+```json
+{
+  "review_id": "review-001",
+  "search_confidentiality": "deidentified",
+  "source": {
+    "id": "EXT-01",
+    "title": "A Prior Result",
+    "stable_id": "doi:10.1234/example",
+    "url": "https://doi.org/10.1234/example",
+    "accessed_at": "2026-07-14",
+    "snapshot_kind": "source_capture",
+    "snapshot_path": "evidence/external/EXT-01.txt"
+  },
+  "captures": [{
+    "support_record": {
+      "id": "EXT-01-SUP-01",
+      "proposition": "The source reports the stated result.",
+      "proposition_kind": "reported_main_result",
+      "support_state": "supported",
+      "access_scope": "full_text",
+      "locator": "Result section, first paragraph"
+    },
+    "excerpt": "The shortest exact source passage needed for support."
+  }]
+}
+```
+
+Run the command without write flags first. It stages LF-only UTF-8 bytes, re-reads the staged file, derives character spans and hashes from those bytes, validates the source definition plus trust-spine support joins, prints the v0.4 fragment, and changes no package file:
+
+```text
+REVIEW_PYTHON scripts/capture_external_source.py REVIEW_DIR capture-spec.json
+```
+
+After inspecting the fragment, add `--write` to atomically create the snapshot. Add `--fragment-path evidence/external/EXT-01.source.json` to retain the validated fragment as a sidecar. Existing destinations are refused unless `--replace-existing` is also explicit. The helper does not silently merge `external-sources.json`; merge the emitted source deliberately, complete work-family/frontier links, and run full package validation.
+
+To bind structured bibliography fields, add the complete `bibliographic_metadata` object to `source` but omit `field_support_record_ids`, then add `metadata_projection` with a `support_record_id` and locator. The helper writes one sorted, compact canonical JSON projection, maps every required metadata field to it, and validates the deep field values immediately. Do not use a metadata projection for substantive results.
 
 ## 5. Compare contributions fairly
 

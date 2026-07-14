@@ -261,6 +261,28 @@ class LatexToolchainAndProfileTests(unittest.TestCase):
         self.assertEqual(selected[0].name, "latexmk-lualatex")
         self.assertEqual(selected[0].engine, "LuaLaTeX")
 
+    def test_health_selection_skips_broken_latexmk_and_uses_lualatex(self) -> None:
+        outcomes = iter(((False, "minimal compile failed (1)"), (True, "healthy")))
+        with mock.patch.object(MODULE.shutil, "which", side_effect=self.which_with_all_tex_tools), \
+                mock.patch.object(MODULE, "_renderer_health", side_effect=lambda *_args, **_kwargs: next(outcomes)) as probe:
+            selected, diagnostics = MODULE.select_healthy_renderer()
+
+        self.assertEqual(selected, "lualatex")
+        self.assertEqual(probe.call_count, 2)
+        self.assertEqual(
+            diagnostics,
+            (
+                "latexmk-lualatex: minimal compile failed (1)",
+                "lualatex: healthy",
+            ),
+        )
+
+    def test_health_selection_returns_reportlab_signal_when_no_tex_is_usable(self) -> None:
+        with mock.patch.object(MODULE.shutil, "which", return_value=None):
+            selected, diagnostics = MODULE.select_healthy_renderer()
+        self.assertIsNone(selected)
+        self.assertEqual(diagnostics, ("no supported TeX renderer is installed",))
+
     def test_auto_does_not_try_another_engine_after_a_compile_error(self) -> None:
         with mock.patch.object(MODULE.shutil, "which", side_effect=self.which_with_all_tex_tools), \
                 mock.patch.object(MODULE, "_run_toolchain", return_value=(1, "fatal compile error", 9)) as run:

@@ -25,9 +25,12 @@ SKILL_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 ALLOWED_FRONTMATTER = {"name", "description"}
 ALLOWED_OPENAI_TOP_LEVEL = {"interface", "dependencies", "policy"}
 REQUIRED_RUNTIME = {
+    "cli_io.py",
     "dependency_versions.py",
     "finalize_review.py",
     "propose_source_inventory.py",
+    "query_source.py",
+    "review_timing.py",
     "safe_io.py",
     "trust_spine.py",
     "validate_review.py",
@@ -328,4 +331,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    from cli_io import configure_utf8_stdio
+
+    configure_utf8_stdio()
     raise SystemExit(main())

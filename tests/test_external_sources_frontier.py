@@ -333,6 +333,36 @@ class FrontierAuditTests(unittest.TestCase):
             errors = TRUST.validate_trust_spine(target, run, ledger, MODULE.validate_schema)
             self.assertTrue(any("excerpt does not match its snapshot span" in error for error in errors), errors)
 
+    def test_external_txt_snapshot_must_use_lf_even_when_hash_and_spans_match(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.copy_fixture(tmp)
+            run, ledger = self.install_complete_frontier(target)
+            external_path = target / "evidence" / "external-sources.json"
+            external = json.loads(external_path.read_text(encoding="utf-8"))
+            source = external["sources"][0]
+            snapshot = target / source["snapshot_path"]
+            text = snapshot.read_text(encoding="utf-8").replace("\n", "\r\n")
+            snapshot.write_bytes(text.encode("utf-8"))
+            source["snapshot_sha256"] = hashlib.sha256(snapshot.read_bytes()).hexdigest()
+            for record in source["support_records"]:
+                excerpt = record["snapshot_excerpt"]
+                start = text.index(excerpt)
+                record["snapshot_start"] = start
+                record["snapshot_end"] = start + len(excerpt)
+                record["snapshot_excerpt_sha256"] = hashlib.sha256(
+                    excerpt.encode("utf-8")
+                ).hexdigest()
+            external_path.write_text(
+                json.dumps(external, indent=2) + "\n", encoding="utf-8"
+            )
+            errors = TRUST.validate_trust_spine(
+                target, run, ledger, MODULE.validate_schema
+            )
+            self.assertIn(
+                "external source EXT-01 snapshot must use LF-only line endings",
+                errors,
+            )
+
     def test_abstract_can_support_the_exact_reported_result_it_contains(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = self.copy_fixture(tmp)

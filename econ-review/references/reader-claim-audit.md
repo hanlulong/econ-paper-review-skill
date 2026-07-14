@@ -94,7 +94,7 @@ Classify every data, measurement, linkage, sample, or coverage candidate before 
 - `unclear`: the materials do not establish whether the limitation is inherent or how it affects the claim;
 - `not_data_related`.
 
-`inherent_and_properly_bounded` is not an active criticism. Record it as a boundary or strength and remove the candidate. For `inherent_but_claim_exceeds`, criticize the claim scope and propose narrowing or clarification; do not demand unavailable data. For `avoidable_handling`, request only a feasible, decision-relevant repair. Use `unclear` as a bounded disclosure question until the paper or supplied materials resolve it.
+`inherent_and_properly_bounded` is not an active criticism. Record it as a boundary or strength, mark the candidate `refuted`, and omit it from author-facing comments without erasing its disposition. For `inherent_but_claim_exceeds`, criticize the claim scope and propose narrowing or clarification; do not demand unavailable data. For `avoidable_handling`, request only a feasible, decision-relevant repair. Use `unclear` as a bounded disclosure question until the paper or supplied materials resolve it.
 
 Do not recommend new data merely because ideal data would be better. Recommend new data only when the central claim cannot be supported otherwise, and present claim narrowing or retargeting as the alternative.
 

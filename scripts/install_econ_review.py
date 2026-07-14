@@ -38,6 +38,7 @@ GENERATED_FILES = {".econ-review-install.json", ".econ-review-runtime.json"}
 REQUIRED_POPPLER_COMMANDS = ("pdfinfo", "pdftotext", "pdftoppm")
 REVIEW_DESK_BUNDLE = Path("review-viewer/release/review-desk.zip")
 REVIEW_DESK_MANIFEST_NAME = "bundle-manifest.json"
+REVIEW_DESK_WINDOWS_LAUNCHER = "review-desk.cmd"
 REVIEW_DESK_FIRST_PARTY_LICENSE = "app/LICENSE.txt"
 REVIEW_DESK_THIRD_PARTY_NOTICE = "app/THIRD_PARTY_NOTICES.txt"
 REVIEW_DESK_THIRD_PARTY_MANIFEST = "app/third-party-licenses/manifest.json"
@@ -214,7 +215,9 @@ def runtime_default(scope: str, project: Path | None, system: str | None = None)
     system = system or platform.system()
     home = Path.home()
     if system == "Windows":
-        base = environment_path("LOCALAPPDATA", home / "AppData" / "Local")
+        # Microsoft Store Python virtualizes parts of LocalAppData.  A user-home
+        # root is stable for CreateFile and CreateProcess and needs no elevation.
+        return home / ".econ-review" / "runtime"
     elif system == "Darwin":
         base = home / "Library" / "Application Support"
     else:
@@ -229,7 +232,7 @@ def review_desk_default(scope: str, project: Path | None, system: str | None = N
     system = system or platform.system()
     home = Path.home()
     if system == "Windows":
-        base = environment_path("LOCALAPPDATA", home / "AppData" / "Local")
+        return home / ".econ-review" / "review-desk"
     elif system == "Darwin":
         base = home / "Library" / "Application Support"
     else:
@@ -239,6 +242,42 @@ def review_desk_default(scope: str, project: Path | None, system: str | None = N
 
 def runtime_python_path(runtime: Path, system: str | None = None) -> Path:
     return runtime / ("Scripts/python.exe" if (system or platform.system()) == "Windows" else "bin/python")
+
+
+def resolve_runtime_location(
+    runtime: Path,
+    system: str | None = None,
+) -> tuple[Path, Path]:
+    """Return the actual runtime root and interpreter after OS redirection.
+
+    Python's Windows venv builder resolves Store-package file-system redirects
+    for child-process execution.  Repeating that resolution here ensures pip,
+    health checks, and installed agent descriptors all use the executable that
+    Windows will actually launch.
+    """
+
+    system = system or platform.system()
+    expected_python = runtime_python_path(runtime, system)
+    if system != "Windows":
+        return runtime, expected_python
+    actual_python = Path(os.path.realpath(expected_python))
+    if os.path.normcase(str(actual_python)) == os.path.normcase(str(expected_python)):
+        return runtime, expected_python
+    if (
+        actual_python.name.casefold() != "python.exe"
+        or actual_python.parent.name.casefold() != "scripts"
+    ):
+        raise InstallError(
+            "Windows redirected the managed Python interpreter to an unexpected location: "
+            f"{actual_python}"
+        )
+    actual_runtime = actual_python.parent.parent
+    if actual_runtime.name.casefold() != runtime.name.casefold():
+        raise InstallError(
+            "Windows redirected the managed runtime outside its expected directory name: "
+            f"{actual_runtime}"
+        )
+    return actual_runtime, actual_python
 
 
 def requirements_digest(path: Path) -> str:
@@ -251,14 +290,19 @@ def _run_quiet(command: Sequence[str], *, env: dict[str, str] | None = None) -> 
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        encoding="utf-8",
+        errors="replace",
         env=env,
         check=False,
     )
 
 
 def runtime_is_reusable(runtime: Path, source: Path) -> bool:
-    python = runtime_python_path(runtime)
-    marker = runtime / ".econ-review-runtime.json"
+    try:
+        actual_runtime, python = resolve_runtime_location(runtime)
+    except InstallError:
+        return False
+    marker = actual_runtime / ".econ-review-runtime.json"
     requirements = source / "requirements-core.txt"
     if (
         not python.is_file()
@@ -299,9 +343,10 @@ def runtime_is_reusable(runtime: Path, source: Path) -> bool:
 
 
 def ensure_runtime(runtime: Path, source: Path, *, refresh: bool, dry_run: bool) -> Path:
-    python = runtime_python_path(runtime)
+    _actual_runtime, python = resolve_runtime_location(runtime)
     if not refresh and runtime_is_reusable(runtime, source):
-        print(f"Reusing managed Python runtime: {runtime}")
+        actual_runtime, python = resolve_runtime_location(runtime)
+        print(f"Reusing managed Python runtime: {actual_runtime}")
         return python
     if dry_run:
         action = "Would refresh" if runtime.exists() else "Would create"
@@ -315,9 +360,17 @@ def ensure_runtime(runtime: Path, source: Path, *, refresh: bool, dry_run: bool)
     had_previous = runtime.exists()
     if had_previous:
         runtime.rename(backup)
+    created_runtime = runtime
     try:
         subprocess.run([sys.executable, "-m", "venv", str(runtime)], check=True)
-        python = runtime_python_path(runtime)
+        created_runtime, python = resolve_runtime_location(runtime)
+        if created_runtime != runtime:
+            print(
+                "Windows redirected the managed runtime; using and recording its actual location: "
+                f"{created_runtime}"
+            )
+        if not python.is_file():
+            raise InstallError(f"managed Python interpreter was not created: {python}")
         pip_env = os.environ.copy()
         pip_env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
         pip_env["PIP_NO_INPUT"] = "1"
@@ -340,7 +393,7 @@ def ensure_runtime(runtime: Path, source: Path, *, refresh: bool, dry_run: bool)
                 "leaking credentials from package-index configuration"
             )
         _write_json(
-            runtime / ".econ-review-runtime.json",
+            created_runtime / ".econ-review-runtime.json",
             {
                 "schema_version": "1",
                 "requirements_sha256": requirements_digest(source / "requirements-core.txt"),
@@ -350,14 +403,16 @@ def ensure_runtime(runtime: Path, source: Path, *, refresh: bool, dry_run: bool)
         if not runtime_is_reusable(runtime, source):
             raise InstallError("the managed Python runtime failed its dependency health check")
     except BaseException:
-        shutil.rmtree(runtime, ignore_errors=True)
+        shutil.rmtree(created_runtime, ignore_errors=True)
+        if created_runtime != runtime:
+            shutil.rmtree(runtime, ignore_errors=True)
         if had_previous and backup.exists():
             backup.rename(runtime)
         raise
     else:
         if backup.exists():
             shutil.rmtree(backup)
-    print(f"Prepared managed Python runtime: {runtime}")
+    print(f"Prepared managed Python runtime: {created_runtime}")
     return python
 
 
@@ -706,7 +761,67 @@ def review_desk_dispatcher_is_current(root: Path, version: Path, digest: str) ->
     return value == {"digest": digest, "schema_version": "1"}
 
 
-def install_review_desk(bundle: Path, root: Path, *, dry_run: bool) -> Path:
+def review_desk_cmd_bytes(runtime_python: Path) -> bytes:
+    """Build a click-friendly Windows launcher bound to the managed runtime."""
+
+    raw_python = str(runtime_python)
+    if any(character in raw_python for character in ('"', "\r", "\n")):
+        raise InstallError("managed runtime path cannot be represented safely in review-desk.cmd")
+    # Percent signs expand even inside cmd.exe quotes; doubling preserves a
+    # literal percent in an unusual but valid user-owned path.
+    quoted_python = '"' + raw_python.replace("%", "%%") + '"'
+    text = (
+        "@echo off\r\n"
+        "setlocal DisableDelayedExpansion\r\n"
+        "chcp 65001 >nul\r\n"
+        "set PYTHONUTF8=1\r\n"
+        f"{quoted_python} \"%~dp0launch_review_desk.py\" %*\r\n"
+        "exit /b %ERRORLEVEL%\r\n"
+    )
+    return text.encode("utf-8")
+
+
+def install_review_desk_cmd(
+    root: Path,
+    runtime_python: Path,
+    *,
+    dry_run: bool,
+) -> Path:
+    """Install or refresh the Windows dispatcher without touching app bytes."""
+
+    destination = root / REVIEW_DESK_WINDOWS_LAUNCHER
+    expected = review_desk_cmd_bytes(runtime_python)
+    if destination.exists() and (
+        _is_link_or_junction(destination) or not destination.is_file()
+    ):
+        raise InstallError(f"refusing unsafe Review Desk Windows launcher: {destination}")
+    current = destination.is_file() and destination.read_bytes() == expected
+    if dry_run:
+        print(
+            f"Would {'keep current' if current else 'install'} Review Desk Windows launcher: "
+            f"{destination}"
+        )
+    elif current:
+        print(f"Already current Review Desk Windows launcher: {destination}")
+    else:
+        temporary = root / f".review-desk-{uuid.uuid4().hex}.cmd"
+        try:
+            temporary.write_bytes(expected)
+            temporary.replace(destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+        print(f"Installed Review Desk Windows launcher: {destination}")
+    return destination
+
+
+def install_review_desk(
+    bundle: Path,
+    root: Path,
+    *,
+    dry_run: bool,
+    runtime_python: Path | None = None,
+    system: str | None = None,
+) -> Path:
     manifest_bytes, records, digest = verify_review_desk_bundle(bundle)
     if root.exists() and _is_link_or_junction(root):
         raise InstallError(f"refusing linked or junction Review Desk root: {root}")
@@ -765,7 +880,19 @@ def install_review_desk(bundle: Path, root: Path, *, dry_run: bool) -> Path:
         print(f"Installed Review Desk launcher: {launcher}")
     elif not dry_run:
         print(f"Already current Review Desk launcher: {launcher}")
-    print(f"Review Desk launch command: {subprocess.list2cmdline([sys.executable, str(launcher)])}")
+    launcher_python = runtime_python or Path(sys.executable)
+    if (system or platform.system()) == "Windows" and runtime_python is not None:
+        windows_launcher = install_review_desk_cmd(
+            root,
+            runtime_python,
+            dry_run=dry_run,
+        )
+        print(f"Review Desk launch command: {windows_launcher}")
+    else:
+        print(
+            "Review Desk launch command: "
+            + subprocess.list2cmdline([str(launcher_python), str(launcher)])
+        )
     print("Review Desk URL: http://127.0.0.1:48127/")
     return destination
 
@@ -933,7 +1060,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             else environment_path("ECON_REVIEW_DESK_HOME", default_desk_root)
         )
         bundle = (args.review_desk_bundle or repository / REVIEW_DESK_BUNDLE).expanduser().absolute()
-        review_desk_path = install_review_desk(bundle, desk_root, dry_run=args.dry_run)
+        review_desk_path = install_review_desk(
+            bundle,
+            desk_root,
+            dry_run=args.dry_run,
+            runtime_python=runtime_python,
+        )
     if args.dry_run:
         if not args.copy_only or args.check:
             print("Would run the core dependency and Poppler health check.")
@@ -959,6 +1091,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "econ-review" / "scripts"))
+    from cli_io import configure_utf8_stdio
+
+    configure_utf8_stdio()
     try:
         raise SystemExit(main())
     except (InstallError, OSError, subprocess.SubprocessError) as exc:

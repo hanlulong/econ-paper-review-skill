@@ -6,9 +6,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import http.server
+import http.client
 import json
 import mimetypes
+import os
+import shutil
 import socketserver
+import subprocess
 import sys
 import threading
 import urllib.parse
@@ -180,12 +184,91 @@ class LoopbackServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
 
 
+def verified_server_is_running(
+    port: int,
+    inventory: dict[str, tuple[int, str]],
+) -> bool:
+    """Return true only when the occupied port serves this Review Desk shape."""
+
+    expected_size, expected_digest = inventory.get("index.html", (-1, ""))
+    connection = http.client.HTTPConnection(HOST, port, timeout=1.5)
+    try:
+        connection.request("GET", "/")
+        response = connection.getresponse()
+        body = response.read(expected_size + 1 if expected_size >= 0 else 1)
+        return (
+            response.status == 200
+            and response.getheader("Content-Length") == str(expected_size)
+            and len(body) == expected_size
+            and hashlib.sha256(body).hexdigest() == expected_digest
+            and response.getheader("X-Content-Type-Options") == "nosniff"
+            and response.getheader("Cross-Origin-Opener-Policy") == "same-origin"
+            and (response.getheader("Server") or "").startswith("ReviewDesk/1")
+        )
+    except (OSError, http.client.HTTPException):
+        return False
+    finally:
+        connection.close()
+
+
+def port_owner_hint(port: int) -> str | None:
+    """Best-effort PID hint for a conflicting listener; never required to launch."""
+
+    try:
+        if os.name == "nt":
+            result = subprocess.run(
+                ["netstat", "-ano", "-p", "tcp"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=4,
+                check=False,
+            )
+            suffix = f":{port}"
+            for line in result.stdout.splitlines():
+                columns = line.split()
+                if (
+                    len(columns) >= 5
+                    and columns[1].endswith(suffix)
+                    and columns[3].upper() == "LISTENING"
+                    and columns[4].isdigit()
+                ):
+                    return f"PID {columns[4]}"
+        elif shutil.which("lsof"):
+            result = subprocess.run(
+                ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=4,
+                check=False,
+            )
+            pid = result.stdout.strip().splitlines()
+            if pid and pid[0].isdigit():
+                return f"PID {pid[0]}"
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def open_review_desk(url: str) -> None:
+    if not webbrowser.open(url):
+        print(f"The browser did not open automatically. Open {url} manually.", file=sys.stderr)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Launch the installed Review Desk on a stable loopback origin.")
     parser.add_argument("--no-browser", action="store_true", help="do not open the default browser")
     parser.add_argument("--quiet", action="store_true", help="suppress request logs")
     parser.add_argument("--check", action="store_true", help="verify the installed release without serving it")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_PORT,
+        help=f"loopback port (default: {DEFAULT_PORT})",
+    )
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         raise ValueError("port must be between 1 and 65535")
@@ -198,9 +281,17 @@ def main() -> int:
     try:
         server = LoopbackServer((HOST, args.port), ReviewDeskHandler)
     except OSError as exc:
+        url = f"http://{HOST}:{args.port}/"
+        if verified_server_is_running(args.port, inventory):
+            print(f"Review Desk is already verified and running at {url}")
+            if not args.no_browser:
+                open_review_desk(url)
+            return 0
+        owner = port_owner_hint(args.port)
+        owner_detail = f" ({owner})" if owner else ""
         raise RuntimeError(
-            f"could not bind the stable Review Desk origin http://{HOST}:{args.port}/; "
-            "close the process using that port and try again"
+            f"could not bind the Review Desk origin {url}; the port is occupied{owner_detail}. "
+            "Close that process or choose another port with --port."
         ) from exc
     server.inventory = inventory  # type: ignore[attr-defined]
     server.app_root = app_root  # type: ignore[attr-defined]
@@ -209,11 +300,7 @@ def main() -> int:
     print(f"Review Desk verified and available at {url}")
     print("Press Ctrl+C to stop it. Review files remain in the browser and are not uploaded.")
     if not args.no_browser:
-        def open_browser() -> None:
-            if not webbrowser.open(url):
-                print(f"The browser did not open automatically. Open {url} manually.", file=sys.stderr)
-
-        timer = threading.Timer(0.2, open_browser)
+        timer = threading.Timer(0.2, open_review_desk, args=(url,))
         timer.daemon = True
         timer.start()
     try:

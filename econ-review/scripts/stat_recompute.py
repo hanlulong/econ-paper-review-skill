@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from safe_io import strict_json_load  # noqa: E402
+from safe_io import atomic_write_bytes, strict_json_load  # noqa: E402
 
 
 def decimal(value: Any, label: str) -> Decimal:
@@ -139,7 +139,11 @@ def main() -> int:
             raise ValueError("input root must be an object")
         rendered = json.dumps(run(payload), indent=2) + "\n"
         if args.output:
-            args.output.write_text(rendered, encoding="utf-8")
+            atomic_write_bytes(
+                args.output.parent,
+                args.output.name,
+                rendered.encode("utf-8"),
+            )
         else:
             print(rendered, end="")
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
@@ -148,4 +152,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from cli_io import configure_utf8_stdio
+
+    configure_utf8_stdio()
     raise SystemExit(main())

@@ -63,6 +63,14 @@ test("keeps a package explicitly unverified when no receipt is present", async (
 test("rejects malformed receipts, wrong identity or contract, and unsafe artifact paths", async () => {
   const fixture = await packageFixture();
   assert.throws(() => validateFinalizationReceipt({ ...fixture.receipt, extra: true }), /unsupported structure/);
+  assert.equal(
+    validateFinalizationReceipt({ ...fixture.receipt, report_renderer: "reportlab" }).report_renderer,
+    "reportlab",
+  );
+  assert.throws(
+    () => validateFinalizationReceipt({ ...fixture.receipt, report_renderer: "unverified-tex" }),
+    /unsupported report_renderer/,
+  );
   assert.throws(() => validateFinalizationReceipt({
     ...fixture.receipt,
     artifacts: { "../findings.json": "a".repeat(64) },

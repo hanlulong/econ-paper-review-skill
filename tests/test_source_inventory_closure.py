@@ -282,6 +282,154 @@ class SourceInventoryClosureTests(unittest.TestCase):
             self.assertEqual(proposed_by_type["pdf_table"]["state"], "bounded")
             self.assertEqual(proposed_by_type["pdf_figure"]["state"], "bounded")
 
+    def test_proposer_runs_before_coverage_and_uses_canonical_pdf_objects(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            review = Path(temporary)
+            text = "Canonical PDF block."
+            (review / "paper.txt").write_text(text, encoding="utf-8")
+            digest = hashlib.sha256(text.encode()).hexdigest()
+            ingestion = {
+                "pages": [{"page": 1, "status": "extracted"}],
+                "blocks": [{
+                    "id": "SRC-01-PDF-B0001", "page": 1, "kind": "paragraph",
+                    "markdown_start": 0, "markdown_end": len(text), "sha256": digest,
+                }],
+                "tables": [{"id": "SRC-01-PDF-TBL-001", "page": 1}],
+                "figures": [{"id": "SRC-01-PDF-FIG-001", "page": 1}],
+                "equations": [{"id": "SRC-01-PDF-EQ-001", "page": 1}],
+            }
+            write_json(review / "evidence/pdf-ingestion/SRC-01/ingestion.json", ingestion)
+            write_json(review / "evidence/source-manifest.json", {
+                "sources": [{
+                    "id": "SRC-01", "role": "manuscript", "path": "paper.pdf",
+                    "media_type": "application/pdf", "extraction": {
+                        "path": "paper.txt",
+                        "ingestion_manifest_path": "evidence/pdf-ingestion/SRC-01/ingestion.json",
+                    },
+                }],
+                "anchors": [{
+                    "id": "ANC-01", "source_id": "SRC-01", "kind": "text_span",
+                    "start_char": 0, "end_char": len(text), "content_sha256": digest,
+                    "locator": "PDF p. 1, bbox 0,0,10,10, block SRC-01-PDF-B0001",
+                }, {
+                    "id": "ANC-02", "source_id": "SRC-01", "kind": "scope",
+                    "start_char": 0, "end_char": len(text), "content_sha256": digest,
+                    "locator": "Complete authenticated PDF extraction",
+                }],
+            })
+
+            proposal = subprocess.run(
+                [sys.executable, str(PROPOSER), str(review), "SRC-01", "paper"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proposal.returncode, 0, proposal.stderr)
+            payload = json.loads(proposal.stdout)
+            self.assertEqual(payload["coverage_unit_status"], "planned")
+            self.assertEqual(payload["coverage_unit_anchor_ids_to_add"], ["ANC-01", "ANC-02"])
+            rows = {
+                (row["object_type"], row["object_id"]): row
+                for row in payload["source_inventory_rows_to_add"]
+            }
+            self.assertEqual(set(rows), {
+                ("pdf_page", "SRC-01-PDF-P0001"),
+                ("pdf_block", "SRC-01-PDF-B0001"),
+                ("pdf_table", "SRC-01-PDF-TBL-001"),
+                ("pdf_figure", "SRC-01-PDF-FIG-001"),
+                ("pdf_equation", "SRC-01-PDF-EQ-001"),
+            })
+            self.assertEqual(rows[("pdf_page", "SRC-01-PDF-P0001")]["locator"], "PDF page 1")
+            self.assertEqual(
+                rows[("pdf_block", "SRC-01-PDF-B0001")]["locator"],
+                "PDF page 1, block SRC-01-PDF-B0001",
+            )
+            self.assertEqual(
+                rows[("pdf_equation", "SRC-01-PDF-EQ-001")]["locator"],
+                "PDF page 1, pdf equation SRC-01-PDF-EQ-001",
+            )
+            self.assertNotIn("PDF-PAGE", proposal.stdout)
+
+            manifest = json.loads(
+                (review / "evidence/source-manifest.json").read_text(encoding="utf-8")
+            )
+            all_anchors = [*manifest["anchors"], *payload["anchors_to_add"]]
+            write_json(review / "evidence/figures.json", {"figures": []})
+            write_json(review / "evidence/tables.json", {"tables": []})
+            errors: list[str] = []
+            MODULE.validate_source_inventory_closure(
+                review,
+                {"source_inventory": payload["source_inventory_rows_to_add"]},
+                {"SRC-01": manifest["sources"][0]},
+                {anchor["id"]: anchor for anchor in all_anchors},
+                [{
+                    "id": "paper", "source_id": "SRC-01", "type": "section",
+                    "anchor_ids": payload["coverage_unit_anchor_ids_to_add"],
+                }],
+                errors,
+            )
+            self.assertEqual(errors, [])
+
+    def test_pdf_math_fragment_heading_is_explicitly_excluded(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            review = Path(temporary)
+            text = (
+                "## Abstract\nNarrative.\n"
+                "## y w,t\nEquation continuation.\n"
+                "## β convergence\nSubstantive discussion.\n"
+                "## (a) Baseline results\nMain specification.\n"
+                "## (b) Robustness checks\nAlternative specification.\n"
+                "## (i) Introduction\nOpening discussion.\n"
+            )
+            (review / "manuscript.md").write_text(text, encoding="utf-8")
+            digest = hashlib.sha256(text.encode()).hexdigest()
+            write_json(review / "evidence/pdf-ingestion/SRC-01/ingestion.json", {
+                "pages": [], "blocks": [], "tables": [], "figures": [], "equations": [],
+            })
+            write_json(review / "evidence/source-manifest.json", {
+                "sources": [{
+                    "id": "SRC-01", "role": "manuscript", "path": "paper.pdf",
+                    "media_type": "application/pdf", "extraction": {
+                        "path": "manuscript.md",
+                        "ingestion_manifest_path": "evidence/pdf-ingestion/SRC-01/ingestion.json",
+                    },
+                }],
+                "anchors": [{
+                    "id": "ANC-01", "source_id": "SRC-01", "kind": "scope",
+                    "start_char": 0, "end_char": len(text), "content_sha256": digest,
+                    "locator": "Complete authenticated PDF extraction",
+                }],
+            })
+
+            proposal = subprocess.run(
+                [sys.executable, str(PROPOSER), str(review), "SRC-01", "paper"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proposal.returncode, 0, proposal.stderr)
+            rows = {
+                row["object_id"]: row
+                for row in json.loads(proposal.stdout)["source_inventory_rows_to_add"]
+                if row["object_type"] == "outline_heading"
+            }
+            self.assertEqual(rows["SRC-01-OUT-H001"]["state"], "covered")
+            math_row = rows["SRC-01-OUT-H002"]
+            self.assertEqual(math_row["state"], "excluded")
+            self.assertEqual(math_row["anchor_ids"], [])
+            self.assertEqual(math_row["coverage_unit_ids"], [])
+            self.assertIn("math-dominated display fragment", math_row["reason"])
+            greek_heading = rows["SRC-01-OUT-H003"]
+            self.assertEqual(greek_heading["state"], "covered")
+            self.assertTrue(greek_heading["anchor_ids"])
+            self.assertEqual(greek_heading["coverage_unit_ids"], ["paper"])
+            for object_id in (
+                "SRC-01-OUT-H004",
+                "SRC-01-OUT-H005",
+                "SRC-01-OUT-H006",
+            ):
+                with self.subTest(object_id=object_id):
+                    self.assertEqual(rows[object_id]["state"], "covered")
+                    self.assertTrue(rows[object_id]["anchor_ids"])
+
     def test_candidate_command_is_read_only(self) -> None:
         before_manifest = (FIXTURE / "evidence/source-manifest.json").read_bytes()
         before_coverage = (FIXTURE / "evidence/coverage.json").read_bytes()

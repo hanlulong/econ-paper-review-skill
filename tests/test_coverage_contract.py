@@ -61,6 +61,11 @@ def convert_to_quick_without_coverage(target: Path) -> None:
     run_path = target / "run.json"
     run = json.loads(run_path.read_text(encoding="utf-8"))
     run["mode"] = "quick"
+    run["requested_mode"] = "quick"
+    run["delivered_mode"] = "quick"
+    run["mode_transition"] = "none"
+    run["transition_reason"] = None
+    run["transition_source_review_id"] = None
     write_json(run_path, run)
     for relative in ("evidence/coverage.json", "evidence/coverage.md"):
         (target / relative).unlink()
@@ -73,6 +78,36 @@ def convert_to_quick_without_coverage(target: Path) -> None:
     ]
     write_json(manifest_path, manifest)
     resign_quick(target)
+
+
+def sync_candidate_discovery_scope(target: Path) -> None:
+    """Keep fixture-only discovery passes closed after adding units or burdens."""
+
+    run = json.loads((target / "run.json").read_text(encoding="utf-8"))
+    coverage_path = target / "evidence" / "coverage.json"
+    coverage = json.loads(coverage_path.read_text(encoding="utf-8"))
+    candidates_path = target / "evidence" / "candidates.json"
+    candidates = json.loads(candidates_path.read_text(encoding="utf-8"))
+
+    unit_ids = [
+        row["id"]
+        for row in coverage["units"]
+        if row.get("status") != "not_applicable"
+    ]
+    burden_ids = [
+        row["id"]
+        for row in run["activated_burdens"]
+        if row.get("status") == "active"
+    ]
+    for discovery_pass in candidates["passes"]:
+        if discovery_pass.get("status") == "completed":
+            discovery_pass["coverage_unit_ids"] = unit_ids
+            discovery_pass["burden_ids"] = burden_ids
+
+    final_round = coverage["second_sweep"]["rounds"][-1]
+    final_round["coverage_unit_ids"] = unit_ids
+    write_json(candidates_path, candidates)
+    write_json(coverage_path, coverage)
 
 
 def add_replication_package(target: Path, state: str) -> None:
@@ -198,6 +233,7 @@ def add_replication_package(target: Path, state: str) -> None:
         payload[owner]["coverage_unit_ids"].extend(replication_unit_ids)
         write_json(path, payload)
 
+    sync_candidate_discovery_scope(target)
     result = subprocess.run(
         [sys.executable, str(FINALIZER), str(target)],
         capture_output=True,
@@ -418,6 +454,7 @@ class CoverageContractTests(unittest.TestCase):
                 payload = json.loads(path.read_text(encoding="utf-8"))
                 payload[owner]["coverage_unit_ids"].append("data-dictionary")
                 write_json(path, payload)
+            sync_candidate_discovery_scope(target)
             result = subprocess.run(
                 [sys.executable, str(FINALIZER), str(target)],
                 capture_output=True,

@@ -76,6 +76,50 @@ test("rejects duplicate computation IDs and malformed provenance metadata", () =
   assert.throws(() => validateReviewComputations({ ...base, computations: [{ ...computation, artifact_path: "../result.json" }] }), /invalid provenance/);
 });
 
+test("accepts schema 0.2 finding-linked and audit-only computations", () => {
+  const findingLinked = validateReviewComputations({
+    schema_version: "0.2",
+    review_id: "synthetic-valid-001",
+    computations: [{
+      ...computation,
+      audit_links: [{ kind: "analytical_entry", id: "ANA-ALGEBRA-01" }],
+    }],
+  });
+  assert.doesNotThrow(() => validateReviewComputationLinks(linkedLedger, findingLinked, sourceManifest));
+
+  const auditOnly = validateReviewComputations({
+    schema_version: "0.2",
+    review_id: "synthetic-valid-001",
+    computations: [{
+      ...computation,
+      finding_ids: [],
+      audit_links: [{ kind: "magnitude_assessment", id: "MAG-01" }],
+    }],
+  });
+  assert.doesNotThrow(() => validateReviewComputationLinks(
+    { ...linkedLedger, findings: [{ id: "LOGIC-01", evidence: [] }] },
+    auditOnly,
+    sourceManifest,
+  ));
+
+  assert.throws(() => validateReviewComputations({
+    schema_version: "0.2",
+    review_id: "synthetic-valid-001",
+    computations: [{ ...computation, finding_ids: [], audit_links: [] }],
+  }), /must link a finding or audit row/);
+  assert.throws(() => validateReviewComputations({
+    schema_version: "0.2",
+    review_id: "synthetic-valid-001",
+    computations: [{
+      ...computation,
+      audit_links: [
+        { kind: "analytical_entry", id: "ANA-ALGEBRA-01" },
+        { kind: "analytical_entry", id: "ANA-ALGEBRA-01" },
+      ],
+    }],
+  }), /duplicate audit links/);
+});
+
 test("checks computation review, finding, evidence, and input-anchor joins", () => {
   const checked = validateReviewComputations({ schema_version: "0.1", review_id: linkedLedger.review_id, computations: [computation] });
   assert.doesNotThrow(() => validateReviewComputationLinks(linkedLedger, checked, sourceManifest));

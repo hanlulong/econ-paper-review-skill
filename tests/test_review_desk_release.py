@@ -145,6 +145,31 @@ class ReviewDeskReleaseTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=5)
 
+    def test_launcher_recognizes_an_already_running_verified_server(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            installed = self.install_release(Path(tmp) / "desk")
+            inventory = LAUNCHER.load_inventory(installed)
+            server = LAUNCHER.LoopbackServer((LAUNCHER.HOST, 0), LAUNCHER.ReviewDeskHandler)
+            server.inventory = inventory
+            server.app_root = installed / "app"
+            server.quiet = True
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                self.assertTrue(
+                    LAUNCHER.verified_server_is_running(server.server_address[1], inventory)
+                )
+                mismatched = dict(inventory)
+                size, digest = mismatched["index.html"]
+                mismatched["index.html"] = (size + 1, digest)
+                self.assertFalse(
+                    LAUNCHER.verified_server_is_running(server.server_address[1], mismatched)
+                )
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
+
     def test_launcher_detects_installed_file_tampering(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             installed = self.install_release(Path(tmp) / "desk")

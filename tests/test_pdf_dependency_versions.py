@@ -6,6 +6,7 @@ import argparse
 import contextlib
 import importlib.util
 import io
+import os
 import sys
 import tempfile
 import types
@@ -77,8 +78,15 @@ class RequirementManifestTests(unittest.TestCase):
             escape = manifests / "escape.txt"
             escape.write_text("-r ../outside.txt\n", encoding="utf-8")
             linked = manifests / "linked.txt"
-            linked.symlink_to(outside)
-            for path in (escape, linked):
+            paths = [escape]
+            try:
+                linked.symlink_to(outside)
+            except OSError:
+                if os.name != "nt":
+                    raise
+            else:
+                paths.append(linked)
+            for path in paths:
                 with self.subTest(path=path.name):
                     with self.assertRaises(VERSIONS.DependencyContractError):
                         VERSIONS.load_manifest(path)

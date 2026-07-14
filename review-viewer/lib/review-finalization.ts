@@ -5,8 +5,10 @@ export const FINALIZATION_EXCLUDED_ROOT_PATHS = new Set([
   "review-actions.json",
 ]);
 
-const RECEIPT_KEYS = new Set(["schema_version", "review_id", "contract_version", "artifacts", "gates"]);
+const REQUIRED_RECEIPT_KEYS = new Set(["schema_version", "review_id", "contract_version", "artifacts", "gates"]);
+const RECEIPT_KEYS = new Set([...REQUIRED_RECEIPT_KEYS, "report_renderer"]);
 const RECEIPT_VERSIONS = new Set(["0.1", "0.2", "0.3"]);
+const REPORT_RENDERERS = new Set(["reportlab", "latexmk-lualatex", "lualatex", "tectonic"]);
 const FINALIZATION_GATES = new Set([
   "source_integrity",
   "source_ingestion",
@@ -29,6 +31,7 @@ export type FinalizationReceipt = {
   schema_version: "0.1" | "0.2" | "0.3";
   review_id: string;
   contract_version: "0.4";
+  report_renderer?: "reportlab" | "latexmk-lualatex" | "lualatex" | "tectonic";
   artifacts: Record<string, string>;
   gates: string[];
 };
@@ -63,7 +66,7 @@ export function isFinalizationArtifactPath(path: string) {
 /** Validate the complete browser-facing finalization receipt contract. */
 export function validateFinalizationReceipt(value: unknown): FinalizationReceipt {
   if (!isRecord(value)
-    || Object.keys(value).length !== RECEIPT_KEYS.size
+    || Array.from(REQUIRED_RECEIPT_KEYS).some((key) => !Object.hasOwn(value, key))
     || Object.keys(value).some((key) => !RECEIPT_KEYS.has(key))) {
     throw new Error("finalization.json has an unsupported structure");
   }
@@ -75,6 +78,11 @@ export function validateFinalizationReceipt(value: unknown): FinalizationReceipt
   }
   if (value.contract_version !== "0.4") {
     throw new Error("finalization.json does not declare review contract 0.4");
+  }
+  if (value.report_renderer !== undefined && (
+    typeof value.report_renderer !== "string" || !REPORT_RENDERERS.has(value.report_renderer)
+  )) {
+    throw new Error("finalization.json has an unsupported report_renderer");
   }
   if (!isRecord(value.artifacts) || !Object.keys(value.artifacts).length) {
     throw new Error("finalization.json has no artifact inventory");
@@ -100,13 +108,17 @@ export function validateFinalizationReceipt(value: unknown): FinalizationReceipt
     || new Set(value.gates).size !== value.gates.length) {
     throw new Error("finalization.json has invalid or duplicate gates");
   }
-  return {
+  const receipt: FinalizationReceipt = {
     schema_version: value.schema_version as FinalizationReceipt["schema_version"],
     review_id: value.review_id,
     contract_version: "0.4",
     artifacts,
     gates: [...value.gates] as string[],
   };
+  if (value.report_renderer !== undefined) {
+    receipt.report_renderer = value.report_renderer as FinalizationReceipt["report_renderer"];
+  }
+  return receipt;
 }
 
 export function expectedFinalizationGates(options: {

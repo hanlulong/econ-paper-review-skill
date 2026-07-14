@@ -9,6 +9,7 @@ import json
 import os
 import re
 import stat
+import sys
 import tempfile
 import unicodedata
 import zipfile
@@ -627,4 +628,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "econ-review" / "scripts"))
+    from cli_io import configure_utf8_stdio
+
+    configure_utf8_stdio()
     raise SystemExit(main())

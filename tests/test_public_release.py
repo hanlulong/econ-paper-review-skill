@@ -35,6 +35,9 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertIn("review-viewer/package.json", paths)
         self.assertIn("review-viewer/release/review-desk.zip", paths)
         self.assertIn("review-viewer/scripts/launch_review_desk.py", paths)
+        self.assertIn("docs/images/review-desk.gif", paths)
+        self.assertIn("docs/sample-review/demo-paper.pdf", paths)
+        self.assertIn("docs/sample-review/paper-review.pdf", paths)
         self.assertIn("tests/fixtures/valid-review/report.md", paths)
         self.assertIn("scripts/public-release-files.json", paths)
         for private in ("DESIGN.md", "HANDOFF.md", "PROJECT-REVIEW.md", "research", "test_paper2"):
@@ -236,7 +239,12 @@ class PublicReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "already exists"):
                 MODULE.build_zip(ROOT, target, files)
             target.unlink()
-            target.symlink_to(Path(tmp) / "elsewhere.zip")
+            try:
+                target.symlink_to(Path(tmp) / "elsewhere.zip")
+            except OSError:
+                if os.name == "nt":
+                    self.skipTest("symlink creation requires Windows Developer Mode or elevated privileges")
+                raise
             with self.assertRaisesRegex(ValueError, "already exists"):
                 MODULE.build_zip(ROOT, target, files)
 
@@ -254,6 +262,10 @@ class PublicReleaseTests(unittest.TestCase):
         return root
 
 
+@unittest.skipIf(
+    os.name == "nt",
+    "install.sh exercises the POSIX entry point; Windows installation is covered by test_install_econ_review.py",
+)
 class InstallerTests(unittest.TestCase):
     def run_installer(
         self,
