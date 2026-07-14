@@ -10,9 +10,6 @@
 
 *Built for economics. Also works well for finance, accounting, political economy, and other social science papers that rest on data, causal inference, or formal models.*
 
-![Review Desk opening a referee report: recommendation, report, and the comment queue](docs/images/review-desk-overview.png)
-*The optional Review Desk viewer opening a finished review — here, the [sample demonstration review](docs/sample-review/paper-review.pdf).*
-
 ## What you get
 
 A finished review lands in a clean `review/` folder next to your paper:
@@ -66,7 +63,7 @@ python3 scripts/install_econ_review.py --dry-run --global --all --with-review-de
 python3 scripts/install_econ_review.py --global --all --with-review-desk
 ```
 
-On native Windows, replace `python3` with the machine's working Python 3.10+ command (normally `python`) and use PowerShell path syntax; the optional `py` launcher is not required. If a compatible, working LuaLaTeX or Tectonic renderer is available, the report uses it; otherwise it uses the maintained built-in PDF renderer. Review Desk is prebuilt and needs no Node.js or npm. See [docs/INSTALL.md](docs/INSTALL.md) for skill-only, Claude-only, Codex-only, and project-local installs.
+On native Windows, run `python scripts\install_econ_review.py --global --all --with-review-desk` in PowerShell. Use the machine's working Python 3.10+ command; the optional `py` launcher is not required. If a compatible, working LuaLaTeX or Tectonic renderer is available, the report uses it; otherwise it uses the maintained built-in PDF renderer. Review Desk is prebuilt and needs no Node.js or npm. See [docs/INSTALL.md](docs/INSTALL.md) for skill-only, Claude-only, Codex-only, and project-local installs.
 
 </details>
 
@@ -128,15 +125,7 @@ A local web viewer that turns a long review into a decided, trackable revision p
 3. **Hand off the plan.** The Desk assembles your decisions into a prioritized to-do list and a structured response template for your agents.
 4. **Close the loop.** The next review round checks every carried decision and runs a fresh full-paper sweep for new problems.
 
-```mermaid
-flowchart LR
-    P([Your paper]) --> R[Referee report<br/>+ comments]
-    R --> W[Review Desk<br/>you decide each comment]
-    W -->|to-do list| A[Your agents<br/>revise the paper]
-    A -->|next review round| R
-```
-
-![Working through one comment in Review Desk: evidence, suggestions, and the decision bar](docs/images/review-desk-comment.png)
+![Review workflow: your paper becomes a referee report, you decide each comment in Review Desk, your agents revise from the to-do list, and the next round rechecks every decision](docs/images/review-desk-flow.png)
 
 Everything stays on your machine — no uploads or accounts.
 
