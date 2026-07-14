@@ -132,6 +132,13 @@ class TrustSpineTests(unittest.TestCase):
                 SAFE_IO.atomic_write_json(root, "artifact.json", {"value": float("nan")})
             self.assertEqual(destination.read_text(encoding="utf-8"), '{"value":1}\n')
 
+    def test_windows_atomic_write_skips_unsupported_directory_fsync(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(SAFE_IO.os, "name", "nt"), \
+                mock.patch.object(SAFE_IO.os, "open") as opened:
+            SAFE_IO._fsync_parent_directory(Path(tmp))
+            opened.assert_not_called()
+
     def test_review_validator_rejects_duplicate_json_keys(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = self.copy_fixture(tmp)
@@ -392,6 +399,7 @@ class TrustSpineTests(unittest.TestCase):
         for relative, required_version in (
             ("evidence/claims.json", "0.2"),
             ("evidence/analytical-audit.json", "0.2"),
+            ("evidence/external-sources.json", "0.4"),
             ("evidence/writing.json", "0.4"),
         ):
             with self.subTest(relative=relative), tempfile.TemporaryDirectory() as tmp:
@@ -848,8 +856,10 @@ class TrustSpineTests(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("finding_id: WRT-01", (target / "writing-report.md").read_text(encoding="utf-8"))
-            self.assertIn("### WRT-01:", (target / "fix-plan.md").read_text(encoding="utf-8"))
+            self.assertIn("finding_id: WRT-01", (target / "editing-comments.md").read_text(encoding="utf-8"))
+            plan = (target / "fix-plan.md").read_text(encoding="utf-8")
+            self.assertIn("<!-- finding_id: WRT-01 -->", plan)
+            self.assertNotIn("### WRT-01:", plan)
             verification = json.loads((target / "evidence" / "verification.json").read_text(encoding="utf-8"))
             self.assertIn("WRT-01", {row["finding_id"] for row in verification["records"]})
             self.assertEqual(MODULE.validate_review(target), [])
@@ -859,7 +869,7 @@ class TrustSpineTests(unittest.TestCase):
             target = self.copy_fixture(tmp)
             tracked = [
                 "run.json", "review-manifest.json", "README.md", "report.md",
-                "writing-report.md", "fix-plan.md", "evidence/verification.md",
+                "editing-comments.md", "fix-plan.md", "evidence/verification.md",
                 "evidence/coverage.md", "evidence/sources.md", "finalization.json",
             ]
             before = {relative: (target / relative).read_bytes() for relative in tracked}
@@ -901,7 +911,7 @@ class TrustSpineTests(unittest.TestCase):
                 text=True,
             )
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("symbolic-link destination", result.stderr)
+            self.assertIn("link or junction destination", result.stderr)
             self.assertEqual(outside.read_text(encoding="utf-8"), "do not overwrite\n")
 
     @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
@@ -917,7 +927,7 @@ class TrustSpineTests(unittest.TestCase):
                 text=True,
             )
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("may not contain symbolic links", result.stderr)
+            self.assertIn("may not contain links or junctions", result.stderr)
 
 
 if __name__ == "__main__":

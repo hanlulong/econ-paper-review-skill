@@ -88,7 +88,7 @@ def validate(path: Path) -> list[str]:
                 errors.append(f"entries[{index}] updated_at precedes final status history")
             if updated_at > exported_at:
                 errors.append(f"entries[{index}] updated_at is later than exported_at")
-            if payload.get("schema_version") == "0.3":
+            if payload.get("schema_version") in {"0.3", "0.4"}:
                 events = entry["events"]
                 event_ids = [event["event_id"] for event in events]
                 all_event_ids.extend(event_ids)
@@ -100,6 +100,8 @@ def validate(path: Path) -> list[str]:
                 event_times: list[datetime] = []
                 replay_disposition = "open"
                 replay_note = ""
+                replay_priority: str | None = None
+                replay_reviewed = False
                 replay_history: list[dict[str, str]] = []
                 for event_index, event in enumerate(events):
                     parent = event.get("parent_event_id")
@@ -118,6 +120,10 @@ def validate(path: Path) -> list[str]:
                         replay_history.append({"disposition": replay_disposition, "at": event["at"]})
                     if "note" in event:
                         replay_note = event["note"] or ""
+                    if event.get("type") == "priority_changed":
+                        replay_priority = event["user_priority"]
+                    if event.get("type") == "reviewed_changed":
+                        replay_reviewed = event["reviewed"]
                 if event_times != sorted(event_times):
                     errors.append(f"entries[{index}] events are not chronological")
                 if event_times and event_times[-1] > exported_at:
@@ -126,6 +132,15 @@ def validate(path: Path) -> list[str]:
                     errors.append(f"entries[{index}] disposition differs from replayed events")
                 if entry["response_note"] != replay_note:
                     errors.append(f"entries[{index}] response_note differs from replayed events")
+                if payload.get("schema_version") == "0.4":
+                    if entry["user_priority"] != replay_priority:
+                        errors.append(f"entries[{index}] user_priority differs from replayed events")
+                    if entry["reviewed"] != replay_reviewed:
+                        errors.append(f"entries[{index}] reviewed differs from replayed events")
+                    if entry["disposition"] in {"not_relevant", "not_addressable"} and not entry["reviewed"]:
+                        errors.append(
+                            f"entries[{index}] excluded disposition must be marked reviewed"
+                        )
                 if entry["status_history"] != replay_history:
                     errors.append(f"entries[{index}] status_history differs from replayed events")
                 if events and entry["updated_at"] != events[-1]["at"]:

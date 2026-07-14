@@ -8,12 +8,17 @@ import {
 } from "./review-actions.ts";
 import { parseStrictJson } from "./strict-json.ts";
 
-export const REVIEW_ACTION_STORAGE_VERSION = 3;
+export const REVIEW_ACTION_STORAGE_VERSION = 4;
+const PREVIOUS_FINGERPRINT_STORAGE_VERSION = 3;
 const REVIEW_ID_ONLY_STORAGE_VERSION = 2;
 const LEGACY_WORKSPACE_STORAGE_VERSION = 1;
 
 export type ReviewActionStorage = Pick<Storage, "length" | "key" | "getItem" | "setItem" | "removeItem">;
-export type StoredActionRestore = { entries: Record<string, ReviewActionEntry>; warning: string };
+export type StoredActionRestore = {
+  entries: Record<string, ReviewActionEntry>;
+  warning: string;
+  rereview_required_finding_ids: string[];
+};
 
 export function reviewActionStoragePrefix(reviewId: string) {
   // Encode the component so clearing review "a" cannot match review "a:b".
@@ -72,6 +77,8 @@ export function restoreBrowserReviewActions(
   try {
     const keys = storageKeys(storage);
     const archivedCurrentKeys = keys.filter((key) => key.startsWith(currentPrefix) && key !== exactKey);
+    const previousPrefix = `review-desk:v${PREVIOUS_FINGERPRINT_STORAGE_VERSION}:${encodeURIComponent(current.review_id)}:`;
+    const previousKeys = keys.filter((key) => key.startsWith(previousPrefix));
     const exact = storage.getItem(exactKey);
     if (exact) {
       const result = reconcileReviewActions(
@@ -80,10 +87,11 @@ export function restoreBrowserReviewActions(
       );
       return {
         entries: result.entries,
+        rereview_required_finding_ids: result.rereview_required_finding_ids,
         warning: joinWarnings([
           result.warnings.map((warning) => warning.message).join(" "),
-          archivedCurrentKeys.length
-            ? `${archivedCurrentKeys.length} prior ledger action snapshot${archivedCurrentKeys.length === 1 ? " remains" : "s remain"} archived in this browser under the original fingerprint${archivedCurrentKeys.length === 1 ? "" : "s"}; unmatched history has not been erased.`
+          archivedCurrentKeys.length + previousKeys.length
+            ? `${archivedCurrentKeys.length + previousKeys.length} prior ledger action snapshot${archivedCurrentKeys.length + previousKeys.length === 1 ? " remains" : "s remain"} archived in this browser under the original fingerprint${archivedCurrentKeys.length + previousKeys.length === 1 ? "" : "s"}; unmatched history has not been erased.`
             : undefined,
         ]),
       };
@@ -103,13 +111,28 @@ export function restoreBrowserReviewActions(
         unreadableKeys.push(key);
       }
     }
+    for (const key of previousKeys) {
+      const value = storage.getItem(key);
+      if (!value) continue;
+      try {
+        priorPayloads.push({
+          payload: parseStoredPayload(value, current.review_id, key.slice(previousPrefix.length)),
+          key,
+        });
+      } catch {
+        unreadableKeys.push(key);
+      }
+    }
 
     const versionTwoKey = `review-desk:v${REVIEW_ID_ONLY_STORAGE_VERSION}:${current.review_id}`;
     const versionTwo = storage.getItem(versionTwoKey);
     if (versionTwo) {
       try {
         priorPayloads.push({
-          payload: parseStoredPayload(versionTwo, current.review_id, current.review_fingerprint),
+          // Review-ID-only storage cannot establish that its actions belong to
+          // the current findings fingerprint. Treat a raw legacy map as a
+          // prior round so carried actions reopen safely.
+          payload: parseStoredPayload(versionTwo, current.review_id, "legacy-review-id-only"),
           key: versionTwoKey,
         });
       } catch {
@@ -126,6 +149,7 @@ export function restoreBrowserReviewActions(
       const result = reconcileReviewActions(newestPrior.payload, current);
       return {
         entries: result.entries,
+        rereview_required_finding_ids: result.rereview_required_finding_ids,
         warning: joinWarnings([
           "Actions from the most recent prior ledger snapshot were reconciled by exact stable finding ID. The complete prior payload remains archived in this browser under its original key, so unmatched history was not erased.",
           result.warnings.map((warning) => warning.message).join(" "),
@@ -149,6 +173,7 @@ export function restoreBrowserReviewActions(
       const allowed = new Set(current.finding_ids);
       return {
         entries: Object.fromEntries(Object.entries(entries).filter(([findingId]) => allowed.has(findingId))),
+        rereview_required_finding_ids: [],
         warning: joinWarnings([
           "Actions for this exact legacy ledger were migrated to the current handoff format; the legacy payload remains archived.",
           legacyKeys.length > 1
@@ -163,19 +188,22 @@ export function restoreBrowserReviewActions(
     if (legacyKeys.length) {
       return {
         entries: {},
+        rereview_required_finding_ids: [],
         warning: "Older legacy actions exist for this review ID, but none match the current ledger fingerprint. They remain archived; export and import them explicitly to reconcile exact finding IDs.",
       };
     }
     if (unreadableKeys.length) {
       return {
         entries: {},
+        rereview_required_finding_ids: [],
         warning: `${unreadableKeys.length} archived action snapshot${unreadableKeys.length === 1 ? " could" : "s could"} not be restored safely and ${unreadableKeys.length === 1 ? "was" : "were"} left untouched.`,
       };
     }
-    return { entries: {}, warning: "" };
+    return { entries: {}, warning: "", rereview_required_finding_ids: [] };
   } catch (error) {
     return {
       entries: {},
+      rereview_required_finding_ids: [],
       warning: `Saved browser actions could not be restored safely and were left untouched: ${error instanceof Error ? error.message : "invalid local data"}`,
     };
   }
@@ -195,11 +223,13 @@ export function persistBrowserReviewActions(
 /** Delete every browser-side action snapshot for one review, including legacy formats. */
 export function clearBrowserReviewActions(storage: ReviewActionStorage, reviewId: string): number {
   const currentPrefix = reviewActionStoragePrefix(reviewId);
+  const previousPrefix = `review-desk:v${PREVIOUS_FINGERPRINT_STORAGE_VERSION}:${encodeURIComponent(reviewId)}:`;
   const legacyPrefix = `review-desk:v${LEGACY_WORKSPACE_STORAGE_VERSION}:${reviewId}:`;
   const exactKeys = new Set([`review-desk:v${REVIEW_ID_ONLY_STORAGE_VERSION}:${reviewId}`]);
   const keys = storageKeys(storage).filter((key) => (
     exactKeys.has(key)
     || key.startsWith(currentPrefix)
+    || key.startsWith(previousPrefix)
     // Legacy v1 stored a SHA-256 ledger fingerprint after the final colon.
     // Checking the suffix prevents review "a" from clearing review "a:b".
     || (key.startsWith(legacyPrefix) && /^[a-f0-9]{64}$/.test(key.slice(legacyPrefix.length)))

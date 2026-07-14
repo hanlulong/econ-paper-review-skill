@@ -1,6 +1,6 @@
 # Detailed-Comment House Style
 
-Use the v0.3/v0.4 issue-first, status-last presentation in both detailed-comment sections: substance findings in `report.md` and writing findings in `writing-report.md`. Existing v0.1 and v0.2 reviews retain their legacy formats. Make the reasoning reader-centered and recognizably useful to an author rather than diagnosis-only feedback.
+Use the issue-first, status-last presentation in both detailed-comment sections: substance findings in `report.md` and editing findings in `editing-comments.md`. Make the reasoning reader-centered and recognizably useful to an author rather than diagnosis-only feedback. Current author-facing capacities are 100 substantive and 30 editing comments; they never justify shortening, padding, merging unrelated issues, stopping discovery, or omitting a verified finding.
 
 ## Contents
 
@@ -16,13 +16,15 @@ Use these visible fields exactly once and in this order:
 
 1. `Issue`: a one-sentence paper-specific diagnosis matching the ledger.
 2. `Relevant text`: the shortest sufficient evidence. Render verbatim passages and normalized source transcriptions as block quotes. Render reviewer observations, figure/table observations, computations, comparisons, and checked absences as unquoted evidence notes. Do not expose internal bracket labels such as `[Reviewer observation]` in the report. Canonical `representation` metadata preserves provenance; never present reviewer prose or an omission as manuscript text.
-3. `Concern`: what the evidence establishes, where it stops, and the paper-specific consequence. Do not repeat the issue.
-4. `Suggestions`: the minimum repair first, stated directly. Add one decisive check only if the broader claim is retained; label optional strengthening as optional.
+3. `Concern`: explain, in complete sentences, what the evidence establishes, where it stops, the missing logical step, and the paper-specific consequence. Do not merely rename or repeat the issue.
+4. `Suggestions`: give the minimum repair first, explain how it resolves the concern, and say what the proposed check would teach the reader if the broader claim is retained. Label optional strengthening as optional.
 5. `Status`: `[Pending]`, always last.
 
 The visible merge is presentational. Keep `fix.what`, `fix.how`, and `fix.resolved_when` distinct in canonical state. Also store `evidence_boundary`, `minimum_repair`, one `display_evidence_id`, and any `related_evidence_ids` or `related_locations`. Multi-location conflicts must expose the other checked locations in a compact sentence. Do not copy the same recommendation into multiple fields.
 
 Leave a blank line after the block quote. This is a rendering requirement, not cosmetic: without it, CommonMark may absorb the following bold label into the quotation.
+
+For a claimed contradiction, retain the exact operative words on both sides—especially direction, rounding language, qualifiers, domain, timing, units, and benchmark. Do not replace `rounded down` with `rounded`, or make an equivalent compression, when the omitted word changes the diagnosis. If exact wording defeats the contradiction, recast only the narrower concern that remains or delete the comment.
 
 ## Reader-decision style
 
@@ -36,6 +38,12 @@ Write each substantive comment to answer five questions:
 
 Prefer the affirmative boundary: `The current evidence establishes X; it does not yet establish Y.` Credit an existing safeguard only when it materially narrows the consequence or repair. Do not invent an author motive or hypothetical defense.
 
+Make every comment self-contained. Do not assume the author has read the ledger, another comment, or an audit appendix. Walk through the reasoning in the order a reader encounters it: what the paper says, what follows from that evidence, which step does not follow, why that changes the interpretation, and how the proposed revision closes the gap. Critical and major comments normally need three to six clear sentences in `Concern` and enough explanation in `Suggestions` to make the repair executable; minor editing comments may remain compact. These are guides to completeness, not word caps or a template to pad. When a recommendation calls for a diagnostic, explain what it tests and how the plausible outcomes would change the paper's claim. The author should never have to infer why a requested exercise matters.
+
+Order comments by reader priority, not by where they happen to appear in the manuscript. Assign `importance_rank` by severity first (`critical`, `major`, `minor`, `info`), then decision role, the consequence for the paper, and the value of a feasible repair. Use manuscript position only to break a genuine tie. A critical finding is a verified issue that can invalidate or make uninterpretable a central claim and could plausibly drive rejection; classify it as potentially dispositive and reviewer P0. This is a substantive judgment, not a keyword, occurrence-count, or quota rule. Both Markdown reports and the viewer must preserve this ordering by default. The author's own P0/P1/P2 work choices remain separate.
+
+Write like a thoughtful human referee speaking to an economist. Use natural transitions, varied cadence, and ordinary words where they preserve precision. Do not expose workflow language such as `canonical record`, `verification passed`, `coverage unit`, `finding ID`, `audit gate`, or `the checked manuscript` in author-facing prose. Avoid telegraphic noun strings, canned AI signposting, and identical sentence patterns across comments. A technically correct comment still fails the style check if the author must reverse-engineer the reasoning.
+
 ## Clarity register — non-specialist economist test
 
 Write for a competent economist who does not work in the paper's method or setting. Preserve the technical content, but make the logic recoverable in one reading:
@@ -44,23 +52,13 @@ Write for a competent economist who does not work in the paper's method or setti
 - Expand a non-obvious acronym introduced by the reviewer at its first use in each comment, then use the acronym consistently. If the quoted manuscript passage contains the acronym, gloss it in the author-facing prose before relying on it. Do not manufacture expansions for mathematical symbols, exhibit labels, standard units, or an acronym that appears only inside the verbatim quote.
 - Give a short functional gloss for a load-bearing specialist term when an economist outside the subfield may not know what inference it controls. Explain what a named test or estimator checks before recommending it. Do not turn the comment into a glossary, and do not force a one-method-per-sentence rule when a comparison among methods is itself the issue.
 - State the consequence in paper-specific terms: name the estimate, sign, proposition, counterfactual, exhibit, population, or interpretation that could change, or say what a reader could wrongly conclude. Avoid stopping at abstractions such as `threatens identification` or `changes the estimand`.
-- State each repair once. Merge strategic direction and implementation into one sequence; do not concatenate two versions of the same recommendation.
+- State each repair once. Merge strategic direction and implementation into one sequence; do not concatenate two versions of the same recommendation. Explain why the change is sufficient and, when a diagnostic is requested, how each possible result would affect the claim.
 
 The validator enforces only high-signal surface failures: prohibited meta-scaffolding at the start of `Concern` or `Suggestions`, malformed acronym capitalization, and near-duplicate sentences within `Suggestions`. Acronym and jargon adequacy remains a semantic verification pass because a universal hard-coded dictionary would misclassify field-standard vocabulary, manuscript-defined terms, symbols, and quoted text across empirical and theoretical papers.
 
 ## Major technical comment
 
-The fixed fields provide scanability. Within `Concern` and `Suggestions`, use one to three cohesive paragraphs only when the issue needs more explanation:
-
-```markdown
-**Concern**: The paper establishes [X], but not [Y], because [specific gap, contradiction, or unreported sensitivity]. [Affected result, proposition, counterfactual, or interpretation.]
-
-**Suggestions**: [Minimum repair.] If the broader claim is retained, [one decisive analysis, derivation, or validation check]. [Optional strengthening, only if useful.]
-
-**Status**: [Pending]
-```
-
-The structural labels are mandatory and therefore exempt from repeated-label lint. Vary paragraph count, openings, and sentence cadence inside the fields. Do not repeat any nontechnical sentence across three comments. Resolution conditions remain paper-specific observables in the ledger rather than generic report boilerplate.
+The fixed fields provide scanability, not an excuse for compressed reasoning. Use cohesive paragraphs inside `Concern` and `Suggestions` whenever the issue needs explanation. State the affirmative evidence boundary, show the missing link, name the affected object, give the minimum repair, and—only if the broader claim remains—one decisive check. The labels are mandatory and exempt from repeated-label lint. Vary paragraph count, openings, and cadence; do not repeat any nontechnical sentence across three comments. Keep resolution conditions as paper-specific observables in the ledger, not report boilerplate.
 
 ## Theory, structural, and macro variants
 
@@ -72,24 +70,9 @@ For macro work, name the aggregate object, accounting or equilibrium relation, s
 
 ## Minor correction
 
-For an objective local reporting, citation, notation, or copyediting issue, write one compact paragraph:
+For an objective local reporting, citation, notation, or copyediting issue, use the same fields in one compact paragraph and give the direct correction or exact replacement. Do not add a defense, rebuttal, robustness battery, or resolution heading to a mechanical correction.
 
-```markdown
-**Issue**: [Exact local error.]
-
-**Relevant text**:
-> [Exact source text.]
-
-**Concern**: [Why the error affects correctness, consistency, traceability, or presentation.]
-
-**Suggestions**: [Direct correction.] Replacement: "[text]".
-
-**Status**: [Pending]
-```
-
-Do not add a defense, rebuttal, robustness battery, or resolution heading to a mechanical correction.
-
-Writing-channel comments use this compact correction form by default. If an apparent writing problem changes the scientific interpretation or obscures a load-bearing claim, route it to substance and use the substantive style instead.
+Editing-channel comments use this compact correction form by default. If an apparent editing problem changes the scientific interpretation or obscures a load-bearing claim, route it to substance and use the substantive style instead.
 
 ## Tone and title rules
 
@@ -98,8 +81,10 @@ Writing-channel comments use this compact correction form by default. If an appa
 - Do not begin with generic boilerplate such as `As written`, `There seems to be an issue`, or `The document would benefit from`.
 - Avoid courtroom phrases such as `the strongest author-side defense` and `supports that defense only to this extent`.
 - Preserve uppercase acronyms, proper names, exhibit labels, and mathematical symbols. Never create prose by lowercasing a title.
-- Reserve venue-tier language for posture calibration and an explicitly requested `writing-report.md` journal-fit addendum; do not insert it into detailed comments.
+- Delimit reviewer-authored mathematics explicitly, for example `$R_b$` and `$b_j$`. Do not alter a verified source span merely to add delimiters; keep its evidence representation and let the renderer handle unambiguous legacy notation.
+- Reserve venue-tier language for posture calibration and an explicitly requested `editing-comments.md` journal-fit addendum; do not insert it into detailed comments.
 - Vary length and cadence by severity; do not force every comment through one paragraph mold.
+- Prefer collegial, direct sentences over audit narration. The report should sound like advice from an engaged referee, not output from a validation engine.
 
 ## Repair and scanability rules
 

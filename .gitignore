@@ -25,7 +25,7 @@ skills-lock.json
 # Private evaluation materials are intentionally outside the publishable tree.
 /DESIGN.md
 /HANDOFF.md
-/PROJECT-REVIEW.md
+/PROJECT-REVIEW*.md
 /test_paper/
 /test_paper2/
 /test_paper3/

@@ -16,6 +16,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from safe_io import (  # noqa: E402
     canonical_portable_path,
+    require_valid_pdf_bytes,
     safe_read_bytes,
     sha256_bytes,
     strict_json_load,
@@ -26,6 +27,7 @@ from generate_verification import render as render_verification  # noqa: E402
 from generate_coverage import render as render_coverage  # noqa: E402
 from generate_sources import render as render_sources  # noqa: E402
 from generate_reports import render_current_writing_report, validate_current_venue_fit  # noqa: E402
+from round_reconciliation import validate_round_reconciliation  # noqa: E402
 
 try:
     from jsonschema import Draft202012Validator, FormatChecker
@@ -85,8 +87,11 @@ CORE_AUDIT_VIEWS = frozenset(
     {"logical_validity", "technical_validity", "methodological_validity"}
 )
 DOCUMENT_SOURCE_ROLES = frozenset({"manuscript", "appendix", "supplement"})
+BIBLIOGRAPHY_SOURCE_ROLES = frozenset({"bibliography"})
 REPLICATION_SOURCE_ROLES = frozenset({"code", "data_dictionary"})
-INTERNAL_SOURCE_ROLES = DOCUMENT_SOURCE_ROLES | REPLICATION_SOURCE_ROLES
+INTERNAL_SOURCE_ROLES = (
+    DOCUMENT_SOURCE_ROLES | BIBLIOGRAPHY_SOURCE_ROLES | REPLICATION_SOURCE_ROLES
+)
 REPLICATION_MATERIAL_STATES = frozenset(
     {"not_permitted", "static_only", "executed"}
 )
@@ -1285,6 +1290,67 @@ def validate_finalization_receipt(
             continue
         if observed != expected:
             errors.append(f"finalized artifact changed after finalization: {relative}")
+    if "paper-review.pdf" in artifacts:
+        try:
+            require_valid_pdf_bytes(
+                safe_read_bytes(review_dir, "paper-review.pdf"),
+                label="finalized paper-review.pdf",
+            )
+        except (OSError, ValueError) as exc:
+            errors.append(str(exc))
+    profile_relative = "evidence/pdf-render-profile.json"
+    if profile_relative in artifact_paths:
+        try:
+            profile = strict_json_load(review_dir / profile_relative)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            errors.append(f"{profile_relative} cannot be read safely: {exc}")
+        else:
+            label = profile_relative
+            required_profile = {
+                "renderer", "engine", "compiler_version", "page_count", "page_size",
+                "document_count", "source_date_epoch", "template_sha256", "latex_sha256",
+                "pdf_sha256", "diagnostics", "attempts",
+            }
+            if not isinstance(profile, dict):
+                errors.append(f"{label} must contain an object")
+            else:
+                require(profile, required_profile, label, errors)
+                renderer = profile.get("renderer")
+                if renderer not in {"latexmk-lualatex", "lualatex", "tectonic"}:
+                    errors.append(f"{label}.renderer is invalid")
+                if profile.get("page_size") not in {"letter", "a4"}:
+                    errors.append(f"{label}.page_size is invalid")
+                for field in ("page_count", "document_count", "source_date_epoch"):
+                    value = profile.get(field)
+                    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                        errors.append(f"{label}.{field} must be a positive integer")
+                for field in ("template_sha256", "latex_sha256", "pdf_sha256"):
+                    value = profile.get(field)
+                    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                        errors.append(f"{label}.{field} must be a lowercase SHA-256 digest")
+                for field in ("engine", "compiler_version"):
+                    if not isinstance(profile.get(field), str) or not profile.get(field, "").strip():
+                        errors.append(f"{label}.{field} must be non-empty")
+                diagnostics = profile.get("diagnostics")
+                if not isinstance(diagnostics, list) or any(
+                    not isinstance(item, str) for item in diagnostics
+                ):
+                    errors.append(f"{label}.diagnostics must be an array of strings")
+                attempts = profile.get("attempts")
+                if not isinstance(attempts, list) or len(attempts) != 1:
+                    errors.append(f"{label}.attempts must record exactly one selected renderer")
+                elif not isinstance(attempts[0], dict) or attempts[0].get("renderer") != renderer:
+                    errors.append(f"{label}.attempts does not match the selected renderer")
+                if "paper-review.pdf" not in artifact_paths:
+                    errors.append(f"{label} requires a finalized paper-review.pdf")
+                else:
+                    try:
+                        pdf_digest = sha256_bytes(safe_read_bytes(review_dir, "paper-review.pdf"))
+                    except (OSError, ValueError) as exc:
+                        errors.append(f"cannot verify {label}.pdf_sha256: {exc}")
+                    else:
+                        if profile.get("pdf_sha256") != pdf_digest:
+                            errors.append(f"{label}.pdf_sha256 does not match paper-review.pdf")
 
 
 def require(obj: dict[str, Any], keys: set[str], label: str, errors: list[str]) -> None:
@@ -1460,19 +1526,19 @@ def check_alternative_section_sets(
         if chosen.issubset(present) and not (present - chosen):
             counts = [len(re.findall(rf"^{re.escape(heading)}\s*$", text, re.MULTILINE)) for heading in headings]
             if counts != [1] * len(headings):
-                errors.append(f"{file_label} requires each writing-report heading exactly once")
+                errors.append(f"{file_label} requires each editing-comments heading exactly once")
                 return
             positions = [text.find(heading) for heading in headings]
             if positions != sorted(positions):
-                errors.append(f"{file_label} writing-report headings are out of order")
+                errors.append(f"{file_label} editing-comments headings are out of order")
                 return
             check_required_sections(text, file_label, headings, errors)
             return
     if any(set(headings).issubset(present) for headings in alternatives):
-        errors.append(f"{file_label} mixes legacy and current writing-report headings")
+        errors.append(f"{file_label} mixes legacy and current editing-comments headings")
         return
     choices = " or ".join(" / ".join(headings) for headings in alternatives)
-    errors.append(f"{file_label} must contain one complete writing-report section set: {choices}")
+    errors.append(f"{file_label} must contain one complete editing-comments section set: {choices}")
 
 
 _QUOTE_FOLD = str.maketrans({
@@ -2107,6 +2173,12 @@ def validate_comment_section(
         "the authors ignore",
         "There seems to be an issue",
         "The document would benefit from",
+        "canonical record",
+        "verification passed",
+        "coverage unit",
+        "finding ID",
+        "audit gate",
+        "the checked manuscript",
         "A careful reader cannot tell whether the stated claim is supported at the precision and scope presented.",
         "A careful reader may misread the object, unit, comparison, or evidentiary strength at this location.",
     )
@@ -2216,6 +2288,12 @@ def validate_comment_section_v3(
         "the authors ignore",
         "There seems to be an issue",
         "The document would benefit from",
+        "canonical record",
+        "verification passed",
+        "coverage unit",
+        "finding ID",
+        "audit gate",
+        "the checked manuscript",
     )
     malformed_acronyms = ("vAR", "iRF", "hPI", "sVAR", "fOMC")
     prose_by_id: dict[str, str] = {}
@@ -2465,6 +2543,14 @@ def validate_review(review_dir: Path) -> list[str]:
                     errors.append("review-manifest.json has duplicate document IDs: " + ", ".join(duplicate_ids))
                 if duplicate_paths:
                     errors.append("review-manifest.json has duplicate document paths: " + ", ".join(duplicate_paths))
+                if (
+                    run.get("prior_round") is not None
+                    and "evidence/round-reconciliation.md" not in document_paths
+                ):
+                    errors.append(
+                        "review-manifest.json must declare evidence/round-reconciliation.md "
+                        "when run.json.prior_round is active"
+                    )
                 root = review_dir.resolve()
                 for index, raw_path in enumerate(document_paths):
                     if not isinstance(raw_path, str):
@@ -2505,6 +2591,11 @@ def validate_review(review_dir: Path) -> list[str]:
         require(comment_policy, {"minimum_target", "maximum", "exhaustive"}, "run.json.comment_policy", errors)
     minimum_target = comment_policy.get("minimum_target")
     maximum_comments = comment_policy.get("maximum")
+    substance_maximum = comment_policy.get("substance_maximum")
+    writing_maximum = comment_policy.get("writing_maximum")
+    channel_capacities_present = (
+        "substance_maximum" in comment_policy or "writing_maximum" in comment_policy
+    )
     if not isinstance(minimum_target, int) or isinstance(minimum_target, bool) or minimum_target < 0:
         errors.append("run.json.comment_policy.minimum_target must be a non-negative integer")
         minimum_target = 0
@@ -2515,10 +2606,41 @@ def validate_review(review_dir: Path) -> list[str]:
         maximum_comments = None
     if maximum_comments is not None and minimum_target > maximum_comments:
         errors.append("run.json.comment_policy.minimum_target cannot exceed maximum")
+    if channel_capacities_present:
+        if "substance_maximum" not in comment_policy or "writing_maximum" not in comment_policy:
+            errors.append(
+                "run.json.comment_policy must declare substance_maximum and writing_maximum together"
+            )
+        for name, value in (
+            ("substance_maximum", substance_maximum),
+            ("writing_maximum", writing_maximum),
+        ):
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                errors.append(
+                    f"run.json.comment_policy.{name} must be a positive integer when channel capacities are used"
+                )
+        if maximum_comments is not None:
+            errors.append(
+                "run.json.comment_policy.maximum must be null when channel-specific capacities are used"
+            )
+        if minimum_target > sum(
+            value for value in (substance_maximum, writing_maximum)
+            if isinstance(value, int) and not isinstance(value, bool)
+        ):
+            errors.append(
+                "run.json.comment_policy.minimum_target cannot exceed the combined channel capacity"
+            )
     if not isinstance(comment_policy.get("exhaustive"), bool):
         errors.append("run.json.comment_policy.exhaustive must be boolean")
     if v4 and run.get("mode") == "full" and maximum_comments is not None:
-        errors.append("v0.4 full reviews must set comment_policy.maximum to null; exhaustive review has no comment cap")
+        errors.append(
+            "v0.4 full reviews must set the legacy comment_policy.maximum to null"
+        )
+    if v4 and run.get("mode") == "full" and channel_capacities_present:
+        if substance_maximum != 100 or writing_maximum != 30:
+            errors.append(
+                "current v0.4 full reviews use substance_maximum 100 and writing_maximum 30"
+            )
     stage_status = run.get("stage_status")
     required_stages = {
         "intake",
@@ -2562,6 +2684,8 @@ def validate_review(review_dir: Path) -> list[str]:
         item for item in active
         if split_contract and item.get("report_channel", "substance") == "writing"
     ]
+    if run.get("prior_round") is not None:
+        errors.extend(validate_round_reconciliation(review_dir, run, ledger))
     if split_contract:
         for item in findings:
             if not isinstance(item, dict):
@@ -2614,6 +2738,10 @@ def validate_review(review_dir: Path) -> list[str]:
             if item.get("essential") is not (role == "potentially_dispositive"):
                 errors.append(
                     f"current-contract finding {item.get('id')} essential must mirror potentially_dispositive decision role"
+                )
+            if item.get("severity") == "critical" and role != "potentially_dispositive":
+                errors.append(
+                    f"critical finding {item.get('id')} must be potentially_dispositive and essential before submission"
                 )
             displayable_evidence = any(
                 isinstance(evidence, dict)
@@ -2677,6 +2805,18 @@ def validate_review(review_dir: Path) -> list[str]:
                     )
     if maximum_comments is not None and len(active) > maximum_comments:
         errors.append(f"detailed comments exceed run maximum: {len(active)} > {maximum_comments}")
+    if isinstance(substance_maximum, int) and not isinstance(substance_maximum, bool):
+        if len(substance_active) > substance_maximum:
+            errors.append(
+                "substantive Detailed Comments exceed their publication capacity: "
+                f"{len(substance_active)} > {substance_maximum}; do not silently truncate"
+            )
+    if isinstance(writing_maximum, int) and not isinstance(writing_maximum, bool):
+        if len(writing_active) > writing_maximum:
+            errors.append(
+                "Detailed Editing Comments exceed their publication capacity: "
+                f"{len(writing_active)} > {writing_maximum}; do not silently truncate"
+            )
     active_ranks = [item.get("importance_rank") for item in active]
     valid_active_ranks = [rank for rank in active_ranks if isinstance(rank, int) and not isinstance(rank, bool)]
     duplicate_ranks = sorted(rank for rank, count in Counter(valid_active_ranks).items() if count > 1)
@@ -2697,11 +2837,38 @@ def validate_review(review_dir: Path) -> list[str]:
             "polish": 3,
         }
         ranked_active = sorted(active, key=lambda item: item.get("importance_rank", 10**9))
-        priorities = [role_priority.get(item.get("decision_role"), 99) for item in ranked_active]
-        if priorities != sorted(priorities):
-            errors.append("v0.3 importance order must place decision-relevant findings before revision value and polish")
+        severity_priority = {
+            "critical": 0,
+            "major": 1,
+            "minor": 2,
+            "info": 3,
+        }
+        severities = [severity_priority.get(item.get("severity"), 99) for item in ranked_active]
+        if severities != sorted(severities):
+            errors.append(
+                "current importance order must be globally severity-first: "
+                "critical, major, minor, then info"
+            )
+        for severity in severity_priority:
+            same_severity = [
+                role_priority.get(item.get("decision_role"), 99)
+                for item in ranked_active
+                if item.get("severity") == severity
+            ]
+            if same_severity != sorted(same_severity):
+                errors.append(
+                    "within each severity tier, current importance order must place "
+                    "potentially dispositive findings before posture material, revision value, and polish"
+                )
+                break
     known_id_set = {item.get("id") for item in findings if isinstance(item, dict)}
     active_id_set = {item.get("id") for item in active}
+    active_by_id = {
+        item.get("id"): item
+        for item in active
+        if isinstance(item.get("id"), str)
+    }
+    severity_priority = {"critical": 0, "major": 1, "minor": 2, "info": 3}
     dependency_graph: dict[str, list[str]] = {}
     for item in active:
         finding_id = item.get("id")
@@ -2713,6 +2880,13 @@ def validate_review(review_dir: Path) -> list[str]:
                 errors.append(f"finding {finding_id} cannot depend on itself")
             elif current_contract and dependency not in known_id_set:
                 errors.append(f"finding {finding_id} depends on unknown {dependency}")
+            elif current_contract and dependency in active_by_id:
+                dependency_severity = active_by_id[dependency].get("severity")
+                if severity_priority.get(dependency_severity, 99) > severity_priority.get(item.get("severity"), 99):
+                    errors.append(
+                        f"finding {finding_id} depends on lower-severity {dependency}; "
+                        "merge the shared root cause or align the severities so the revision plan remains severity-first"
+                    )
     visiting: set[str] = set()
     visited: set[str] = set()
 
@@ -2738,7 +2912,7 @@ def validate_review(review_dir: Path) -> list[str]:
         errors.append(f"run.json.counts mismatch: expected {expected_counts}, got {run.get('counts')}")
 
     report_path = review_dir / "report.md"
-    writing_report_path = review_dir / "writing-report.md"
+    writing_report_path = review_dir / "editing-comments.md"
     plan_path = review_dir / "fix-plan.md"
     synthesis_path = review_dir / "synthesis.json"
     required_output_paths = [report_path, plan_path]
@@ -3201,7 +3375,7 @@ def validate_review(review_dir: Path) -> list[str]:
         ):
             if re.search(rf"^{re.escape(heading)}\s*$", report, re.MULTILINE):
                 errors.append(
-                    f"{heading} belongs in writing-report.md "
+                    f"{heading} belongs in editing-comments.md "
                     "(report.md is the substance-only referee report)"
                 )
         report_ids = validate_comment_section(
@@ -3235,7 +3409,7 @@ def validate_review(review_dir: Path) -> list[str]:
         ):
             if re.search(rf"^{re.escape(heading)}\s*$", report, re.MULTILINE):
                 errors.append(
-                    f"{heading} belongs in writing-report.md "
+                    f"{heading} belongs in editing-comments.md "
                     "(report.md is the substance-only referee report)"
                 )
         if synthesis is not None:
@@ -3303,7 +3477,7 @@ def validate_review(review_dir: Path) -> list[str]:
         if run.get("mode") == "full":
             check_required_sections(
                 writing_report,
-                "writing-report.md",
+                "editing-comments.md",
                 (
                     "## Writing quality summary",
                     "## Grammar, typos, and mechanics",
@@ -3315,24 +3489,24 @@ def validate_review(review_dir: Path) -> list[str]:
             )
         writing_ids = validate_comment_section(
             writing_report,
-            "writing-report.md",
-            "Detailed Writing Comments",
+            "editing-comments.md",
+            "Detailed Editing Comments",
             writing_active,
             errors,
         )
         writing_tokens = set(re.findall(r"\b[A-Z][A-Z0-9_-]*-[0-9]{2,}\b", writing_report))
         for item in writing_active:
             if item.get("id") not in writing_tokens:
-                errors.append(f"active finding {item.get('id')} is not referenced in writing-report.md")
+                errors.append(f"active finding {item.get('id')} is not referenced in editing-comments.md")
         for item in substance_active:
             if item.get("id") in writing_ids:
-                errors.append(f"substance-channel finding {item.get('id')} must not appear in writing-report.md")
+                errors.append(f"substance-channel finding {item.get('id')} must not appear in editing-comments.md")
     if writing_report_path.exists() and current_contract:
         writing_report = writing_report_path.read_text(encoding="utf-8")
         if run.get("mode") == "full":
             current_sections = (
-                "## Writing assessment",
-                "## Highest-return writing revisions",
+                "## Editing assessment",
+                "## Highest-return editing revisions",
                 "## Section-by-section reader audit",
                 "## Terminology, definitions, and notation",
                 "## Tables and figures as writing",
@@ -3356,10 +3530,10 @@ def validate_review(review_dir: Path) -> list[str]:
                     writing_report,
                     re.MULTILINE,
                 ) for heading in legacy_writing_headings):
-                    errors.append("writing-report.md mixes legacy and current writing-report headings")
+                    errors.append("editing-comments.md mixes legacy and current editing-comments headings")
                 check_alternative_section_sets(
                     writing_report,
-                    "writing-report.md",
+                    "editing-comments.md",
                     (expected_sections,),
                     errors,
                 )
@@ -3367,13 +3541,13 @@ def validate_review(review_dir: Path) -> list[str]:
                 if bool(journal_sections) != journal_fit_requested or len(journal_sections) > 1:
                     expected = "present" if journal_fit_requested else "absent"
                     errors.append(
-                        "writing-report journal-fit section must be " + expected
+                        "editing-comments journal-fit section must be " + expected
                         + " according to run.json.requested_addons"
                     )
             else:
                 check_alternative_section_sets(
                     writing_report,
-                    "writing-report.md",
+                    "editing-comments.md",
                     (
                         current_sections,
                         current_sections[:-1],
@@ -3390,21 +3564,33 @@ def validate_review(review_dir: Path) -> list[str]:
                 )
         writing_ids = validate_comment_section_v3(
             writing_report,
-            "writing-report.md",
-            "Detailed Writing Comments",
+            "editing-comments.md",
+            "Detailed Editing Comments",
             writing_active,
             errors,
         )
         writing_tokens = set(re.findall(r"\b[A-Z][A-Z0-9_-]*-[0-9]{2,}\b", writing_report))
         for item in writing_active:
             if item.get("id") not in writing_tokens:
-                errors.append(f"active finding {item.get('id')} is not referenced in writing-report.md")
+                errors.append(f"active finding {item.get('id')} is not referenced in editing-comments.md")
         for item in substance_active:
             if item.get("id") in writing_ids:
-                errors.append(f"substance-channel finding {item.get('id')} must not appear in writing-report.md")
+                errors.append(f"substance-channel finding {item.get('id')} must not appear in editing-comments.md")
     if plan_path.exists():
         plan = plan_path.read_text(encoding="utf-8")
-        plan_ids = re.findall(r"^### ([A-Z][A-Z0-9_-]*-[0-9]{2,}):", plan, re.MULTILINE)
+        plan_ids = re.findall(
+            r"^<!-- finding_id: ([A-Z][A-Z0-9_-]*-[0-9]{2,}) -->\s*$",
+            plan,
+            re.MULTILINE,
+        )
+        plan_numbers = [
+            int(value)
+            for value in re.findall(r"^### Comment ([0-9]+):\s+", plan, re.MULTILINE)
+        ]
+        if plan_numbers != list(range(1, len(plan_numbers) + 1)):
+            errors.append("fix-plan.md comment headings must be consecutively numbered from 1")
+        if len(plan_numbers) != len(plan_ids):
+            errors.append("each fix-plan.md comment heading requires exactly one hidden finding_id")
         plan_id_counts = Counter(plan_ids)
         active_ids = {item.get("id") for item in active}
         unknown_plan_ids = sorted(set(plan_ids) - active_ids)
@@ -3467,6 +3653,11 @@ def validate_review(review_dir: Path) -> list[str]:
             "evidence/sources.md",
             "evidence/verification.md",
         ]
+        if run.get("prior_round") is not None:
+            required_artifacts.extend([
+                "evidence/round-reconciliation.json",
+                "evidence/round-reconciliation.md",
+            ])
         if run.get("mode") == "full":
             required_artifacts.append("evidence/reader-claim-audit.md")
             required_artifacts.append("evidence/claims.json")
@@ -3708,10 +3899,10 @@ def validate_review(review_dir: Path) -> list[str]:
             if run.get("mode") == "full" and strict_burden_coverage:
                 if (
                     isinstance(structured_sources, dict)
-                    and structured_sources.get("schema_version") != "0.3"
+                    and structured_sources.get("schema_version") != "0.4"
                 ):
                     errors.append(
-                        "v0.4 full review requires evidence/external-sources.json schema_version 0.3"
+                        "v0.4 full review requires evidence/external-sources.json schema_version 0.4"
                     )
             readable_sources = review_dir / "evidence" / "sources.md"
             if (
@@ -7404,8 +7595,8 @@ def validate_review(review_dir: Path) -> list[str]:
                     if writing_report_path.exists():
                         writing_report = writing_report_path.read_text(encoding="utf-8")
                         rich_headings = (
-                            "## Writing assessment",
-                            "## Highest-return writing revisions",
+                            "## Editing assessment",
+                            "## Highest-return editing revisions",
                             "## Section-by-section reader audit",
                             "## Terminology, definitions, and notation",
                             "## Tables and figures as writing",
@@ -7415,7 +7606,7 @@ def validate_review(review_dir: Path) -> list[str]:
                             rich_headings += ("## Style and writing improvements",)
                         if not all(re.search(rf"^{re.escape(heading)}\s*$", writing_report, re.MULTILINE) for heading in rich_headings):
                             errors.append(
-                                f"writing audit v{writing_audit_version} requires its complete current writing-report preamble"
+                                f"writing audit v{writing_audit_version} requires its complete current editing-comments preamble"
                             )
                         else:
                             def writing_section(heading: str) -> str:
@@ -7426,22 +7617,31 @@ def validate_review(review_dir: Path) -> list[str]:
                                 next_heading = re.search(r"^## ", following, re.MULTILINE)
                                 return following[:next_heading.start()] if next_heading else following
 
-                            assessment_block = normalize_quote(writing_section("## Writing assessment"))
+                            assessment_block = normalize_quote(writing_section("## Editing assessment"))
                             raw_strengths = writing.get("strengths", [])
                             strengths = raw_strengths if isinstance(raw_strengths, list) else []
                             for strength in strengths:
                                 if isinstance(strength, str) and normalize_quote(strength) not in assessment_block:
-                                    errors.append("writing-report assessment omits a canonical writing strength")
-                            highest_block = writing_section("## Highest-return writing revisions")
+                                    errors.append("editing-comments assessment omits a canonical writing strength")
+                            highest_block = writing_section("## Highest-return editing revisions")
+                            writing_findings_by_id = {
+                                item.get("id"): item
+                                for item in writing_active
+                                if isinstance(item, dict)
+                            }
                             for finding_id in highest_ids:
-                                if finding_id not in highest_block:
-                                    errors.append(f"writing-report highest-return section omits {finding_id}")
+                                finding = writing_findings_by_id.get(finding_id, {})
+                                visible_label = finding.get("title") or finding.get("issue")
+                                if not isinstance(visible_label, str) or normalize_quote(visible_label) not in normalize_quote(highest_block):
+                                    errors.append(
+                                        f"editing-comments highest-return section omits the visible title for {finding_id}"
+                                    )
                             section_block = normalize_quote(writing_section("## Section-by-section reader audit"))
                             section_rows = writing.get("section_audit", [])
                             for row in section_rows if isinstance(section_rows, list) else []:
                                 section_name = row.get("section") if isinstance(row, dict) else None
                                 if isinstance(section_name, str) and normalize_quote(section_name) not in section_block:
-                                    errors.append(f"writing-report section audit omits {section_name!r}")
+                                    errors.append(f"editing-comments section audit omits {section_name!r}")
                         if strict_burden_coverage and writing_audit_version == "0.4":
                             try:
                                 expected_writing_report = render_current_writing_report(
@@ -7450,11 +7650,11 @@ def validate_review(review_dir: Path) -> list[str]:
                                     run,
                                 )
                             except (KeyError, TypeError, ValueError) as exc:
-                                errors.append(f"cannot render canonical writing-report.md: {exc}")
+                                errors.append(f"cannot render canonical editing-comments.md: {exc}")
                             else:
                                 if writing_report != expected_writing_report:
                                     errors.append(
-                                        "writing-report.md is not synchronized with evidence/writing.json, findings.json, and run.json"
+                                        "editing-comments.md is not synchronized with evidence/writing.json, findings.json, and run.json"
                                     )
 
     return errors

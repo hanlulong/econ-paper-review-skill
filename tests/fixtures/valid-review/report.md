@@ -1,7 +1,7 @@
 # Referee Report
 
 <!-- review-navigation:start -->
-> **Review package:** [Start here](README.md) · [Referee report](report.md) · [Writing report](writing-report.md) · [Revision plan](fix-plan.md) · [Audit trail](evidence/verification.md)
+> **Review files:** [Start here](README.md) · [Referee report](report.md) · [Editing comments](editing-comments.md) · [Revision plan](fix-plan.md)
 <!-- review-navigation:end -->
 
 ## Overall assessment
@@ -26,10 +26,11 @@ The assessment would improve with these revisions:
 
 ### 1. The headline uniqueness result includes an unresolved boundary case
 <!-- principal_concern_id: PC-01 -->
+<!-- linked_finding_ids: LOGIC-01 -->
 
 The paper presents a unique prediction on a domain that permits two optimal actions.
 
-Linked findings: `LOGIC-01`. Repairability: within current design.
+This can be corrected within the current design.
 
 What would change the assessment: Revise the proposition, proof, and comparative-static language consistently at the equality boundary.
 

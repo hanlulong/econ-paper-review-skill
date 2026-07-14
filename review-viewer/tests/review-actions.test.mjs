@@ -54,9 +54,14 @@ test("generated payload round-trips without losing entry timestamps or history",
   assert.deepEqual(generated.entries[1].status_history, first.status_history);
   assert.deepEqual(actions.parseReviewActions(JSON.stringify(generated)), generated);
   assert.deepEqual(Object.keys(generated).sort(), [...actionSchema.required].sort());
-  assert.deepEqual(Object.keys(generated.entries[0]).sort(), [...actionSchema.$defs.entry.required, "events"].sort());
+  assert.deepEqual(Object.keys(generated.entries[0]).sort(), [
+    ...actionSchema.$defs.entry.required,
+    "events",
+    "reviewed",
+    "user_priority",
+  ].sort());
   assert.ok(actionSchema.properties.schema_version.enum.includes(generated.schema_version));
-  assert.equal(generated.schema_version, "0.3");
+  assert.equal(generated.schema_version, "0.4");
   assert.equal(generated.kind, actionSchema.properties.kind.const);
   assert.ok(actionSchema.$defs.entry.properties.disposition.enum.includes(generated.entries[0].disposition));
 });
@@ -104,6 +109,8 @@ test("legacy addressed and parked statuses migrate to external dispositions", ()
   assert.equal(migrated["WRITING-02"].disposition, "deferred");
   assert.equal(migrated["TABLE-03"].disposition, "open");
   assert.equal(migrated["IDENT-01"].response_note, "Implemented.");
+  assert.equal(migrated["IDENT-01"].user_priority, null);
+  assert.equal(migrated["IDENT-01"].reviewed, false);
   assert.equal(migrated["IDENT-01"].updated_at, T1, "legacy exported_at should be preserved");
   assert.deepEqual(migrated["WRITING-02"].status_history, [{ disposition: "deferred", at: T1 }]);
 });
@@ -243,6 +250,51 @@ test("status history is append-only and note-only changes preserve it", () => {
   );
 });
 
+test("personal priority and reviewed state are independent append-only actions", () => {
+  const opened = actions.updateReviewAction(undefined, "IDENT-01", {}, T0);
+  const prioritized = actions.updateReviewAction(opened, "IDENT-01", { user_priority: "P0" }, T1);
+  const reviewed = actions.updateReviewAction(prioritized, "IDENT-01", { reviewed: true }, T2);
+  assert.equal(reviewed.disposition, "open", "personal priority must not rewrite reviewer severity or disposition");
+  assert.equal(reviewed.user_priority, "P0");
+  assert.equal(reviewed.reviewed, true);
+  assert.deepEqual(reviewed.events.map((event) => event.type), [
+    "disposition_changed", "priority_changed", "reviewed_changed",
+  ]);
+  assert.deepEqual(reviewed.status_history, opened.status_history);
+  assert.deepEqual(actions.parseReviewActions(actions.generateReviewActionsPayload({
+    source_review_id: "review-1",
+    source_review_fingerprint: "ledger-v1",
+    exported_at: T2,
+    entries: [reviewed],
+  })).entries[0], reviewed);
+});
+
+test("not-relevant and not-addressable are reviewed exclusions and remain reversible", () => {
+  const opened = actions.updateReviewAction(undefined, "IDENT-01", {}, T0);
+  assert.throws(
+    () => actions.updateReviewAction(opened, "IDENT-01", { disposition: "not_relevant" }, T1),
+    /must be marked reviewed/,
+  );
+  const excluded = actions.updateReviewAction(opened, "IDENT-01", {
+    disposition: "not_addressable",
+    reviewed: true,
+    response_note: "The requested test requires unavailable historical microdata.",
+  }, T1);
+  assert.equal(excluded.disposition, "not_addressable");
+  assert.equal(excluded.reviewed, true);
+  const restored = actions.updateReviewAction(excluded, "IDENT-01", { disposition: "open" }, T2, { type: "reversed" });
+  assert.equal(restored.disposition, "open");
+  assert.equal(restored.reviewed, true, "undoing an exclusion must not silently erase explicit review state");
+  assert.equal(restored.events.at(-1).type, "reversed");
+});
+
+test("no-op action updates preserve timestamps and event history", () => {
+  const reviewed = actions.updateReviewAction(undefined, "IDENT-01", { reviewed: true }, T1);
+  const repeated = actions.updateReviewAction(reviewed, "IDENT-01", { reviewed: true }, T2);
+  assert.deepEqual(repeated, reviewed);
+  assert.equal(repeated.updated_at, T1);
+});
+
 test("independently initialized findings receive globally unique action events", () => {
   const first = actions.updateReviewAction(undefined, "IDENT-01", { disposition: "ready_for_recheck" }, T1);
   const second = actions.updateReviewAction(undefined, "WRITING-02", { disposition: "challenged" }, T1);
@@ -298,7 +350,90 @@ test("a changed fingerprint warns but preserves exact-ID next-round reconciliati
   assert.equal(result.fingerprint_matches, false);
   assert.deepEqual(result.matched_finding_ids, ["IDENT-01"]);
   assert.deepEqual(result.untouched_finding_ids, ["NEW-03"]);
+  assert.deepEqual(result.rereview_required_finding_ids, ["IDENT-01"]);
+  assert.equal(result.entries["IDENT-01"].disposition, "open");
+  assert.equal(result.entries["IDENT-01"].reviewed, false);
   assert.deepEqual(result.warnings.map((warning) => warning.code), ["fingerprint_mismatch"]);
+  assert.match(result.warnings[0].message, /notes and personal priorities were carried forward/i);
+  assert.match(result.warnings[0].message, /must be reviewed again/i);
+});
+
+test("changed-fingerprint rollover reopens every surviving workflow state without mutating prior actions", () => {
+  const makeRoundEntry = (findingId, disposition) => {
+    const noted = actions.updateReviewAction(undefined, findingId, {
+      response_note: `Carry the note for ${findingId}.`,
+      changed_locations: [`Section for ${findingId}`],
+      user_priority: "P1",
+      reviewed: true,
+    }, T0);
+    return actions.updateReviewAction(noted, findingId, { disposition }, T1);
+  };
+  const originals = [
+    makeRoundEntry("OPEN-01", "open"),
+    makeRoundEntry("READY-02", "ready_for_recheck"),
+    makeRoundEntry("CHALLENGE-03", "challenged"),
+    makeRoundEntry("DEFER-04", "deferred"),
+    makeRoundEntry("IRRELEVANT-05", "not_relevant"),
+    makeRoundEntry("UNADDRESSABLE-06", "not_addressable"),
+  ];
+  const source = actions.generateReviewActionsPayload({
+    source_review_id: "review-1",
+    source_review_fingerprint: "ledger-v1",
+    exported_at: T2,
+    entries: originals,
+  });
+  const archivedBefore = JSON.stringify(source);
+  const result = actions.reconcileReviewActions(source, {
+    review_id: "review-1",
+    review_fingerprint: "ledger-v2",
+    finding_ids: originals.map((item) => item.finding_id),
+  }, { rollover_at: T0 });
+
+  assert.equal(JSON.stringify(source), archivedBefore, "reconciliation must not mutate the prior-fingerprint payload");
+  assert.deepEqual(result.rereview_required_finding_ids, [
+    "CHALLENGE-03", "DEFER-04", "OPEN-01", "READY-02",
+  ]);
+  assert.deepEqual(Object.fromEntries(Object.entries(result.entries).map(([id, item]) => [id, item.disposition])), {
+    "CHALLENGE-03": "open",
+    "DEFER-04": "deferred",
+    "IRRELEVANT-05": "not_relevant",
+    "OPEN-01": "open",
+    "READY-02": "open",
+    "UNADDRESSABLE-06": "not_addressable",
+  });
+  for (const original of originals) {
+    const carried = result.entries[original.finding_id];
+    assert.equal(carried.response_note, original.response_note);
+    assert.equal(carried.user_priority, "P1");
+    assert.deepEqual(carried.changed_locations, original.changed_locations);
+    assert.deepEqual(carried.events.slice(0, original.events.length), original.events, `${original.finding_id} must retain its complete event prefix`);
+    assert.ok(carried.events.every((event, index, events) => index === 0 || Date.parse(event.at) >= Date.parse(events[index - 1].at)));
+    if (["not_relevant", "not_addressable"].includes(original.disposition)) {
+      assert.equal(carried.reviewed, true, "explicit exclusions must remain schema-valid reviewed exclusions");
+      assert.deepEqual(carried, original);
+    } else {
+      assert.equal(carried.reviewed, false);
+      if (carried.events.length > original.events.length) {
+        assert.equal(carried.events[original.events.length].parent_event_id, original.events.at(-1).event_id);
+        assert.equal(carried.events.at(-1).origin, "import");
+        assert.ok(Date.parse(carried.updated_at) > Date.parse(original.updated_at));
+      }
+    }
+  }
+  assert.doesNotThrow(() => actions.generateReviewActionsPayload({
+    source_review_id: "review-1",
+    source_review_fingerprint: "ledger-v2",
+    exported_at: T2,
+    entries: result.entries,
+  }), "the rolled event chains must replay to their current state");
+
+  const exact = actions.reconcileReviewActions(source, {
+    review_id: "review-1",
+    review_fingerprint: "ledger-v1",
+    finding_ids: originals.map((item) => item.finding_id),
+  }, { rollover_at: T2 });
+  assert.deepEqual(exact.rereview_required_finding_ids, []);
+  assert.deepEqual(exact.entries, Object.fromEntries(source.entries.map((item) => [item.finding_id, item])));
 });
 
 test("a changed review ID is warned and never applies coincidentally matching IDs", () => {
@@ -313,7 +448,18 @@ test("a changed review ID is warned and never applies coincidentally matching ID
   assert.deepEqual(result.matched_finding_ids, []);
   assert.deepEqual(result.unmatched_entry_ids, ["IDENT-01"]);
   assert.deepEqual(result.untouched_finding_ids, ["IDENT-01", "NEW-03"]);
+  assert.deepEqual(result.rereview_required_finding_ids, []);
   assert.deepEqual(result.warnings.map((warning) => warning.code), ["review_id_mismatch", "unmatched_entries"]);
+
+  const fullyDifferent = actions.reconcileReviewActions(payload(), {
+    review_id: "different-review",
+    review_fingerprint: "ledger-v2",
+    finding_ids: ["IDENT-01"],
+  });
+  assert.deepEqual(fullyDifferent.warnings.map((warning) => warning.code), [
+    "review_id_mismatch", "fingerprint_mismatch", "unmatched_entries",
+  ]);
+  assert.doesNotMatch(fullyDifferent.warnings[1].message, /carried forward/i);
 });
 
 test("action merge applies new IDs and newer imports that extend current history", () => {

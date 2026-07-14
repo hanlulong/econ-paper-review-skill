@@ -16,15 +16,38 @@ unchanged.
 | `defusedxml` | Python Software Foundation license | Defensive parsing of Poppler-generated XHTML | Python dependency; not vendored |
 | `pdfplumber` / `pdfminer.six` | MIT | PDF geometry and table candidates | Python dependencies; not vendored |
 | `pypdf` | BSD-3-Clause | PDF structural and safety inspection | Python dependency; not vendored |
+| `reportlab` | BSD-3-Clause | Maintained PDF-report fallback when no supported TeX renderer is available | Python dependency; not vendored |
+| Bitstream Vera fonts (distributed by `reportlab`) | Bitstream Vera font license | Fixed fonts for the ReportLab fallback | Loaded from the separately installed ReportLab package; glyph subsets may be embedded in generated reports |
 | Pillow | HPND | Image inspection and deterministic crops | Python dependency; not vendored |
 | PyYAML | MIT | Agent-skill package validation | Python dependency; not vendored |
 | `packaging` | Apache-2.0 or BSD-2-Clause | Offline PEP 440/508 checks against bundled requirement manifests | Python dependency; not vendored |
 | Tesseract | Apache-2.0 | Optional local prose OCR | External executable; not bundled |
 | Poppler utilities | GPL | Page metadata, text geometry, and rendering | External executables; not bundled |
+| [LuaLaTeX / TeX Live](https://www.tug.org/texlive/copying.html) | Package-specific free-software licenses | Preferred professional PDF report rendering when already installed | External executable and support tree; not bundled or installed by this project |
+| [Tectonic](https://github.com/tectonic-typesetting/tectonic/blob/master/LICENSE) | MIT; derived TeX components use additional open-source licenses | Preferred professional PDF report rendering when explicitly installed | External executable and support bundle; not bundled or installed by this project |
 
 Invoking a separately installed executable is not permission to redistribute
 its binary. If an online or desktop distribution later bundles Poppler or
 Tesseract, perform a new packaging and license review first.
+
+ReportLab 4.5.1 is pinned so fallback PDF bytes and line wrapping remain
+reproducible. Its packaged Bitstream Vera fonts provide a fixed cross-platform
+font source. The Vera license permits redistribution and embedding subject to
+its notice and naming conditions; preserve the license file distributed with
+ReportLab (`reportlab/fonts/bitstream-vera-license.txt`) when packaging the
+runtime, and reassess notice placement before distributing a desktop or hosted
+report generator.
+
+The LaTeX report template expects standard TeX packages and fonts, including
+the standard `article` class, Libertinus, TeX Gyre fallbacks, `microtype`,
+`hyperref`, and the table and framing packages declared by the template. They
+remain part of the user's
+separately installed TeX distribution and are not copied into this repository.
+TeX Live permits redistribution subject to the license terms of its individual
+components, often including source-availability conditions; Tectonic is
+MIT-licensed, while the TeX components from which it is derived retain their
+own licenses. Re-audit the exact executable, support bundle, packages, and fonts
+before bundling any TeX runtime. Pandoc is not used, bundled, or required.
 
 ## Used only by the optional hosted adapter
 
@@ -36,21 +59,34 @@ Tesseract, perform a new packaging and license review first.
 
 The Review Desk's direct JavaScript dependencies are declared in
 `review-viewer/package.json`, and `package-lock.json` records the exact resolved
-tree. They are downloaded by npm and are not vendored in this source archive.
-The tree is predominantly permissively licensed, but the current lockfile also
-records MPL-2.0 components, libvips platform packages under
-LGPL-3.0-or-later, and smaller numbers of CC-BY-4.0, Python-2.0,
-BlueOak-1.0.0, and 0BSD components. A production build or hosted deployment
-may therefore carry attribution, notice, source-availability, relinking, or
-other obligations that do not arise merely from publishing this source tree.
-The generated viewer build also embeds font files; include their applicable
-font license and notices in the deployment review even though generated build
-directories are excluded from this source archive.
+tree. Development dependencies are downloaded by npm and are not checked into
+the source tree as `node_modules/`. The checked-in
+`review-viewer/release/review-desk.zip`, however, is a distributable compiled
+artifact and does contain third-party client code, CSS, and font files.
 
-Before a commercial deployment, generate an SBOM from the exact lockfile,
-identify which transitive components enter the deployed artifact, preserve all
-required notices, and obtain a legal review of the resulting distribution and
-hosting model. `npm audit` checks known security advisories; it is not a license
+Every static release build derives its shipped-package inventory from Vite's
+exact client output module graph, verifies each package and version against
+`package-lock.json`, and fails if a shipped package lacks a complete license or
+notice text. The bundle includes `app/THIRD_PARTY_NOTICES.txt`, a canonical
+`app/third-party-licenses/manifest.json`, and the referenced upstream license
+and notice files. KaTeX's emitted fonts carry their separate SIL Open Font
+License 1.1 copyright and Reserved Font Name notice. These files are covered by
+the bundle's own per-file hash manifest and are enforced by the bundle builder,
+installer release tests, and public-release scanner. Vite, Vinext, Cloudflare,
+and other development tools are not listed in that runtime inventory unless
+their modules actually enter the static client artifact.
+
+The full development lockfile includes packages that do not enter the static
+artifact and therefore can have a broader license mix than the embedded
+runtime inventory. A hosted deployment or a different build target must be
+audited from its own exact deployed artifact rather than reusing the static
+bundle's inventory.
+
+Before a commercial deployment, generate an SBOM from the exact lockfile and
+deployed artifact, preserve all required notices, and obtain a legal review of
+the resulting distribution and hosting model. The deterministic embedded
+inventory improves traceability but is not legal advice or a substitute for
+that review. `npm audit` checks known security advisories; it is not a license
 or attribution audit.
 
 ## Evaluated conversion backends

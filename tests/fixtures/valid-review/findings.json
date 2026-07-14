@@ -22,7 +22,7 @@
         "CLM-01"
       ],
       "reader_effect": "The proposition and comparative-static summary currently state a stronger global conclusion.",
-      "severity": "major",
+      "severity": "critical",
       "essential": true,
       "status": "open",
       "support_state": "in_conflict",

@@ -19,9 +19,31 @@ SPEC = importlib.util.spec_from_file_location("generate_sources", SCRIPT)
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+V04_SPEC = importlib.util.spec_from_file_location(
+    "external_sources_v04_render_fixture",
+    ROOT / "tests" / "test_external_sources_schema_v04.py",
+)
+assert V04_SPEC and V04_SPEC.loader
+V04_FIXTURE = importlib.util.module_from_spec(V04_SPEC)
+V04_SPEC.loader.exec_module(V04_FIXTURE)
 
 
 class GenerateSourcesTests(unittest.TestCase):
+    def test_v04_render_exposes_claim_screening_comparison_and_closure(self) -> None:
+        rendered = MODULE.render(V04_FIXTURE.valid_v04_payload())
+        for heading in (
+            "## Contribution and attribution claims",
+            "## Claim search coverage",
+            "## Candidate screening",
+            "## Contribution comparisons",
+            "## Search closure",
+        ):
+            self.assertIn(heading, rendered)
+        self.assertIn("materially overstated", rendered)
+        self.assertIn("mischaracterized", rendered)
+        self.assertIn("Alex Example", rendered)
+        self.assertNotIn("## Closest-paper comparisons", rendered)
+
     def test_fixture_render_is_exact_and_records_boundary(self) -> None:
         payload = json.loads((FIXTURE / "evidence" / "external-sources.json").read_text())
         rendered = MODULE.render(payload)

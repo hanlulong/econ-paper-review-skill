@@ -26,8 +26,7 @@ test("server-renders the Review Desk shell without starter metadata", async () =
 
   const html = await response.text();
   assert.match(html, /<title>Review Desk<\/title>/i);
-  assert.match(html, /Opening the review ledger/);
-  assert.match(html, /evidence-first workspace/i);
+  assert.match(html, /Opening the review/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
 
@@ -51,7 +50,7 @@ test("ships the evidence-first interaction model", async () => {
     "Concern",
     "Suggestions",
     "Ready to close when",
-    "What changed?",
+    "Instruction or response",
     "Import actions",
     "Review document reader",
     "Principal concerns",
@@ -62,31 +61,38 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(workspace, /localStorage/);
   assert.match(actionStorage, /review-desk:v\$\{REVIEW_ACTION_STORAGE_VERSION\}:\$\{encodeURIComponent\(reviewId\)\}:/);
   assert.match(actionStorage, /complete prior payload remains archived/i);
-  assert.match(workspace, /reviewLedgerFingerprint\(ledger\.findings\)/);
+  assert.match(workspace, /source_review_fingerprint: ledgerFingerprint/);
+  assert.match(workspace, /sha256Hex\(findingsText\)/);
+  assert.match(workspace, /Reviewed by decision/);
+  assert.match(workspace, /Reopen this comment before reconsidering the decision/);
   assert.match(workspace, /openFinding\(\s*linkedFinding\.id/);
   assert.match(workspace, /parseReviewUrlState/);
   assert.match(workspace, /addEventListener\("popstate"/);
-  assert.match(workspace, /Package not verified as final/);
-  assert.match(workspace, /Finalized · integrity verified/);
-  assert.match(workspace, /No comments are recorded in this package/);
-  assert.match(workspace, /An empty findings ledger does not by itself establish that the review is complete/);
+  assert.match(workspace, /Review files need attention/);
+  assert.doesNotMatch(workspace, /Review ready/);
+  assert.match(workspace, /No comments are recorded in this review/);
+  assert.match(workspace, /Any incomplete checks are identified separately/);
   assert.doesNotMatch(workspace, /Review complete|No active comments remain/);
   assert.match(workspace, /This tab only/);
+  const sessionStorageControl = workspace.slice(workspace.indexOf('aria-pressed={persistenceMode === "session"}'), workspace.indexOf('className="danger-text"'));
+  assert.doesNotMatch(sessionStorageControl, /clearBrowserReviewActions|localStorage\.removeItem/);
+  assert.match(sessionStorageControl, /Existing browser snapshots are unchanged/);
   assert.match(workspace, /missing-exhibit/);
   assert.match(workspace, /source-manifest\.json/);
   assert.match(workspace, /exactAnchorExcerpt\(manuscript, activeSourceAnchor, sha256Hex\)/);
-  assert.match(workspace, /Verified source anchor/);
   assert.match(workspace, /evidence\/computations\.json/);
   assert.match(workspace, /validateReviewComputations/);
   assert.match(workspace, /validateReviewComputationLinks/);
   assert.match(workspace, /ComputationProvenance/);
   assert.match(workspace, /sourceAnchorPageLabel\(locator\)/);
-  assert.match(workspace, /Full locator:/);
-  for (const label of ["Recorded computation", "Input anchors", "Artifact record", "SHA-256", "Tolerance"]) {
+  assert.match(workspace, /<dt>Location<\/dt>/);
+  for (const label of ["Calculation details", "Inputs checked", "Result", "Method", "Tolerance"]) {
     assert.match(workspace, new RegExp(label));
   }
-  assert.match(workspace, /does not run the method or open the artifact/);
-  assert.match(workspace, /Comparison source anchors/);
+  assert.doesNotMatch(workspace, /Artifact record/);
+  assert.doesNotMatch(workspace, /<dt>SHA-256<\/dt>/);
+  assert.match(workspace, /does not rerun the calculation/);
+  assert.match(workspace, /Comparison passages/);
   assert.match(workspace, /conciseSourceAnchorLabel/);
   assert.match(workspace, /data-source-anchor=/);
   assert.match(workspace, /evidence\.anchor_ids/);
@@ -103,6 +109,12 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(workspace, /review-actions\.json/);
   assert.match(workspace, /ready_for_recheck/);
   assert.match(workspace, /challenged/);
+  assert.match(workspace, /workflowDecision\(entry\.disposition\) === status/);
+  assert.match(workspace, /<option value="open">Open<\/option>[\s\S]*<option value="ready_for_recheck">Ready for review<\/option>[\s\S]*<option value="deferred">Set aside<\/option>/);
+  assert.doesNotMatch(workspace, />Recheck<\/button>|>Challenge<\/button>|>Defer<\/button>|>Not relevant<\/button>|>Not addressable<\/button>/);
+  assert.match(workspace, /className=\{`decision-menu/);
+  assert.match(workspace, /Reasoned response/);
+  assert.match(workspace, /Revisit later/);
   assert.match(workspace, /severity/);
   assert.match(workspace, /validateSynthesis/);
   assert.match(workspace, /synthesis\.json/);
@@ -116,10 +128,13 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(workspace, /The reversal was added to its action history/);
   assert.match(workspace, /decision_role/);
   assert.match(workspace, /Filter by publication relevance/);
-  assert.match(workspace, /Ready for recheck/);
-  assert.match(workspace, /Deferred/);
+  assert.match(workspace, /Ready for review/);
+  assert.match(workspace, /Set aside/);
   assert.match(workspace, /report_channel/);
-  assert.match(workspace, /Filter by report channel/);
+  assert.match(workspace, /Filter by comment category/);
+  assert.match(workspace, /return finding\.report_channel === "writing" \? "Editing comments"/);
+  assert.match(workspace, /<option value="writing">Editing comments \(\{editingCount\}\)<\/option>/);
+  assert.doesNotMatch(workspace, /<option value="writing">Writing/);
   assert.match(workspace, /Filters\{activeFilters/);
   assert.match(workspace, /channelLabel/);
   assert.match(workspace, /lazy\(\(\) => import\("\.\/markdown-content"\)\)/);
@@ -136,11 +151,13 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(workspace, /blocked-report-image/);
   assert.doesNotMatch(workspace, /<span>Possible fix<\/span>/);
   assert.match(workspace, /report\.md/);
-  assert.match(workspace, /writing-report\.md/);
-  assert.match(workspace, /Optional context<\/strong><span>finalization\.json · synthesis\.json · review-manifest\.json · all report\/audit Markdown/);
+  assert.match(workspace, /editing-comments\.md/);
+  assert.doesNotMatch(workspace, /writing-report\.md/);
+  assert.match(workspace, /Optional context<\/strong><span>Include the manuscript and saved table or figure images when available/);
   assert.match(workspace, /Open a review without uploading it/);
   assert.match(workspace, /Open review folder/);
-  assert.match(workspace, /npm run dev:bundled/);
+  assert.doesNotMatch(workspace, /npm run dev:bundled/);
+  assert.doesNotMatch(workspace, /run\.paper_family\.replaceAll/);
   assert.match(workspace, /webkitdirectory/);
   assert.match(workspace, /Duplicate relative file paths were selected/);
   assert.match(workspace, /normalizedFilePath/);
@@ -151,11 +168,42 @@ test("ships the evidence-first interaction model", async () => {
   assert.doesNotMatch(workspace, /Fairness check|Fairness and verification|Saved locally in this browser|changed-locations/);
   assert.match(workspace, /detailMode.*overview/);
   assert.match(workspace, /Start with the first comment/);
+  assert.match(workspace, /Resolve critical comments first, then major comments/);
+  assert.match(workspace, /What was reviewed/);
+  assert.match(workspace, /What could not be checked/);
   assert.match(workspace, /side-by-side-reader/);
+  assert.match(workspace, /sortReviewFindings\(matching, queueOrder\)/);
+  assert.match(workspace, />Reviewer priority<\/button>/);
+  assert.match(workspace, />Severity<\/button>/);
+  assert.doesNotMatch(workspace, />Importance<\/button>/);
   assert.match(workspace, /Paper order/);
+  assert.match(workspace, /My revision plan/);
+  assert.match(workspace, /revision-tasks\.json/);
+  assert.match(workspace, /revision-agent-brief\.md/);
+  assert.match(workspace, /revision-response\.template\.json/);
+  assert.match(workspace, /Instructions for my editing agent/);
+  assert.match(workspace, /Agent response form/);
+  assert.match(workspace, /Mark as read and decided/);
+  assert.match(workspace, /const marksReviewed = nextStatus !== "open"/);
+  assert.match(workspace, /previousReviewed: entry\.reviewed/);
+  assert.match(workspace, /Next unreviewed/);
+  assert.match(workspace, /Does not apply/);
+  assert.match(workspace, /Cannot address/);
+  assert.match(workspace, /Filter by reviewed state/);
+  assert.match(workspace, /Filter by my priority/);
+  assert.match(workspace, /Do not self-declare reviewer findings resolved/);
+  assert.match(workspace, /response_only/);
+  assert.match(workspace, /commitRevisionNoteDrafts/);
+  assert.match(workspace, /handoff_ready/);
+  assert.match(workspace, /Comment #\$\{index \+ 1\}/);
+  assert.doesNotMatch(workspace, /<h1 className="visually-hidden">Review Desk for \{run\.review_id\}/);
+  assert.doesNotMatch(workspace, /Publication role:|Repairability:|Author disposition:/);
+  assert.match(workspace, /This is not a complete review folder/);
+  assert.match(workspace, /unsupported older or newer version/);
+  assert.match(workspace, /Some files changed after the review was generated/);
   assert.match(workspace, /event\.key\.toLowerCase\(\) === "j"/);
   assert.match(workspace, /event\.key\.toLowerCase\(\) === "k"/);
-  assert.match(workspace, /aria-keyshortcuts="J K A C P N"/);
+  assert.match(workspace, /aria-keyshortcuts="J K R S N"/);
   assert.match(workspace, /\["ArrowDown", "ArrowUp", "Home", "End"\]/);
   assert.match(workspace, /event\.isComposing/);
   assert.match(workspace, /closest\("input, textarea, select, button, a/);
@@ -221,8 +269,7 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(workspace, /equationEvidencePresentation/);
   assert.match(workspace, /EvidenceSemanticFrame/);
   assert.match(workspace, /<EvidenceSemanticFrame representation=\{evidence\?\.representation\}/);
-  assert.match(workspace, /evidence\.support_record_id/);
-  assert.match(workspace, /Support record/);
+  assert.doesNotMatch(workspace, /support_record_id|Support record/);
   assert.match(workspace, /evidence\?\.type === "equation"/);
   assert.match(workspace, /\["code", "table_cell"\]\.includes/);
   assert.doesNotMatch(workspace, /quote-mark/);
@@ -243,7 +290,9 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(css, /\.evidence-sheet \.source-excerpt\s*\{[^}]*white-space:\s*pre-wrap/);
   assert.match(css, /\.document-pane\s*\{[^}]*display:\s*none/);
   assert.match(css, /outline:\s*3px solid #0b6b63/);
-  assert.match(css, /\.topbar\s*\{[^}]*height:\s*64px/);
+  assert.match(css, /\.topbar\s*\{[^}]*height:\s*56px/);
+  assert.match(css, /\.topbar\s*\{[^}]*grid-template-columns:\s*auto minmax\(180px, 420px\) minmax\(0, 1fr\) auto/);
+  assert.match(css, /\.header-review-picker select\s*\{[^}]*max-width:\s*420px/);
   assert.match(css, /\.compact-evidence-block\s*\{\s*display:\s*grid/);
   assert.match(css, /\.filter-popover/);
   assert.match(css, /\.rail-controls\s*\{[^}]*position:\s*sticky/);
@@ -256,8 +305,8 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(workspace, /data-testid="evidence-context"/);
   assert.match(workspace, /<nav className="finding-list" aria-label=/);
   assert.doesNotMatch(workspace, /className="finding-list" role="listbox"|role="option"|aria-controls="comment-panel evidence-panel"/);
-  assert.match(workspace, /<button className="orientation-strip" onClick=\{openOverview\}>/);
-  assert.doesNotMatch(workspace, /className="orientation-strip"[^>]*aria-label=/);
+  assert.match(workspace, /<button className="overview-link" onClick=\{openOverview\}/);
+  assert.match(workspace, /aria-current=\{detailMode === "overview"/);
   assert.match(workspace, /className="skip-link" href="#review-detail">Skip to review detail/);
   assert.doesNotMatch(workspace, /href="#comment-panel"/);
   assert.ok((workspace.match(/id="review-detail"/g) || []).length >= 5, "every conditional detail view needs the stable skip-link target");
@@ -271,14 +320,14 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(workspace, /topMenu\.current\.open = false/);
   assert.match(workspace, /reportBackButton\.current\?\.focus/);
   assert.doesNotMatch(workspace, /role="dialog" aria-modal="false"/);
-  assert.doesNotMatch(css, /\.orientation-body > p\s*\{[^}]*max-height:\s*130px/);
-  assert.match(css, /\.orientation-strip\s*\{[^}]*min-height:\s*74px[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto/);
-  assert.match(css, /\.orientation-strip \.posture-chip\s*\{[^}]*grid-column:\s*1 \/ -1/);
+  assert.doesNotMatch(css, /\.orientation-strip/);
+  assert.match(css, /\.overview-link\s*\{[^}]*min-height:\s*52px/);
   assert.match(css, /env\(safe-area-inset-bottom\)/);
   assert.match(css, /@media print/);
   assert.match(css, /\.comment-pane\s*\{[^}]*height:\s*calc\(100% - 49px\)/);
+  assert.match(css, /\.comment-title-row h2:focus-visible\s*\{[^}]*outline:\s*none[^}]*text-decoration-color:\s*var\(--teal\)/);
   assert.match(css, /\.workspace-actions button\s*\{[^}]*min-height:\s*44px/);
-  assert.match(css, /\.workspace-grid\s*\{[^}]*--author-action-dock-height:\s*64px/);
+  assert.match(css, /\.workspace-grid\s*\{[^}]*--author-action-dock-height:\s*58px/);
   assert.match(css, /\.document-pane\s*\{[^}]*inset:\s*0 0 var\(--author-action-dock-height\) auto/);
   assert.match(css, /\.author-action-bar\s*\{[^}]*z-index:\s*13[^}]*height:\s*var\(--author-action-dock-height\)/);
   assert.match(css, /@media \(max-width:\s*760px\)[\s\S]*\.document-pane\s*\{[^}]*position:\s*static/);
@@ -288,6 +337,11 @@ test("ships the evidence-first interaction model", async () => {
   assert.match(css, /\.severity-pill\.severity-critical\s*\{[^}]*background:\s*var\(--critical\)/);
   assert.match(css, /\.severity-pill\.severity-major\s*\{[^}]*background:\s*var\(--coral-soft\)/);
   assert.match(css, /\.status-dot\s*\{[^}]*border:\s*2px solid #737e83/);
+  assert.match(css, /\.revision-plan-pane/);
+  assert.match(css, /\.personal-priority-control/);
+  assert.match(css, /\.reviewed-toggle\.active/);
+  assert.match(css, /\.status-not_relevant/);
+  assert.match(css, /\.status-not_addressable/);
   assert.match(css, /\.filter-help\s*\{[^}]*color:\s*#5c686d/);
   assert.match(css, /\.exhibit-image-link/);
   assert.match(css, /\.comparison-source-switcher/);
@@ -320,7 +374,7 @@ test("the authorized bundled fixture is synthetic and internally consistent", as
 
   for (const entry of registry.reviews) {
     const base = new URL(`../public/reviews/${entry.slug}/`, import.meta.url);
-    const [ledger, run, synthesis, sourceManifest, computations, manuscript, startHere, report, writingReport, tables, figures, finalization] = await Promise.all([
+    const [ledger, run, synthesis, sourceManifest, computations, manuscript, startHere, report, editingComments, tables, figures, finalization] = await Promise.all([
       readFile(new URL("findings.json", base), "utf8").then(JSON.parse),
       readFile(new URL("run.json", base), "utf8").then(JSON.parse),
       readFile(new URL("synthesis.json", base), "utf8").then(JSON.parse),
@@ -329,7 +383,7 @@ test("the authorized bundled fixture is synthetic and internally consistent", as
       readFile(new URL("synthetic-paper.md", base), "utf8"),
       readFile(new URL("README.md", base), "utf8"),
       readFile(new URL("report.md", base), "utf8"),
-      readFile(new URL("writing-report.md", base), "utf8"),
+      readFile(new URL("editing-comments.md", base), "utf8"),
       readFile(new URL("evidence/tables.json", base), "utf8").then(JSON.parse),
       readFile(new URL("evidence/figures.json", base), "utf8").then(JSON.parse),
       readFile(new URL("finalization.json", base), "utf8").then(JSON.parse),
@@ -350,7 +404,8 @@ test("the authorized bundled fixture is synthetic and internally consistent", as
     assert.match(manuscript, /Boundary Case in a Static Signaling Model/);
     assert.match(startHere, /Start here/i);
     assert.match(report, /Detailed Comments \(1\)/);
-    assert.match(writingReport, /Detailed Writing Comments \(1\)/);
+    assert.match(editingComments, /^# Editing comments$/m);
+    assert.match(editingComments, /Detailed Editing Comments \(1\)/);
     assert.deepEqual(new Set(active.map((finding) => finding.report_channel)), new Set(["substance", "writing"]));
     assert.doesNotMatch(manuscript, /Place-Based Green|Racial Inequality in Housing/);
     for (const row of [

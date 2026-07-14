@@ -807,7 +807,7 @@ def convert_fixture_to_contract_v02(target: Path) -> None:
     writing_path.write_text(json.dumps(writing, indent=2) + "\n", encoding="utf-8")
 
     writing_finding = by_id["WRT-01"]
-    target.joinpath("writing-report.md").write_text(
+    target.joinpath("editing-comments.md").write_text(
         "# Writing Review Report\n\n"
         "## Writing quality summary\n\n"
         "The manuscript is concise and generally readable; one verified agreement error remains.\n\n"
@@ -819,7 +819,7 @@ def convert_fixture_to_contract_v02(target: Path) -> None:
         "Preserve the compact proposition summary while making the objective correction.\n\n"
         "## Reference accuracy and citation support\n\n"
         "The synthetic fixture contains no citations or bibliography records.\n\n"
-        "## Detailed Writing Comments (1)\n\n"
+        "## Detailed Editing Comments (1)\n\n"
         f"### 1. {writing_finding['title']}\n"
         "<!-- finding_id: WRT-01 -->\n\n"
         "**Status**: [Pending]\n\n"
@@ -992,7 +992,7 @@ class ValidateReviewTests(unittest.TestCase):
             self.assertEqual(json.loads((target / "run.json").read_text())["schema_version"], "0.2")
             self.assertEqual(json.loads((target / "findings.json").read_text())["schema_version"], "0.2")
             self.assertEqual(json.loads((target / "evidence" / "writing.json").read_text())["schema_version"], "0.1")
-            self.assertIn("## Writing quality summary", (target / "writing-report.md").read_text())
+            self.assertIn("## Writing quality summary", (target / "editing-comments.md").read_text())
             self.assertEqual(MODULE.validate_review(target), [])
 
     def test_uncapped_comment_policy_passes(self) -> None:
@@ -1006,7 +1006,7 @@ class ValidateReviewTests(unittest.TestCase):
             refresh_finalization_receipt(target)
             self.assertEqual(MODULE.validate_review(target), [])
 
-    def test_v04_full_review_rejects_a_comment_cap(self) -> None:
+    def test_v04_full_review_rejects_a_legacy_aggregate_comment_cap(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "review"
             shutil.copytree(FIXTURE, target)
@@ -1015,7 +1015,32 @@ class ValidateReviewTests(unittest.TestCase):
             run["comment_policy"]["maximum"] = 100
             run_path.write_text(json.dumps(run, indent=2) + "\n", encoding="utf-8")
             errors = MODULE.validate_review(target)
-            self.assertTrue(any("exhaustive review has no comment cap" in error for error in errors), errors)
+            self.assertTrue(any("legacy comment_policy.maximum" in error for error in errors), errors)
+
+    def test_v04_full_review_uses_separate_100_and_30_channel_capacities(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "review"
+            shutil.copytree(FIXTURE, target)
+            run_path = target / "run.json"
+            run = json.loads(run_path.read_text(encoding="utf-8"))
+            run["comment_policy"]["writing_maximum"] = 29
+            run_path.write_text(json.dumps(run, indent=2) + "\n", encoding="utf-8")
+            errors = MODULE.validate_review(target)
+            self.assertTrue(any(
+                "substance_maximum 100 and writing_maximum 30" in error
+                for error in errors
+            ), errors)
+
+    def test_channel_capacities_must_be_declared_together(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "review"
+            shutil.copytree(FIXTURE, target)
+            run_path = target / "run.json"
+            run = json.loads(run_path.read_text(encoding="utf-8"))
+            run["comment_policy"].pop("writing_maximum")
+            run_path.write_text(json.dumps(run, indent=2) + "\n", encoding="utf-8")
+            errors = MODULE.validate_review(target)
+            self.assertTrue(any("declare substance_maximum and writing_maximum together" in error for error in errors), errors)
 
     def test_burdens_use_closed_conceptual_parents_without_alias_rows(self) -> None:
         def append_extension(target: Path, parent_id: str | None) -> None:
@@ -1230,6 +1255,66 @@ class ValidateReviewTests(unittest.TestCase):
             errors = MODULE.validate_review(target)
             self.assertTrue(any("importance ranks must be consecutive" in error for error in errors))
 
+    def test_current_priority_order_is_globally_severity_first(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "review"
+            shutil.copytree(FIXTURE, target)
+            ledger_path = target / "findings.json"
+            ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+            major, minor = ledger["findings"]
+            major["decision_role"] = "revision_value"
+            major["essential"] = False
+            major["importance_rank"] = 2
+            minor["decision_role"] = "revision_value"
+            minor["importance_rank"] = 1
+            ledger_path.write_text(json.dumps(ledger, indent=2) + "\n", encoding="utf-8")
+            errors = MODULE.validate_review(target)
+            self.assertTrue(
+                any("globally severity-first" in error for error in errors),
+                errors,
+            )
+
+    def test_current_priority_order_uses_decision_role_within_severity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "review"
+            shutil.copytree(FIXTURE, target)
+            ledger_path = target / "findings.json"
+            ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+            dispositive, revision = ledger["findings"]
+            dispositive.update({"severity": "major", "importance_rank": 2})
+            revision.update({
+                "severity": "major",
+                "decision_role": "revision_value",
+                "essential": False,
+                "report_channel": "substance",
+                "importance_rank": 1,
+            })
+            ledger_path.write_text(json.dumps(ledger, indent=2) + "\n", encoding="utf-8")
+            errors = MODULE.validate_review(target)
+            self.assertTrue(
+                any("within each severity tier" in error for error in errors),
+                errors,
+            )
+
+    def test_critical_finding_must_be_potentially_dispositive_and_essential(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "review"
+            shutil.copytree(FIXTURE, target)
+            ledger_path = target / "findings.json"
+            ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+            row = ledger["findings"][0]
+            row.update({
+                "severity": "critical",
+                "decision_role": "revision_value",
+                "essential": False,
+            })
+            ledger_path.write_text(json.dumps(ledger, indent=2) + "\n", encoding="utf-8")
+            errors = MODULE.validate_review(target)
+            self.assertTrue(
+                any("must be potentially_dispositive and essential" in error for error in errors),
+                errors,
+            )
+
     def test_active_refuted_finding_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "review"
@@ -1247,7 +1332,8 @@ class ValidateReviewTests(unittest.TestCase):
             shutil.copytree(FIXTURE, target)
             plan_path = target / "fix-plan.md"
             plan_path.write_text(
-                plan_path.read_text(encoding="utf-8") + "\n### LOGIC-01: Duplicate task\n",
+                plan_path.read_text(encoding="utf-8")
+                + "\n### Comment 99: Duplicate task\n<!-- finding_id: LOGIC-01 -->\n",
                 encoding="utf-8",
             )
             errors = MODULE.validate_review(target)
@@ -3310,6 +3396,23 @@ class ValidateReviewTests(unittest.TestCase):
             errors = MODULE.validate_review(target)
             self.assertTrue(any("uses prohibited boilerplate: As written," in error for error in errors))
 
+    def test_detailed_comment_rejects_internal_machine_language(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "review"
+            shutil.copytree(FIXTURE, target)
+            path = target / "report.md"
+            report = path.read_text(encoding="utf-8").replace(
+                "At equality both actions maximize payoff",
+                "The canonical record shows that both actions maximize payoff at equality",
+                1,
+            )
+            path.write_text(report, encoding="utf-8")
+            errors = MODULE.validate_review(target)
+            self.assertTrue(
+                any("uses prohibited boilerplate: canonical record" in error for error in errors),
+                errors,
+            )
+
     def test_v3_problem_cannot_open_with_meta_scaffolding(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "review"
@@ -3729,11 +3832,11 @@ class ValidateReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "review"
             shutil.copytree(FIXTURE, target)
-            report_path = target / "writing-report.md"
+            report_path = target / "editing-comments.md"
             report = report_path.read_text(encoding="utf-8")
             report = report.replace(
-                "## Detailed Writing Comments",
-                "## References and citation integrity\n\nRoutine reference checks.\n\n## Detailed Writing Comments",
+                "## Detailed Editing Comments",
+                "## References and citation integrity\n\nRoutine reference checks.\n\n## Detailed Editing Comments",
             )
             report_path.write_text(report, encoding="utf-8")
             errors = MODULE.validate_review(target)
@@ -3959,7 +4062,7 @@ class ValidateReviewTests(unittest.TestCase):
             })
             coverage_path.write_text(json.dumps(coverage, indent=2) + "\n", encoding="utf-8")
 
-            report_path = target / "writing-report.md"
+            report_path = target / "editing-comments.md"
             report = report_path.read_text(encoding="utf-8")
             report = report.replace(
                 "The synthetic manuscript is concise and readable. One objective subject-verb agreement error requires correction; no broader prose problem is present.",
@@ -3998,7 +4101,7 @@ class ValidateReviewTests(unittest.TestCase):
             self.assertTrue(any("requires a highest-return finding" in error for error in errors))
 
     def test_full_writing_report_does_not_require_journal_fit(self) -> None:
-        report = (FIXTURE / "writing-report.md").read_text(encoding="utf-8")
+        report = (FIXTURE / "editing-comments.md").read_text(encoding="utf-8")
         self.assertNotIn("## Journal fit and submission strategy", report)
         self.assertEqual(MODULE.validate_review(FIXTURE), [])
 
@@ -4014,7 +4117,7 @@ class ValidateReviewTests(unittest.TestCase):
             self.assertTrue(any("requires run.json.requested_addons" in error for error in errors))
 
     def test_assessment_boundary_heading_is_internal_only(self) -> None:
-        for relative in ("report.md", "writing-report.md"):
+        for relative in ("report.md", "editing-comments.md"):
             for heading in ("## Assessment Boundary: internal scope", "### assessment-boundaries"):
                 with self.subTest(relative=relative, heading=heading), tempfile.TemporaryDirectory() as tmp:
                     target = Path(tmp) / "review"
@@ -4070,7 +4173,7 @@ class ValidateReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "review"
             shutil.copytree(FIXTURE, target)
-            path = target / "writing-report.md"
+            path = target / "editing-comments.md"
             report = path.read_text(encoding="utf-8").replace(
                 "The synthetic manuscript is concise and readable.",
                 "A stale hand-edited assessment says something else.",
@@ -4084,39 +4187,39 @@ class ValidateReviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "review"
             shutil.copytree(FIXTURE, target)
-            path = target / "writing-report.md"
+            path = target / "editing-comments.md"
             report = path.read_text(encoding="utf-8").replace(
-                "## Detailed Writing Comments",
-                "## Writing quality summary\n\nRedundant legacy-format section.\n\n## Detailed Writing Comments",
+                "## Detailed Editing Comments",
+                "## Writing quality summary\n\nRedundant legacy-format section.\n\n## Detailed Editing Comments",
             )
             path.write_text(report, encoding="utf-8")
             errors = MODULE.validate_review(target)
-            self.assertTrue(any("mixes legacy and current writing-report headings" in error for error in errors))
+            self.assertTrue(any("mixes legacy and current editing-comments headings" in error for error in errors))
 
     def test_writing_report_rejects_reordered_or_duplicate_headings(self) -> None:
         for mutation, expected in (
             (
                 lambda report: report.replace(
-                    "## Writing assessment", "## TEMP", 1
+                    "## Editing assessment", "## TEMP", 1
                 ).replace(
-                    "## Highest-return writing revisions", "## Writing assessment", 1
+                    "## Highest-return editing revisions", "## Editing assessment", 1
                 ).replace(
-                    "## TEMP", "## Highest-return writing revisions", 1
+                    "## TEMP", "## Highest-return editing revisions", 1
                 ),
                 "headings are out of order",
             ),
             (
                 lambda report: report.replace(
-                    "## Detailed Writing Comments",
-                    "## Writing assessment\n\nDuplicate.\n\n## Detailed Writing Comments",
+                    "## Detailed Editing Comments",
+                    "## Editing assessment\n\nDuplicate.\n\n## Detailed Editing Comments",
                 ),
-                "each writing-report heading exactly once",
+                "each editing-comments heading exactly once",
             ),
         ):
             with self.subTest(expected=expected), tempfile.TemporaryDirectory() as tmp:
                 target = Path(tmp) / "review"
                 shutil.copytree(FIXTURE, target)
-                path = target / "writing-report.md"
+                path = target / "editing-comments.md"
                 path.write_text(mutation(path.read_text(encoding="utf-8")), encoding="utf-8")
                 errors = MODULE.validate_review(target)
                 self.assertTrue(any(expected in error for error in errors))
@@ -4192,15 +4295,15 @@ class ValidateReviewTests(unittest.TestCase):
             )
             path.write_text(report, encoding="utf-8")
             errors = MODULE.validate_review(target)
-            self.assertTrue(any("belongs in writing-report.md" in error for error in errors))
+            self.assertTrue(any("belongs in editing-comments.md" in error for error in errors))
 
     def test_v2_full_run_requires_writing_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "review"
             shutil.copytree(FIXTURE, target)
-            (target / "writing-report.md").unlink()
+            (target / "editing-comments.md").unlink()
             errors = MODULE.validate_review(target)
-            self.assertTrue(any("missing required file" in error and "writing-report.md" in error for error in errors))
+            self.assertTrue(any("missing required file" in error and "editing-comments.md" in error for error in errors))
 
     def test_complete_v2_run_requires_telemetry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

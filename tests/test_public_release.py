@@ -28,6 +28,8 @@ class PublicReleaseTests(unittest.TestCase):
         paths = {path.as_posix() for path in MODULE.public_files(ROOT)}
         self.assertIn("econ-review/SKILL.md", paths)
         self.assertIn("review-viewer/package.json", paths)
+        self.assertIn("review-viewer/release/review-desk.zip", paths)
+        self.assertIn("review-viewer/scripts/launch_review_desk.py", paths)
         self.assertIn("tests/fixtures/valid-review/report.md", paths)
         self.assertIn("scripts/public-release-files.json", paths)
         for private in ("DESIGN.md", "HANDOFF.md", "PROJECT-REVIEW.md", "research", "test_paper2"):
@@ -86,6 +88,19 @@ class PublicReleaseTests(unittest.TestCase):
             with self.subTest(path=value):
                 with self.assertRaisesRegex(ValueError, "unsafe|non-canonical"):
                     MODULE._safe_relative(value)
+
+    def test_archive_modes_are_host_independent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            python = root / "tool.py"
+            shell = root / "install.sh"
+            markdown = root / "README.md"
+            for path in (python, shell, markdown):
+                path.write_text("fixture\n", encoding="utf-8")
+                path.chmod(0o600)
+            self.assertEqual(MODULE._release_mode(python), 0o755)
+            self.assertEqual(MODULE._release_mode(shell), 0o755)
+            self.assertEqual(MODULE._release_mode(markdown), 0o644)
 
     def test_privacy_scan_rejects_home_paths_and_secret_filenames(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -160,6 +175,27 @@ class PublicReleaseTests(unittest.TestCase):
                     data = archive.read(f"econ-paper-review-skill/{record['path']}")
                     self.assertEqual(len(data), record["size"])
                     self.assertEqual(hashlib.sha256(data).hexdigest(), record["sha256"])
+
+    def test_nested_review_desk_license_notice_is_mandatory(self) -> None:
+        source = ROOT / "review-viewer" / "release" / "review-desk.zip"
+        notice = MODULE.REVIEW_DESK_THIRD_PARTY_NOTICE
+        with tempfile.TemporaryDirectory() as tmp:
+            rewritten = Path(tmp) / "review-desk-without-notice.zip"
+            with zipfile.ZipFile(source) as original:
+                manifest = json.loads(original.read("bundle-manifest.json"))
+                manifest["files"] = [record for record in manifest["files"] if record["path"] != notice]
+                payloads = {
+                    info.filename: (info, original.read(info.filename))
+                    for info in original.infolist()
+                    if info.filename not in {"bundle-manifest.json", notice}
+                }
+                manifest_info = original.getinfo("bundle-manifest.json")
+            with zipfile.ZipFile(rewritten, "w") as output:
+                output.writestr(manifest_info, MODULE._canonical_json(manifest))
+                for _name, (info, data) in payloads.items():
+                    output.writestr(info, data)
+            with self.assertRaisesRegex(ValueError, "third-party notices"):
+                MODULE._scan_review_desk_bundle(rewritten)
 
     def test_builder_refuses_existing_or_symlink_output(self) -> None:
         files = MODULE.public_files(ROOT)

@@ -24,6 +24,20 @@ POSTURE = {
     "not_assessed": "Not assessed",
 }
 
+SEVERITY_ORDER = {
+    "critical": 0,
+    "major": 1,
+    "minor": 2,
+    "info": 3,
+}
+
+DECISION_ROLE_ORDER = {
+    "potentially_dispositive": 0,
+    "posture_material": 1,
+    "revision_value": 2,
+    "polish": 3,
+}
+
 NAVIGATION_START = "<!-- review-navigation:start -->"
 NAVIGATION_END = "<!-- review-navigation:end -->"
 ASSESSMENT_BOUNDARY_HEADING = re.compile(
@@ -42,14 +56,11 @@ def review_navigation(include_writing: bool) -> str:
         "[Referee report](report.md)",
     ]
     if include_writing:
-        links.append("[Writing report](writing-report.md)")
-    links.extend([
-        "[Revision plan](fix-plan.md)",
-        "[Audit trail](evidence/verification.md)",
-    ])
+        links.append("[Editing comments](editing-comments.md)")
+    links.append("[Revision plan](fix-plan.md)")
     return "\n".join([
         NAVIGATION_START,
-        "> **Review package:** " + " · ".join(links),
+        "> **Review files:** " + " · ".join(links),
         NAVIGATION_END,
     ])
 
@@ -404,7 +415,15 @@ def active_rows(ledger: dict[str, Any], channel: str) -> list[dict[str, Any]]:
         and row.get("severity") in {"critical", "major", "minor", "info"}
         and row.get("report_channel", "substance") == channel
     ]
-    return sorted(rows, key=lambda row: row.get("importance_rank", 10**9))
+    # Current ledgers must encode this order in importance_rank. Keep the
+    # projection defensive as well so a stale or legacy rank can never place a
+    # lower-severity comment ahead of a critical one in an author report.
+    return sorted(rows, key=lambda row: (
+        SEVERITY_ORDER.get(str(row.get("severity")), 99),
+        DECISION_ROLE_ORDER.get(str(row.get("decision_role")), 99),
+        row.get("importance_rank", 10**9),
+        str(row.get("id") or ""),
+    ))
 
 
 def canonical_manifest(
@@ -412,24 +431,45 @@ def canonical_manifest(
     ledger: dict[str, Any],
     include_writing: bool,
 ) -> dict[str, Any]:
-    """Build the standard v0.3 viewer index while preserving declared extras.
+    """Build the author-facing document index while preserving safe reader extras.
 
-    The manifest lists only author-facing review documents. Manuscripts are
-    intentionally never discovered by a directory-wide scan. An existing
-    manifest may declare additional Markdown documents; safe, existing extras
-    are retained so the framework remains extensible.
+    Internal audits remain under supporting/evidence for later agents and
+    validation; they are not promoted into the PDF or Review Desk navigation.
+    An existing manifest may retain a deliberately author-facing overview,
+    report, or plan, but never an internal audit merely because it is readable.
     """
     review_id = required_text(ledger, "review_id", "findings.json")
     documents: list[dict[str, Any]] = [
         {"id": "start-here", "title": "Start here", "group": "overview", "path": "README.md", "order": 0},
         {"id": "referee-report", "title": "Referee report", "group": "overview", "path": "report.md", "order": 10},
     ]
+    run_path = review_dir / "run.json"
+    run = load(run_path) if run_path.exists() else {}
+    round_markdown = review_dir / "evidence" / "round-reconciliation.md"
+    has_prior_round = run.get("prior_round") is not None
+    if has_prior_round:
+        if not round_markdown.is_file():
+            raise ValueError(
+                "run.json.prior_round requires evidence/round-reconciliation.md "
+                "before report generation"
+            )
+        documents.append({
+            "id": "round-progress",
+            "title": "What changed since the prior review",
+            "group": "overview",
+            "path": "evidence/round-reconciliation.md",
+            "order": 20,
+        })
+    elif round_markdown.exists():
+        raise ValueError(
+            "evidence/round-reconciliation.md requires run.json.prior_round"
+        )
     if include_writing:
         documents.append({
-            "id": "writing-report",
-            "title": "Writing report",
+            "id": "editing-comments",
+            "title": "Editing comments",
             "group": "reports",
-            "path": "writing-report.md",
+            "path": "editing-comments.md",
             "order": 10,
         })
     documents.append({
@@ -440,34 +480,7 @@ def canonical_manifest(
         "order": 10,
     })
 
-    evidence_metadata = {
-        "reconstruction.md": ("paper-reconstruction", "Paper reconstruction", 10),
-        "reader-claim-audit.md": ("reader-claim-audit", "Reader and claim audit", 20),
-        "analytical-audit.md": ("analytical-audit", "Analytical audit", 30),
-        "figures.md": ("figure-audit", "Figure audit", 40),
-        "tables.md": ("table-audit", "Table audit", 50),
-        "writing.md": ("writing-audit", "Writing audit", 60),
-        "coverage.md": ("coverage-audit", "Coverage audit", 70),
-        "sources.md": ("source-verification", "Source verification", 80),
-        "verification.md": ("package-verification", "Package verification", 90),
-    }
-    for index, path in enumerate(sorted((review_dir / "evidence").glob("*.md"))):
-        relative_path = canonical_portable_path(
-            path.relative_to(review_dir).as_posix()
-        )
-        identifier, title, order = evidence_metadata.get(
-            path.name,
-            (f"evidence-{manifest_slug(path.stem)}", path.stem.replace("-", " ").title(), 100 + index),
-        )
-        documents.append({
-            "id": identifier,
-            "title": title,
-            "group": "audit",
-            "path": relative_path,
-            "order": order,
-        })
-
-    canonical_paths = {row["path"] for row in documents} | {"writing-report.md"}
+    canonical_paths = {row["path"] for row in documents} | {"editing-comments.md"}
     manifest_path = review_dir / "review-manifest.json"
     if manifest_path.exists():
         existing = load(manifest_path)
@@ -486,13 +499,18 @@ def canonical_manifest(
                 continue
             if not (review_dir / relative).is_file():
                 raise ValueError(f"{context}.path does not exist: {path}")
+            group = required_text(row, "group", context)
+            if group == "audit":
+                continue
+            if group not in {"overview", "reports", "plan"}:
+                raise ValueError(f"{context}.group must be overview, reports, plan, or audit")
             order = row.get("order")
             if not isinstance(order, int) or isinstance(order, bool):
                 raise ValueError(f"{context}.order must be an integer")
             documents.append({
                 "id": required_text(row, "id", context),
                 "title": required_text(row, "title", context),
-                "group": required_text(row, "group", context),
+                "group": group,
                 "path": path,
                 "order": order,
             })
@@ -518,10 +536,10 @@ def author_documents(review_dir: Path, include_writing: bool) -> list[tuple[str,
         "fix-plan.md": ("Revision plan", "Plan", "fix-plan.md", 10),
     }
     if include_writing:
-        documents["writing-report.md"] = (
-            "Writing report",
+        documents["editing-comments.md"] = (
+            "Editing comments",
             "Reports",
-            "writing-report.md",
+            "editing-comments.md",
             10,
         )
     manifest_path = review_dir / "review-manifest.json"
@@ -537,25 +555,22 @@ def author_documents(review_dir: Path, include_writing: bool) -> list[tuple[str,
             path = canonical_portable_path(required_text(row, "path", context))
             if Path(path).is_absolute() or ".." in Path(path).parts or not path.endswith(".md"):
                 raise ValueError(f"{context}.path must be a safe package-relative Markdown path")
-            if path == "writing-report.md" and not include_writing:
+            if path == "editing-comments.md" and not include_writing:
                 continue
             title = required_text(row, "title", context)
-            group = required_text(row, "group", context).title()
+            raw_group = required_text(row, "group", context)
+            if raw_group == "audit":
+                continue
+            group = raw_group.title()
             order = row.get("order")
             if not isinstance(order, int) or isinstance(order, bool):
                 raise ValueError(f"{context}.order must be an integer")
             documents[path] = (title, group, path, order)
-    else:
-        for path in sorted((review_dir / "evidence").glob("*.md")):
-            relative = canonical_portable_path(path.relative_to(review_dir).as_posix())
-            title = path.stem.replace("-", " ").title()
-            documents[relative] = (title, "Audit", relative, 100)
-
-    group_order = {"Overview": 0, "Reports": 1, "Plan": 2, "Audit": 3}
+    group_order = {"Overview": 0, "Reports": 1, "Plan": 2}
     rows = [
         row for row in documents.values()
         if row[2] in {"README.md", "report.md"}
-        or (row[2] == "writing-report.md" and include_writing)
+        or (row[2] == "editing-comments.md" and include_writing)
         or (review_dir / row[2]).exists()
         or row[2] == "fix-plan.md"
     ]
@@ -607,6 +622,26 @@ def render_landing_page(
     if not isinstance(capabilities, dict):
         raise ValueError("run.json.capabilities must be an object")
 
+    reading_order = [
+        "1. Read the [referee report](report.md) for the overall assessment and publication risks.",
+    ]
+    next_number = 2
+    if run.get("prior_round") is not None:
+        reading_order.append(
+            f"{next_number}. Review [what changed since the prior review]"
+            "(evidence/round-reconciliation.md) for the independent recheck of earlier comments."
+        )
+        next_number += 1
+    reading_order.append(
+        f"{next_number}. Work through the [revision plan](fix-plan.md) from P0 to P2."
+    )
+    next_number += 1
+    if include_writing:
+        reading_order.append(
+            f"{next_number}. Use the [editing comments](editing-comments.md) for structure, "
+            "terminology, mechanics, figures, and style."
+        )
+
     lines = [
         "# Start here: paper review",
         "",
@@ -614,15 +649,12 @@ def render_landing_page(
         "",
         "The Markdown reports and revision plan contain the full review; the local Review Desk is optional.",
         "",
-        f"**Inventory:** {counted(len(substance), 'substantive comment')}, {counted(len(writing), 'writing comment')}, and {counted(len(concerns), 'principal publication concern')}.",
+        f"**Inventory:** {counted(len(substance), 'substantive comment')}, {counted(len(writing), 'editing comment')}, and {counted(len(concerns), 'principal publication concern')}.",
         "",
         "## Recommended reading order",
         "",
-        "1. Read the [referee report](report.md) for the overall assessment and publication risks.",
-        "2. Work through the [revision plan](fix-plan.md) from P0 to P2.",
+        *reading_order,
     ]
-    if include_writing:
-        lines.append("3. Use the [writing report](writing-report.md) for structure, terminology, mechanics, figures, and style.")
     lines.extend(["", "## Highest-priority concerns", ""])
     if not concerns:
         lines.append("No verified issue currently meets the principal-concern threshold.")
@@ -632,11 +664,10 @@ def render_landing_page(
             raise ValueError(f"{context} must be an object")
         title = required_text(concern, "title", context)
         required_text(concern, "rationale", context)
-        finding_ids = string_list(concern, "finding_ids", context)
+        string_list(concern, "finding_ids", context)
         repairability = humanize(required_text(concern, "repairability", context))
-        linked = ", ".join(f"`{finding_id}`" for finding_id in finding_ids)
         lines.append(
-            f"{index}. [{title}](report.md#{markdown_anchor(index, title)}) — linked comments: {linked}; repairability: {repairability}."
+            f"{index}. [{title}](report.md#{markdown_anchor(index, title)}) — revision path: {repairability}."
         )
     other_major = synthesis.get("other_major_finding_ids")
     if not isinstance(other_major, list):
@@ -644,46 +675,152 @@ def render_landing_page(
     if other_major:
         lines.extend([
             "",
-            f"The referee report also identifies {len(other_major)} other posture-material issue{'s' if len(other_major) != 1 else ''}.",
+            f"The referee report also identifies {len(other_major)} other important issue{'s' if len(other_major) != 1 else ''}.",
         ])
 
     figures = required_text(boundary, "figures", "run.json.assessment_boundary")
     equations = required_text(boundary, "equations", "run.json.assessment_boundary")
     appendix = required_text(boundary, "appendix", "run.json.assessment_boundary")
-    notes = optional_text(boundary, "notes", "run.json.assessment_boundary") or "No additional boundary note was recorded."
-    literature = "available" if capabilities.get("live_literature_search") is True else "not available"
+    notes = optional_text(boundary, "notes", "run.json.assessment_boundary")
     replication = humanize(capabilities.get("replication_code"))
     lines.extend([
         "",
-        "## Review coverage at a glance",
+        "## What was reviewed",
         "",
         f"- **Materials:** {source_coverage(run)}; appendix {humanize(appendix)}.",
-        f"- **Rendered/formal evidence:** figures {humanize(figures)}; equations {humanize(equations)}.",
-        f"- **External checks and limits:** live literature search {literature}; replication code {replication}. {notes}",
+        f"- **Figures and equations:** figures {humanize(figures)}; equations {humanize(equations)}.",
+    ])
+    unchecked: list[str] = []
+    if appendix in {"not_available", "not_supplied", "unavailable"}:
+        unchecked.append("No appendix was available for review.")
+    if capabilities.get("live_literature_search") is not True:
+        unchecked.append("The review did not independently check the live literature.")
+    if replication in {"not supplied", "not available", "not permitted"}:
+        unchecked.append(f"Replication code was {replication}, so the reported results were not rerun.")
+    elif replication == "static only":
+        unchecked.append("Replication code was read but not executed.")
+    if notes:
+        unchecked.append(notes)
+    if unchecked:
+        lines.extend(["", "## What could not be checked", ""])
+        lines.extend(f"- {value}" for value in unchecked)
+    lines.extend([
         "",
-        "## Files in this package",
+        "## Review files",
         "",
-        "| Purpose | File |",
+        "| Purpose | Open |",
         "|---|---|",
     ])
     for title, group, path in author_documents(review_dir, include_writing):
+        if path == "README.md":
+            continue
         safe_title = title.replace("|", "\\|")
-        lines.append(f"| {group}: {safe_title} | [{path}]({path}) |")
+        lines.append(f"| {group}: {safe_title} | [{safe_title}]({path}) |")
     lines.extend([
-        "",
-        "The JSON files are canonical machine-readable state for validation and later review rounds; authors normally work from the Markdown files above.",
         "",
         "## Carry work into the next round",
         "",
-        "Ticking a revision-plan box records author progress; it does not close the finding, so report comments remain **Pending** until rechecked. In the optional Review Desk, **Ready for recheck** requests another review, **Challenged** requests reconsideration, and **Deferred** keeps the issue open. Notes are optional. Export `review-actions.json` to carry these actions into the next round.",
+        "Use Review Desk to set your priority, add an instruction or response, and choose **Open**, **Ready for review**, or **Set aside** for each comment. Ready for review means either that a change was made or that a reasoned response is ready to assess. Set aside distinguishes comments to revisit next round from comments that do not apply or cannot be addressed. The exported revision brief carries these choices and your notes into the next round.",
     ])
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _markdown_label(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+
+
+def _sentence(value: Any) -> str:
+    text = " ".join(str(value or "").split()).strip()
+    if text and not text.endswith((".", "?", "!")):
+        text += "."
+    return text
+
+
+def _source_citation(source: dict[str, Any]) -> str:
+    title = required_text(source, "title", f"external source {source.get('id')}")
+    metadata = source.get("bibliographic_metadata")
+    author_names: list[str] = []
+    year = ""
+    if isinstance(metadata, dict):
+        raw_authors = metadata.get("authors")
+        if isinstance(raw_authors, list):
+            author_names = [
+                str(row.get("name")).strip()
+                for row in raw_authors
+                if isinstance(row, dict) and isinstance(row.get("name"), str) and row.get("name").strip()
+            ]
+        raw_date = metadata.get("first_public_date") or metadata.get("publication_date")
+        if isinstance(raw_date, str) and re.match(r"^[0-9]{4}", raw_date):
+            year = raw_date[:4]
+    if len(author_names) == 1:
+        authors = author_names[0]
+    elif len(author_names) == 2:
+        authors = f"{author_names[0]} and {author_names[1]}"
+    elif author_names:
+        authors = f"{author_names[0]} et al."
+    else:
+        authors = ""
+    title_label = _markdown_label(title)
+    raw_url = source.get("url")
+    linked_title = f"[{title_label}](<{raw_url}>)" if isinstance(raw_url, str) and raw_url.startswith("https://") else title_label
+    prefix = authors + (f" ({year})" if authors and year else "")
+    return f"{prefix}, {linked_title}" if prefix else linked_title
+
+
+def contribution_comparison_lines(external_sources: dict[str, Any] | None) -> list[str]:
+    """Project verified material comparators into the referee report.
+
+    Search confidentiality governs outbound queries; it does not require the
+    final report to conceal public papers whose metadata and propositions have
+    been verified. Inconclusive or background rows remain in supporting
+    evidence rather than being promoted into author-facing claims.
+    """
+    if not isinstance(external_sources, dict) or external_sources.get("schema_version") != "0.4":
+        return []
+    audit = external_sources.get("frontier_audit")
+    if not isinstance(audit, dict):
+        return []
+    raw_sources = external_sources.get("sources")
+    raw_comparisons = audit.get("literature_comparisons")
+    if not isinstance(raw_sources, list) or not isinstance(raw_comparisons, list):
+        raise ValueError("current external-sources.json must provide sources and literature_comparisons arrays")
+    by_id = {
+        row.get("id"): row
+        for row in raw_sources
+        if isinstance(row, dict) and isinstance(row.get("id"), str)
+    }
+    material_relations = {
+        "closest_antecedent", "material_overlap", "adjacent_contribution",
+        "method_or_data_precedent", "contradictory_result", "replication",
+    }
+    lines: list[str] = []
+    for index, comparison in enumerate(raw_comparisons):
+        if not isinstance(comparison, dict):
+            raise ValueError(f"external-sources.json literature comparison {index} must be an object")
+        if comparison.get("assessment_state") != "supported" or comparison.get("relation_type") not in material_relations:
+            continue
+        source_id = comparison.get("source_id")
+        source = by_id.get(source_id)
+        if source is None:
+            raise ValueError(f"external-sources.json comparison references unknown source {source_id}")
+        source_contribution = _sentence(comparison.get("source_contribution"))
+        overlap = _sentence(comparison.get("overlap"))
+        surviving_difference = _sentence(comparison.get("surviving_difference"))
+        if not all((source_contribution, overlap, surviving_difference)):
+            raise ValueError(f"external-sources.json comparison {comparison.get('id')} is incomplete")
+        lines.append(
+            f"- **{_source_citation(source)}.** {source_contribution} "
+            f"The overlap is specific: {overlap} The reviewed paper remains distinct because {surviving_difference}"
+        )
+    return lines
 
 
 def render_report(
     ledger: dict[str, Any],
     synthesis: dict[str, Any],
     include_writing: bool = True,
+    round_reconciliation: dict[str, Any] | None = None,
+    external_sources: dict[str, Any] | None = None,
 ) -> str:
     all_rows = finding_rows(ledger)
     by_id: dict[str, dict[str, Any]] = {}
@@ -713,6 +850,61 @@ def render_report(
     if strengths:
         lines.extend(["", "The main strengths worth preserving are:", ""])
         lines.extend(f"- {value}" for value in strengths)
+    comparison_lines = contribution_comparison_lines(external_sources)
+    if comparison_lines:
+        lines.extend([
+            "",
+            "## Contribution and closest literature",
+            "",
+            "The verified comparisons below are the ones that materially affect how the contribution should be framed:",
+            "",
+            *comparison_lines,
+        ])
+    if round_reconciliation is not None:
+        records = round_reconciliation.get("records")
+        new_finding_ids = round_reconciliation.get("new_finding_ids")
+        if not isinstance(records, list) or not isinstance(new_finding_ids, list):
+            raise ValueError(
+                "evidence/round-reconciliation.json must provide records and new_finding_ids arrays"
+            )
+        outcomes = [
+            row.get("outcome")
+            for row in records
+            if isinstance(row, dict)
+        ]
+        if len(outcomes) != len(records):
+            raise ValueError(
+                "evidence/round-reconciliation.json.records must contain objects"
+            )
+        allowed_outcomes = {
+            "resolved", "partly_resolved", "unchanged", "superseded", "user_excluded",
+        }
+        unsupported = sorted(
+            {value for value in outcomes if value not in allowed_outcomes},
+            key=str,
+        )
+        if unsupported:
+            raise ValueError(
+                "evidence/round-reconciliation.json has unsupported outcomes: "
+                + ", ".join(str(value) for value in unsupported)
+            )
+        resolved = outcomes.count("resolved")
+        remaining = sum(
+            value in {"partly_resolved", "unchanged", "superseded"}
+            for value in outcomes
+        )
+        excluded = outcomes.count("user_excluded")
+        lines.extend([
+            "",
+            "## Progress since the prior review",
+            "",
+            f"The independent recheck finds {counted(resolved, 'prior comment')} resolved, "
+            f"{counted(remaining, 'prior comment')} still active, and "
+            f"{counted(excluded, 'prior comment')} excluded by the user. "
+            f"The fresh review pass identifies {counted(len(new_finding_ids), 'new issue')}. "
+            "See [What changed since the prior review](evidence/round-reconciliation.md) "
+            "for the finding-by-finding evidence.",
+        ])
     lines.extend([
         "",
         "## Recommendation and main grounds",
@@ -741,16 +933,24 @@ def render_report(
         for finding_id in finding_ids:
             if finding_id not in by_id:
                 raise ValueError(f"{context}.finding_ids references unknown finding {finding_id}")
-        linked = ", ".join(f"`{finding_id}`" for finding_id in finding_ids)
         repairability = required_text(concern, "repairability", context)
         upgrade_condition = required_text(concern, "upgrade_condition", context)
         lines.extend([
             f"### {index}. {concern_title}",
             f"<!-- principal_concern_id: {concern_id} -->",
+            f"<!-- linked_finding_ids: {', '.join(finding_ids)} -->",
             "",
             rationale,
             "",
-            f"Linked findings: {linked}. Repairability: {repairability.replace('_', ' ')}.",
+            {
+                "within_current_design": "This can be corrected within the current design.",
+                "claim_narrowing": "This can be addressed by narrowing the affected claim.",
+                "additional_analysis": "This requires additional analysis using the current evidence base.",
+                "new_evidence": "Resolving this fully requires new evidence.",
+                "redesign": "Resolving this fully requires a redesign.",
+                "unclear": "The feasible revision path is not yet clear.",
+                "no_clear_fix": "No credible correction is currently apparent.",
+            }[repairability],
             "",
             f"What would change the assessment: {upgrade_condition}",
             "",
@@ -765,7 +965,7 @@ def render_report(
             context = finding_context(row)
             title = optional_text(row, "title", context) or required_text(row, "issue", context)
             why_it_matters = required_text(row, "why_it_matters", context)
-            lines.append(f"- **{title}** (`{finding_id}`): {why_it_matters}")
+            lines.append(f"- **{title}:** {why_it_matters}")
     else:
         lines.append("No other major substantive issues were identified.")
     lines.extend([
@@ -786,12 +986,12 @@ def markdown_cell(value: Any) -> str:
     return " ".join(str(value or "—").split()).replace("|", r"\|")
 
 
-def finding_id_list(row: dict[str, Any]) -> str:
+def related_comment_list(row: dict[str, Any], labels: dict[str, str]) -> str:
     raw_ids = row.get("finding_ids", [])
     if not isinstance(raw_ids, list):
         raise ValueError("writing audit finding_ids must be an array")
     ids = [value for value in raw_ids if isinstance(value, str) and value]
-    return ", ".join(f"`{value}`" for value in ids) or "—"
+    return "; ".join(labels.get(value, "Related comment") for value in ids) or "—"
 
 
 def render_current_writing_report(
@@ -799,9 +999,9 @@ def render_current_writing_report(
     writing_audit: dict[str, Any],
     run: dict[str, Any],
 ) -> str:
-    """Project the current writing report entirely from canonical JSON state."""
+    """Project the current editing comments entirely from canonical JSON state."""
     if writing_audit.get("schema_version") != "0.4":
-        raise ValueError("canonical writing-report generation requires writing audit schema_version 0.4")
+        raise ValueError("canonical editing-comments generation requires writing audit schema_version 0.4")
     if writing_audit.get("review_id") != ledger.get("review_id") or run.get("review_id") != ledger.get("review_id"):
         raise ValueError("run, findings, and writing audit review_id values must match")
 
@@ -828,6 +1028,11 @@ def render_current_writing_report(
         for row in writing_rows
         if isinstance(row.get("id"), str)
     }
+    comment_labels = {
+        row["id"]: f"Comment {index}: {optional_text(row, 'title', finding_context(row)) or required_text(row, 'issue', finding_context(row))}"
+        for index, row in enumerate(writing_rows, start=1)
+        if isinstance(row.get("id"), str)
+    }
     highest_ids = string_list(
         writing_audit,
         "highest_return_finding_ids",
@@ -835,11 +1040,11 @@ def render_current_writing_report(
     )
 
     lines = [
-        "# Writing report",
+        "# Editing comments",
         "",
         review_navigation(include_writing=True),
         "",
-        "## Writing assessment",
+        "## Editing assessment",
         "",
         required_text(writing_audit, "assessment_summary", "evidence/writing.json"),
         "",
@@ -851,7 +1056,7 @@ def render_current_writing_report(
     strengths = string_list(writing_audit, "strengths", "evidence/writing.json")
     lines.extend(f"- {strength}" for strength in strengths)
 
-    lines.extend(["", "## Highest-return writing revisions", ""])
+    lines.extend(["", "## Highest-return editing revisions", ""])
     if highest_ids:
         for index, finding_id in enumerate(highest_ids, start=1):
             row = writing_by_id.get(finding_id)
@@ -862,9 +1067,9 @@ def render_current_writing_report(
             context = finding_context(row)
             title = optional_text(row, "title", context) or required_text(row, "issue", context)
             punctuated_title = title if title.endswith((".", "?", "!")) else title + "."
-            lines.append(f"{index}. **`{finding_id}` — {punctuated_title}** {constructive_feedback(row)}")
+            lines.append(f"{index}. **{punctuated_title}** {constructive_feedback(row)}")
     else:
-        lines.append("No active writing finding currently requires a prioritized revision.")
+        lines.append("No active editing finding currently requires a prioritized revision.")
 
     section_rows = writing_audit.get("section_audit")
     if not isinstance(section_rows, list):
@@ -873,7 +1078,7 @@ def render_current_writing_report(
         "",
         "## Section-by-section reader audit",
         "",
-        "| Section | Current job | What works | Reader friction | Revision direction | Findings |",
+        "| Section | Current job | What works | Reader friction | Revision direction | Related comments |",
         "|---|---|---|---|---|---|",
     ])
     for index, row in enumerate(section_rows):
@@ -887,7 +1092,7 @@ def render_current_writing_report(
                 markdown_cell(row.get("what_works")),
                 markdown_cell(row.get("reader_friction")),
                 markdown_cell(row.get("revision_direction")),
-                finding_id_list(row),
+                related_comment_list(row, comment_labels),
             ])
             + " |"
         )
@@ -901,7 +1106,7 @@ def render_current_writing_report(
         "",
         required_text(writing_audit, "terminology_summary", "evidence/writing.json"),
         "",
-        "| Object | Status | Preferred form | Variants checked | Locations checked | Findings |",
+        "| Object | Status | Preferred form | Variants checked | Locations checked | Related comments |",
         "|---|---|---|---|---|---|",
     ])
     for index, row in enumerate(consistency_rows):
@@ -918,7 +1123,7 @@ def render_current_writing_report(
                 markdown_cell(row.get("preferred")),
                 markdown_cell("; ".join(str(value) for value in variants)),
                 markdown_cell(row.get("locations_checked")),
-                finding_id_list(row),
+                related_comment_list(row, comment_labels),
             ])
             + " |"
         )
@@ -940,10 +1145,8 @@ def render_current_writing_report(
             raise ValueError(f"evidence/writing.json.mechanics[{index}] must be an object")
         group_id = required_text(row, "id", f"evidence/writing.json.mechanics[{index}]")
         lines.extend([
-            f"### {group_id}: {humanize(row.get('kind')).capitalize()}",
-            "",
-            f"**Result:** {humanize(row.get('status')).capitalize()}. "
-            f"**Priority:** {humanize(row.get('priority'))}. **Findings:** {finding_id_list(row)}",
+            f"### {index + 1}. {humanize(row.get('kind')).capitalize()}",
+            f"<!-- writing_group_id: {group_id}; render_verification: {row.get('render_verification')} -->",
             "",
         ])
         occurrences = row.get("occurrences")
@@ -970,17 +1173,20 @@ def render_current_writing_report(
                     "correction",
                     f"evidence/writing.json.mechanics[{index}].occurrences[{occurrence_index}]",
                 )
-                provenance = humanize(occurrence.get("source_provenance"))
-                verification = humanize(occurrence.get("render_verification"))
-                lines.append(
-                    f"- **{locator}:** “{clean_join(before)}” → “{clean_join(after)}” "
-                    f"_({provenance}; {verification})_"
-                )
+                lines.extend([
+                    f"<!-- occurrence_source: {occurrence.get('source_provenance')}; render_verification: {occurrence.get('render_verification')} -->",
+                    f"- **{locator}:** Replace “{clean_join(before)}” with “{clean_join(after)}”",
+                ])
             lines.append("")
+        else:
+            lines.extend(["No correction is needed in this category.", ""])
+        related_comments = related_comment_list(row, comment_labels)
+        if related_comments != "—":
+            lines.extend([f"See {related_comments} for the full explanation and revision request.", ""])
         lines.extend([
-            f"**Reader consequence:** {required_text(row, 'reader_consequence', f'evidence/writing.json.mechanics[{index}]')}",
+            f"**Why it matters:** {required_text(row, 'reader_consequence', f'evidence/writing.json.mechanics[{index}]')}",
             "",
-            f"**Checked:** {required_text(row, 'notes', f'evidence/writing.json.mechanics[{index}]')}",
+            required_text(row, "notes", f"evidence/writing.json.mechanics[{index}]"),
             "",
         ])
 
@@ -993,7 +1199,7 @@ def render_current_writing_report(
     lines.extend(["## Style and writing improvements", ""])
     if style_rows:
         lines.extend([
-            "| Location | Current friction | Suggested revision | Priority | Findings |",
+            "| Location | Current friction | Suggested revision | Priority | Related comments |",
             "|---|---|---|---|---|",
         ])
         for index, row in enumerate(style_rows):
@@ -1006,7 +1212,7 @@ def render_current_writing_report(
                     markdown_cell(row.get("current_problem")),
                     markdown_cell(row.get("suggested_revision")),
                     markdown_cell(humanize(row.get("priority"))),
-                    finding_id_list(row),
+                    related_comment_list(row, comment_labels),
                 ])
                 + " |"
             )
@@ -1015,7 +1221,7 @@ def render_current_writing_report(
     lines.extend(["", "### Redundancy and repetition", ""])
     if redundancy_rows:
         lines.extend([
-            "| Repeated idea | Locations | Recommended home | Findings |",
+            "| Repeated idea | Locations | Recommended home | Related comments |",
             "|---|---|---|---|",
         ])
         for index, row in enumerate(redundancy_rows):
@@ -1030,7 +1236,7 @@ def render_current_writing_report(
                     markdown_cell(row.get("idea")),
                     markdown_cell("; ".join(str(value) for value in locations)),
                     markdown_cell(row.get("recommended_home")),
-                    finding_id_list(row),
+                    related_comment_list(row, comment_labels),
                 ])
                 + " |"
             )
@@ -1052,7 +1258,7 @@ def render_current_writing_report(
             "",
             f"**Recommended sequence:** {required_text(venue, 'recommended_strategy', 'evidence/writing.json.venue_fit')}",
             "",
-            f"**Related findings:** {finding_id_list(venue)}",
+            f"**Related comments:** {related_comment_list(venue, comment_labels)}",
         ])
         for index, candidate in enumerate(candidates, start=1):
             if not isinstance(candidate, dict):
@@ -1086,11 +1292,11 @@ def render_current_writing_report(
         detail_block(index, row)
         for index, row in enumerate(writing_rows, start=1)
     )
-    lines.extend(["", f"## Detailed Writing Comments ({len(writing_rows)})", ""])
+    lines.extend(["", f"## Detailed Editing Comments ({len(writing_rows)})", ""])
     if details:
         lines.append(details)
     else:
-        lines.append("No active writing comments remain.")
+        lines.append("No active editing comments remain.")
     rendered = "\n".join(lines).rstrip() + "\n"
     if ASSESSMENT_BOUNDARY_HEADING.search(rendered):
         raise ValueError(
@@ -1106,13 +1312,13 @@ def render_current_writing_report(
 
 def render_legacy_writing_report(review_dir: Path, ledger: dict[str, Any]) -> str:
     """Preserve pre-v0.4 preambles for immutable and legacy-compatible packages."""
-    destination = review_dir / "writing-report.md"
+    destination = review_dir / "editing-comments.md"
     if not destination.exists():
-        raise ValueError("writing-report.md preamble is required before deterministic detail generation")
+        raise ValueError("editing-comments.md preamble is required before deterministic detail generation")
     existing = destination.read_text(encoding="utf-8")
-    marker = "## Detailed Writing Comments"
+    marker = "## Detailed Editing Comments"
     preamble = existing.split(marker, 1)[0].rstrip()
-    # New writing reports exclude routine bibliography and citation-accuracy
+    # New editing comments exclude routine bibliography and citation-accuracy
     # checking. Strip either legacy reference section when normalizing a current
     # package, while leaving archived packages untouched unless regenerated.
     for heading in (
@@ -1125,11 +1331,11 @@ def render_legacy_writing_report(review_dir: Path, ledger: dict[str, Any]) -> st
             preamble,
             flags=re.MULTILINE,
         ).rstrip()
-    preamble = re.sub(r"^# Writing and reference report\s*$", "# Writing report", preamble, flags=re.MULTILINE)
+    preamble = re.sub(r"^# Writing and reference report\s*$", "# Editing comments", preamble, flags=re.MULTILINE)
     preamble = add_navigation(preamble, include_writing=True)
     writing = active_rows(ledger, "writing")
     details = "\n\n".join(detail_block(index, row) for index, row in enumerate(writing, start=1))
-    return f"{preamble}\n\n## Detailed Writing Comments ({len(writing)})\n\n{details}\n"
+    return f"{preamble}\n\n## Detailed Editing Comments ({len(writing)})\n\n{details}\n"
 
 
 def render_writing_report(
@@ -1162,10 +1368,12 @@ def main() -> int:
         if contract not in {"0.3", "0.4"} or synthesis.get("review_contract_version") not in {"0.3", "0.4"}:
             raise ValueError("generate_reports.py requires the v0.3 or v0.4 contract")
         writing_rows = active_rows(ledger, "writing")
-        writing_path = args.review_dir / "writing-report.md"
+        writing_path = args.review_dir / "editing-comments.md"
         include_writing = bool(run.get("mode") == "full" or writing_rows or writing_path.exists())
         writing_audit_path = args.review_dir / "evidence" / "writing.json"
         writing_audit = load(writing_audit_path) if writing_audit_path.exists() else None
+        external_sources_path = args.review_dir / "evidence" / "external-sources.json"
+        external_sources = load(external_sources_path) if external_sources_path.exists() else None
         frozen_legacy_receipt = False
         finalization_path = args.review_dir / "finalization.json"
         if finalization_path.exists():
@@ -1184,6 +1392,15 @@ def main() -> int:
                 "current v0.4 full report generation requires evidence/writing.json schema_version 0.4"
             )
         manifest_path = args.review_dir / "review-manifest.json"
+        round_reconciliation = None
+        if run.get("prior_round") is not None:
+            round_reconciliation = load(
+                args.review_dir / "evidence" / "round-reconciliation.json"
+            )
+            if round_reconciliation.get("review_id") != run.get("review_id"):
+                raise ValueError(
+                    "evidence/round-reconciliation.json review_id differs from run.json"
+                )
         manifest_output = json.dumps(
             canonical_manifest(args.review_dir, ledger, include_writing),
             indent=2,
@@ -1195,7 +1412,13 @@ def main() -> int:
         else:
             atomic_write_text(args.review_dir, "review-manifest.json", manifest_output)
         outputs = {
-            args.review_dir / "report.md": render_report(ledger, synthesis, include_writing),
+            args.review_dir / "report.md": render_report(
+                ledger,
+                synthesis,
+                include_writing,
+                round_reconciliation,
+                external_sources,
+            ),
             args.review_dir / "README.md": render_landing_page(
                 args.review_dir,
                 ledger,

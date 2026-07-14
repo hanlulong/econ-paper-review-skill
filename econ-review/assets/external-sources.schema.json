@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "review_id", "search_confidentiality", "sources"],
   "properties": {
-    "schema_version": {"enum": ["0.1", "0.2", "0.3"]},
+    "schema_version": {"enum": ["0.1", "0.2", "0.3", "0.4"]},
     "review_id": {"type": "string", "minLength": 1},
     "search_confidentiality": {"enum": ["forbidden", "deidentified", "exact_allowed"]},
     "sources": {
@@ -37,6 +37,8 @@
         "snapshot_kind": {
           "enum": ["source_capture", "official_metadata", "reviewer_note"]
         },
+        "bibliographic_metadata": {"$ref": "#/$defs/bibliographicMetadata"},
+        "capture_policy": {"$ref": "#/$defs/capturePolicy"},
         "support_records": {
           "type": "array",
           "minItems": 1,
@@ -46,6 +48,142 @@
         "snapshot_path": {"type": "string", "minLength": 1},
         "snapshot_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
       }
+    },
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "author_type", "stable_id"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "author_type": {"enum": ["person", "organization"]},
+        "stable_id": {"type": ["string", "null"], "minLength": 1}
+      }
+    },
+    "bibliographicMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authors", "identifiers", "source_type", "venue", "publication_date",
+        "first_public_date", "first_public_date_status", "work_family_id",
+        "metadata_source_url", "record_status", "record_status_checked_at",
+        "record_status_source_url", "field_support_record_ids"
+      ],
+      "properties": {
+        "authors": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/author"}
+        },
+        "identifiers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["scheme", "value"],
+            "properties": {
+              "scheme": {"enum": ["doi", "openalex", "repec", "isbn", "ssrn", "arxiv", "other"]},
+              "value": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "source_type": {
+          "enum": [
+            "journal_article", "working_paper", "preprint", "book",
+            "book_chapter", "conference_paper", "report", "thesis",
+            "dataset", "software", "other"
+          ]
+        },
+        "venue": {"type": ["string", "null"], "minLength": 1},
+        "publication_date": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "format": "date"}
+          ]
+        },
+        "first_public_date": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "format": "date"}
+          ]
+        },
+        "first_public_date_status": {"enum": ["verified", "reported", "unresolved"]},
+        "work_family_id": {"type": "string", "pattern": "^WORK-[0-9]{2,}$"},
+        "metadata_source_url": {"type": "string", "pattern": "^https://"},
+        "record_status": {"enum": ["current", "corrected", "retracted", "withdrawn", "unknown"]},
+        "record_status_checked_at": {"type": "string", "format": "date"},
+        "record_status_source_url": {"type": "string", "pattern": "^https://"},
+        "field_support_record_ids": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "authors", "title", "identifiers", "source_type", "venue",
+            "publication_date", "first_public_date", "first_public_date_status",
+            "metadata_source_url", "record_status", "record_status_checked_at",
+            "record_status_source_url"
+          ],
+          "properties": {
+            "authors": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"},
+            "title": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"},
+            "identifiers": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"},
+            "source_type": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"},
+            "venue": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"},
+            "publication_date": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"},
+            "first_public_date": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"},
+            "first_public_date_status": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"},
+            "metadata_source_url": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"},
+            "record_status": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"},
+            "record_status_checked_at": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"},
+            "record_status_source_url": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"}
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"first_public_date_status": {"enum": ["verified", "reported"]}},
+            "required": ["first_public_date_status"]
+          },
+          "then": {"properties": {"first_public_date": {"type": "string", "format": "date"}}}
+        },
+        {
+          "if": {
+            "properties": {"first_public_date_status": {"const": "unresolved"}},
+            "required": ["first_public_date_status"]
+          },
+          "then": {"properties": {"first_public_date": {"type": "null"}}}
+        }
+      ]
+    },
+    "capturePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lawful_access_basis", "retained_material", "redistribution"],
+      "properties": {
+        "lawful_access_basis": {
+          "enum": ["open_or_public", "licensed_private", "metadata_only", "author_supplied", "other"]
+        },
+        "retained_material": {"enum": ["minimal_excerpt", "private_full_text", "metadata_only"]},
+        "redistribution": {"enum": ["permitted", "not_permitted", "unknown"]}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"lawful_access_basis": {"const": "licensed_private"}},
+            "required": ["lawful_access_basis"]
+          },
+          "then": {"properties": {"redistribution": {"const": "not_permitted"}}}
+        },
+        {
+          "if": {
+            "properties": {"retained_material": {"const": "private_full_text"}},
+            "required": ["retained_material"]
+          },
+          "then": {"properties": {"redistribution": {"const": "not_permitted"}}}
+        }
+      ]
     },
     "supportRecord": {
       "type": "object",
@@ -61,7 +199,9 @@
         "proposition_kind": {
           "enum": [
             "bibliographic_metadata", "reported_question", "reported_main_result",
-            "method_detail", "sample_detail", "source_level_absence",
+            "method_detail", "design_or_identification_detail",
+            "model_or_assumption_detail", "theorem_or_proof_detail",
+            "data_or_measurement_detail", "sample_detail", "source_level_absence",
             "frontier_exhaustiveness", "other"
           ]
         },
@@ -69,6 +209,7 @@
         "access_scope": {"enum": ["full_text", "abstract", "official_summary", "metadata", "other"]},
         "scope_complete": {"type": "boolean"},
         "scope_complete_basis": {"type": ["string", "null"], "minLength": 1},
+        "assessment_note": {"type": ["string", "null"], "minLength": 1},
         "locator": {"type": "string", "minLength": 1},
         "snapshot_excerpt": {"type": ["string", "null"], "minLength": 1},
         "snapshot_start": {"type": ["integer", "null"], "minimum": 0},
@@ -87,6 +228,15 @@
         }
       },
       "allOf": [
+        {
+          "if": {
+            "properties": {"support_state": {"enum": ["partial", "conflict"]}},
+            "required": ["support_state"]
+          },
+          "then": {
+            "properties": {"assessment_note": {"type": "string", "minLength": 1}}
+          }
+        },
         {
           "if": {
             "properties": {"support_state": {"enum": ["supported", "partial", "conflict"]}},
@@ -166,6 +316,13 @@
         "id": {"type": "string", "pattern": "^QRYF-[0-9]{2,}$"},
         "family": {"type": "string", "minLength": 1},
         "rationale": {"type": "string", "minLength": 1},
+        "discovery_route": {"$ref": "#/$defs/discoveryRoute"},
+        "claim_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^LIT-CLM-[0-9]{2,}$"}
+        },
         "status": {"enum": ["completed", "blocked_by_policy", "inaccessible"]},
         "query_logs": {
           "type": "array",
@@ -193,6 +350,15 @@
             }
           }
         }
+      ]
+    },
+    "discoveryRoute": {
+      "enum": [
+        "manuscript_bibliography", "concept_search", "mechanism_or_model_search",
+        "design_or_evidence_search", "setting_or_object_search", "survey_or_handbook",
+        "backward_citation_chain", "forward_citation_chain", "author_or_version_search",
+        "recent_working_papers", "recent_journals_or_books",
+        "duplicate_or_version_search", "other"
       ]
     },
     "closestPaper": {
@@ -251,6 +417,492 @@
         }
       ]
     },
+    "workFamily": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "canonical_title", "member_source_ids", "preferred_source_id",
+        "first_public_date", "resolution_status", "resolution_basis",
+        "resolution_support_record_ids"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^WORK-[0-9]{2,}$"},
+        "canonical_title": {"type": "string", "minLength": 1},
+        "member_source_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^EXT-[0-9]{2,}$"}
+        },
+        "preferred_source_id": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "pattern": "^EXT-[0-9]{2,}$"}
+          ]
+        },
+        "first_public_date": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "format": "date"}
+          ]
+        },
+        "resolution_status": {"enum": ["resolved", "uncertain"]},
+        "resolution_basis": {"type": "string", "minLength": 1},
+        "resolution_support_record_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"resolution_status": {"const": "resolved"}},
+            "required": ["resolution_status"]
+          },
+          "then": {
+            "properties": {
+              "preferred_source_id": {"type": "string", "pattern": "^EXT-[0-9]{2,}$"},
+              "first_public_date": {"type": "string", "format": "date"},
+              "resolution_support_record_ids": {"minItems": 1}
+            }
+          }
+        }
+      ]
+    },
+    "claimAssessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "internal_claim_ids", "claim_type", "claim_text", "manuscript_anchor_ids",
+        "contribution_dimensions", "source_ids_under_assessment", "query_family_ids",
+        "assessment", "assessment_note", "fair_restatement", "finding_ids"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^LIT-CLM-[0-9]{2,}$"},
+        "internal_claim_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^CLM-[0-9]{2,}$"}
+        },
+        "claim_type": {
+          "enum": [
+            "contribution", "priority", "novelty", "attribution",
+            "literature_coverage", "citation_support", "contradiction_or_replication",
+            "other"
+          ]
+        },
+        "claim_text": {"type": "string", "minLength": 1},
+        "manuscript_anchor_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"}
+        },
+        "contribution_dimensions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "source_ids_under_assessment": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^EXT-[0-9]{2,}$"}
+        },
+        "query_family_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^QRYF-[0-9]{2,}$"}
+        },
+        "assessment": {
+          "enum": [
+            "supported", "supported_if_narrowed", "positioning_incomplete",
+            "materially_overstated", "contradicted", "bounded"
+          ]
+        },
+        "assessment_note": {"type": "string", "minLength": 1},
+        "fair_restatement": {"type": "string", "minLength": 1},
+        "finding_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]*-[0-9]{2,}$"}
+        }
+      }
+    },
+    "literatureComparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "source_id", "claim_id", "support_record_ids",
+        "contribution_dimensions", "relation_type", "source_contribution",
+        "overlap", "surviving_difference", "assessment_state", "assessment_note",
+        "confidence"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^LIT-CMP-[0-9]{2,}$"},
+        "source_id": {"type": "string", "pattern": "^EXT-[0-9]{2,}$"},
+        "claim_id": {"type": "string", "pattern": "^LIT-CLM-[0-9]{2,}$"},
+        "support_record_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^EXT-[0-9]{2,}-SUP-[0-9]{2,}$"}
+        },
+        "contribution_dimensions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "relation_type": {
+          "enum": [
+            "closest_antecedent", "material_overlap", "adjacent_contribution",
+            "method_or_data_precedent", "contradictory_result", "replication",
+            "background", "other"
+          ]
+        },
+        "source_contribution": {"type": "string", "minLength": 1},
+        "overlap": {"type": "string", "minLength": 1},
+        "surviving_difference": {"type": "string", "minLength": 1},
+        "assessment_state": {"enum": ["supported", "partial", "conflict", "inconclusive"]},
+        "assessment_note": {"type": ["string", "null"], "minLength": 1},
+        "confidence": {"enum": ["high", "medium", "low"]}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "assessment_state": {"enum": ["partial", "conflict", "inconclusive"]}
+            },
+            "required": ["assessment_state"]
+          },
+          "then": {
+            "properties": {"assessment_note": {"type": "string", "minLength": 1}}
+          }
+        }
+      ]
+    },
+    "candidateScreening": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "source_id", "query_family_ids", "query_log_ids", "claim_ids", "comparison_ids",
+        "screening_scope", "citation_status", "temporal_relation", "temporal_basis",
+        "materiality", "materiality_effect", "disposition", "recommended_actions",
+        "recommended_insertion_anchor_ids", "recommended_change", "reasoning"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^LIT-SCR-[0-9]{2,}$"},
+        "source_id": {"type": "string", "pattern": "^EXT-[0-9]{2,}$"},
+        "query_family_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^QRYF-[0-9]{2,}$"}
+        },
+        "query_log_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^QRY-[0-9]{2,}$"}
+        },
+        "claim_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^LIT-CLM-[0-9]{2,}$"}
+        },
+        "comparison_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^LIT-CMP-[0-9]{2,}$"}
+        },
+        "screening_scope": {"enum": ["full_text", "abstract", "metadata_only", "unavailable"]},
+        "citation_status": {
+          "enum": [
+            "cited_fairly", "cited_incompletely", "mischaracterized",
+            "not_cited", "not_applicable", "unknown"
+          ]
+        },
+        "temporal_relation": {
+          "enum": ["predates_cutoff", "contemporaneous", "postdates_cutoff", "unknown"]
+        },
+        "temporal_basis": {"type": "string", "minLength": 1},
+        "materiality": {"enum": ["material", "adjacent", "context", "not_material", "unresolved"]},
+        "materiality_effect": {
+          "enum": [
+            "changes_priority", "changes_credit", "narrows_contribution",
+            "changes_interpretation", "context_only", "none", "unresolved"
+          ]
+        },
+        "disposition": {
+          "enum": [
+            "closest", "material_prior_work", "material_adjacent", "background",
+            "version_duplicate", "excluded", "unresolved"
+          ]
+        },
+        "recommended_actions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "compare_directly", "add_citation", "narrow_claim", "correct_attribution",
+              "clarify_difference", "merge_version", "no_action", "resolve_access"
+            ]
+          }
+        },
+        "recommended_insertion_anchor_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"}
+        },
+        "recommended_change": {"type": ["string", "null"], "minLength": 1},
+        "reasoning": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "recommended_actions": {"contains": {"const": "add_citation"}}
+            },
+            "required": ["recommended_actions"]
+          },
+          "then": {
+            "properties": {
+              "recommended_insertion_anchor_ids": {"minItems": 1},
+              "recommended_change": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      ]
+    },
+    "claimSearchCoverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "query_family_ids", "discovery_routes", "status", "boundary"],
+      "properties": {
+        "claim_id": {"type": "string", "pattern": "^LIT-CLM-[0-9]{2,}$"},
+        "query_family_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^QRYF-[0-9]{2,}$"}
+        },
+        "discovery_routes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/discoveryRoute"}
+        },
+        "status": {"enum": ["complete", "bounded"]},
+        "boundary": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/boundary"}
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "complete"}}, "required": ["status"]},
+          "then": {
+            "properties": {
+              "discovery_routes": {"minItems": 2},
+              "boundary": {"type": "null"}
+            }
+          },
+          "else": {"properties": {"boundary": {"$ref": "#/$defs/boundary"}}}
+        }
+      ]
+    },
+    "chainDirection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "query_log_ids", "note"],
+      "properties": {
+        "status": {"enum": ["completed", "bounded", "not_applicable"]},
+        "query_log_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^QRY-[0-9]{2,}$"}
+        },
+        "note": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "completed"}}, "required": ["status"]},
+          "then": {"properties": {"query_log_ids": {"minItems": 1}}}
+        }
+      ]
+    },
+    "currentFrontierCoverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "query_log_ids", "searched_through", "note"],
+      "properties": {
+        "status": {"enum": ["completed", "bounded", "not_applicable"]},
+        "query_log_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^QRY-[0-9]{2,}$"}
+        },
+        "searched_through": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "format": "date"}
+          ]
+        },
+        "note": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "completed"}}, "required": ["status"]},
+          "then": {
+            "properties": {
+              "query_log_ids": {"minItems": 1},
+              "searched_through": {"type": "string", "format": "date"}
+            }
+          }
+        }
+      ]
+    },
+    "zeroYieldRound": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "executed_at", "discovery_routes", "query_log_ids", "new_material_source_ids", "note"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^LIT-RND-[0-9]{2,}$"},
+        "executed_at": {"type": "string", "format": "date"},
+        "discovery_routes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/discoveryRoute"}
+        },
+        "query_log_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^QRY-[0-9]{2,}$"}
+        },
+        "new_material_source_ids": {"type": "array", "maxItems": 0},
+        "note": {"type": "string", "minLength": 1}
+      }
+    },
+    "searchClosure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status", "covered_claim_ids", "independent_discovery_routes",
+        "screened_candidate_ids", "unresolved_candidate_ids", "citation_chaining",
+        "recent_frontier_coverage", "final_zero_yield_rounds",
+        "stopping_basis", "boundary"
+      ],
+      "properties": {
+        "status": {"enum": ["satisfied", "bounded", "not_assessed"]},
+        "covered_claim_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^LIT-CLM-[0-9]{2,}$"}
+        },
+        "independent_discovery_routes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/discoveryRoute"}
+        },
+        "screened_candidate_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^LIT-SCR-[0-9]{2,}$"}
+        },
+        "unresolved_candidate_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^LIT-SCR-[0-9]{2,}$"}
+        },
+        "citation_chaining": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["backward", "forward"],
+          "properties": {
+            "backward": {"$ref": "#/$defs/chainDirection"},
+            "forward": {"$ref": "#/$defs/chainDirection"}
+          }
+        },
+        "recent_frontier_coverage": {"$ref": "#/$defs/currentFrontierCoverage"},
+        "final_zero_yield_rounds": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/zeroYieldRound"}
+        },
+        "stopping_basis": {"type": "string", "minLength": 1},
+        "boundary": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/boundary"}
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "satisfied"}}, "required": ["status"]},
+          "then": {
+            "properties": {
+              "covered_claim_ids": {"minItems": 1},
+              "independent_discovery_routes": {"minItems": 2},
+              "unresolved_candidate_ids": {"maxItems": 0},
+              "citation_chaining": {
+                "properties": {
+                  "backward": {"properties": {"status": {"enum": ["completed", "not_applicable"]}}},
+                  "forward": {"properties": {"status": {"enum": ["completed", "not_applicable"]}}}
+                }
+              },
+              "recent_frontier_coverage": {
+                "properties": {"status": {"const": "completed"}}
+              },
+              "final_zero_yield_rounds": {"minItems": 2, "maxItems": 2},
+              "boundary": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"status": {"enum": ["bounded", "not_assessed"]}},
+            "required": ["status"]
+          },
+          "then": {"properties": {"boundary": {"$ref": "#/$defs/boundary"}}}
+        }
+      ]
+    },
+    "manuscriptLiteratureCutoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "date", "basis"],
+      "properties": {
+        "status": {"enum": ["verified", "estimated", "unresolved"]},
+        "date": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "format": "date"}
+          ]
+        },
+        "basis": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"enum": ["verified", "estimated"]}},
+            "required": ["status"]
+          },
+          "then": {"properties": {"date": {"type": "string", "format": "date"}}}
+        },
+        {
+          "if": {"properties": {"status": {"const": "unresolved"}}, "required": ["status"]},
+          "then": {"properties": {"date": {"type": "null"}}}
+        }
+      ]
+    },
     "frontierAudit": {
       "type": "object",
       "additionalProperties": false,
@@ -268,6 +920,7 @@
           "items": {"type": "string", "minLength": 1}
         },
         "assessed_at": {"type": "string", "format": "date"},
+        "manuscript_literature_cutoff": {"$ref": "#/$defs/manuscriptLiteratureCutoff"},
         "query_families": {
           "type": "array",
           "uniqueItems": true,
@@ -278,6 +931,32 @@
           "uniqueItems": true,
           "items": {"$ref": "#/$defs/closestPaper"}
         },
+        "work_families": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/workFamily"}
+        },
+        "claim_assessments": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/claimAssessment"}
+        },
+        "literature_comparisons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/literatureComparison"}
+        },
+        "candidate_screening": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/candidateScreening"}
+        },
+        "claim_search_coverage": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/claimSearchCoverage"}
+        },
+        "search_closure": {"$ref": "#/$defs/searchClosure"},
         "boundary": {
           "oneOf": [
             {"type": "null"},
@@ -292,7 +971,6 @@
           "then": {
             "properties": {
               "query_families": {"minItems": 1},
-              "closest_papers": {"minItems": 1},
               "boundary": {"type": "null"}
             }
           },
@@ -307,11 +985,11 @@
   },
   "allOf": [
     {
-      "if": {"properties": {"schema_version": {"enum": ["0.2", "0.3"]}}, "required": ["schema_version"]},
+      "if": {"properties": {"schema_version": {"enum": ["0.2", "0.3", "0.4"]}}, "required": ["schema_version"]},
       "then": {"required": ["frontier_audit"]}
     },
     {
-      "if": {"properties": {"schema_version": {"const": "0.3"}}, "required": ["schema_version"]},
+      "if": {"properties": {"schema_version": {"enum": ["0.3", "0.4"]}}, "required": ["schema_version"]},
       "then": {
         "properties": {
           "sources": {
@@ -357,6 +1035,109 @@
                         }
                       ]
                     }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"schema_version": {"enum": ["0.2", "0.3"]}}, "required": ["schema_version"]},
+      "then": {
+        "properties": {
+          "frontier_audit": {
+            "allOf": [
+              {"$ref": "#/$defs/frontierAudit"},
+              {
+                "if": {
+                  "properties": {"status": {"const": "complete"}},
+                  "required": ["status"]
+                },
+                "then": {"properties": {"closest_papers": {"minItems": 1}}}
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"schema_version": {"const": "0.4"}}, "required": ["schema_version"]},
+      "then": {
+        "properties": {
+          "sources": {
+            "items": {
+              "allOf": [
+                {"$ref": "#/$defs/source"},
+                {
+                  "required": ["bibliographic_metadata", "capture_policy"],
+                  "properties": {
+                    "support_records": {
+                      "items": {
+                        "allOf": [
+                          {"$ref": "#/$defs/supportRecord"},
+                          {"required": ["assessment_note"]}
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "frontier_audit": {
+            "allOf": [
+              {"$ref": "#/$defs/frontierAudit"},
+              {
+                "required": [
+                  "work_families", "claim_assessments", "literature_comparisons",
+                  "candidate_screening", "claim_search_coverage", "search_closure",
+                  "manuscript_literature_cutoff"
+                ],
+                "properties": {
+                  "query_families": {
+                    "items": {
+                      "allOf": [
+                        {"$ref": "#/$defs/queryFamily"},
+                        {"required": ["discovery_route", "claim_ids"]}
+                      ]
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {"status": {"const": "complete"}},
+                  "required": ["status"]
+                },
+                "then": {
+                  "properties": {
+                    "claim_assessments": {"minItems": 1},
+                    "claim_search_coverage": {"minItems": 1},
+                    "search_closure": {"properties": {"status": {"const": "satisfied"}}}
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {"status": {"const": "bounded"}},
+                  "required": ["status"]
+                },
+                "then": {
+                  "properties": {
+                    "search_closure": {"properties": {"status": {"const": "bounded"}}}
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {"status": {"const": "not_assessed"}},
+                  "required": ["status"]
+                },
+                "then": {
+                  "properties": {
+                    "search_closure": {"properties": {"status": {"const": "not_assessed"}}}
                   }
                 }
               }

@@ -217,6 +217,40 @@ class FrontierAuditTests(unittest.TestCase):
             audit = external["frontier_audit"]
             audit["status"] = "not_assessed"
             audit["query_families"] = []
+            audit["claim_assessments"] = []
+            audit["literature_comparisons"] = []
+            audit["candidate_screening"] = []
+            audit["claim_search_coverage"] = []
+            audit["search_closure"] = {
+                "status": "not_assessed",
+                "covered_claim_ids": [],
+                "independent_discovery_routes": [],
+                "screened_candidate_ids": [],
+                "unresolved_candidate_ids": [],
+                "citation_chaining": {
+                    "backward": {
+                        "status": "not_applicable", "query_log_ids": [],
+                        "note": "Literature verification was outside the authorized scope.",
+                    },
+                    "forward": {
+                        "status": "not_applicable", "query_log_ids": [],
+                        "note": "Literature verification was outside the authorized scope.",
+                    },
+                },
+                "recent_frontier_coverage": {
+                    "status": "not_applicable", "query_log_ids": [],
+                    "searched_through": None,
+                    "note": "Literature verification was outside the authorized scope.",
+                },
+                "final_zero_yield_rounds": [],
+                "stopping_basis": "No search was attempted because the stage was outside scope.",
+                "boundary": {
+                    "reason": "outside_assessment_scope",
+                    "affected_scope": "External novelty assessment",
+                    "impact": "The review makes no frontier or priority judgment.",
+                    "completion_condition": "Authorize an external novelty assessment.",
+                },
+            }
             audit["boundary"] = {
                 "reason": "outside_assessment_scope",
                 "affected_scope": "External novelty assessment",
@@ -573,7 +607,7 @@ class FrontierAuditTests(unittest.TestCase):
             ledger = json.loads((target / "findings.json").read_text(encoding="utf-8"))
             self.assertEqual(TRUST.validate_trust_spine(target, run, ledger, MODULE.validate_schema), [])
 
-    def test_current_full_review_and_finalizer_require_v03_support_contract(self) -> None:
+    def test_current_full_review_and_finalizer_require_v04_literature_contract(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = self.copy_fixture(tmp)
             path = target / "evidence" / "external-sources.json"
@@ -584,14 +618,14 @@ class FrontierAuditTests(unittest.TestCase):
             refresh_finalization_receipt(target)
             errors = MODULE.validate_review(target)
             self.assertTrue(any(
-                "requires evidence/external-sources.json schema_version 0.3" in error
+                "requires evidence/external-sources.json schema_version 0.4" in error
                 for error in errors
             ), errors)
             run = json.loads((target / "run.json").read_text(encoding="utf-8"))
             ledger = json.loads((target / "findings.json").read_text(encoding="utf-8"))
             readiness = FINALIZE_MODULE.readiness_errors(target, run, ledger)
             self.assertTrue(any(
-                "requires evidence/external-sources.json schema_version 0.3" in error
+                "requires evidence/external-sources.json schema_version 0.4" in error
                 for error in readiness
             ), readiness)
 

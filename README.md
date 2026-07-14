@@ -2,24 +2,20 @@
 
 **Get a tough, fair referee report on your economics paper — before a real referee sees it.**
 
-`econ-review` is a free Agent Skill for Claude Code and Codex. It reads your paper the way a careful journal referee would: first it works out what you are claiming and how your evidence supports it, then it checks everything it can verify — identification, tables, proofs, numbers, references, writing — and gives you a referee report plus a step-by-step plan for fixing what it found. It never rewrites your paper. That part stays yours.
+`econ-review` is an Agent Skill for Claude Code and Codex. It reads your paper the way a careful journal referee would: first it works out what you are claiming and how your evidence supports it, then it checks everything it can verify — identification, tables, proofs, numbers, references, writing — and gives you a referee report plus a step-by-step plan for fixing what it found. It never rewrites your paper. That part stays yours.
 
 *Built for economics. Also works well for finance, accounting, political economy, and other social science papers that rest on data, causal inference, or formal models.*
 
-<!-- TODO before public launch: export a fresh screenshot of the Review Desk showing the
-     synthetic review (npm run dev:bundled) and place it at docs/assets/review-desk.png -->
-![Review Desk](docs/assets/review-desk.png)
-
 ## What you get
 
-A finished review lands in a `review/` folder next to your paper:
+A finished review lands in a clean `review/` folder next to your paper:
 
-- **`report.md`** — the referee report: an overall assessment, the issues that could sink the paper at a journal, and detailed comments.
-- **`fix-plan.md`** — the same findings turned into an ordered to-do list: what must be fixed before submission, what would strengthen the paper, what is polish.
-- **`writing-report.md`** — grammar, typos, consistent terminology, references, and table/figure presentation, kept separate so the main report stays about substance.
+- **`paper-review.pdf`** — the primary report: a professionally typeset, bookmarked PDF containing the referee report, exhaustive detailed comments, editing comments, and revision plan. Its cover shows only the manuscript title, “Referee Report,” and the assessment date; its contents page includes the report's useful sections without listing every comment.
+- **`reports/`** — the referee report, editing comments, and revision plan as Markdown for editing or agent use.
 - **`review/README.md`** — a one-page summary that tells you what to read first.
+- **`supporting/`** — working files used by the Review Desk and later review rounds; most authors do not need to open them.
 
-Every comment quotes your own paper, explains why the issue matters, and says what to do about it:
+Every comment identifies the relevant manuscript text or, when the issue comes from a checked comparison or calculation, states the basis directly. It explains why the issue matters and what to do about it:
 
 > ### Section 3: The global uniqueness claim fails at the equality boundary
 >
@@ -31,19 +27,26 @@ Every comment quotes your own paper, explains why the issue matters, and says wh
 > **Concern**: At equality both actions maximize payoff, so the model supports a set-valued prediction. The proposition and comparative-static summary currently state a stronger global conclusion. No tie-breaking rule or boundary restriction appears in the supplied manuscript.
 >
 > **Suggestions**: Add a tie-breaking rule or state a set-valued equilibrium at the boundary. Align Proposition 1, its proof, and the comparative static.
+>
+> **Status**: [Pending]
 
-*(From the bundled example. A full review of a 90-page empirical paper typically produces 50–60 comments like this.)*
+*(From the bundled example. Full reviews keep every verified issue—up to 100 substantive comments and 30 editing comments. These are output capacities, not targets or stopping rules.)*
 
 ## Install
 
 Paste this into Claude Code or Codex and it will install itself:
 
 ```text
-Install the econ-review skill: clone https://github.com/hanlulong/econ-paper-review-skill.git,
-then from the cloned folder run "python3 -m pip install -r requirements.txt" and "./install.sh".
-If Poppler is missing, install it too (brew install poppler / apt install poppler-utils).
-Confirm the skill is installed at the end.
+Install econ-review from https://github.com/hanlulong/econ-paper-review-skill for
+Claude Code and Codex by following docs/INSTALL.md. Use my existing GitHub login;
+never ask me to paste a token, and preserve uncommitted work. Run the dry run, then
+the managed global setup for both agents with --with-review-desk. Do not install
+system packages, TeX, Pandoc, or anything requiring administrator access. Report
+both skill paths, PDF/report readiness, the Review Desk command and URL, anything
+still missing, and remind me to reload my agent sessions.
 ```
+
+The expanded, security-preserving prompt and project-local variants are in [docs/INSTALL.md](docs/INSTALL.md).
 
 <details>
 <summary>Manual installation</summary>
@@ -51,11 +54,11 @@ Confirm the skill is installed at the end.
 ```bash
 git clone https://github.com/hanlulong/econ-paper-review-skill.git
 cd econ-paper-review-skill
-python3 -m pip install -r requirements.txt
-./install.sh
+python3 scripts/install_econ_review.py --dry-run --global --all --with-review-desk
+python3 scripts/install_econ_review.py --global --all --with-review-desk
 ```
 
-Requires Python 3.10+ and [Poppler](https://poppler.freedesktop.org/) for PDF reading (`brew install poppler` on Mac, `apt install poppler-utils` on Linux). See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for Claude-only, Codex-only, and project-local installs.
+On native Windows, replace `python3` with `py -3` and use PowerShell path syntax. Requires Python 3.10+ and [Poppler](https://poppler.freedesktop.org/) for PDF reading. If compatible LuaLaTeX or Tectonic is already installed, the report uses the professional LaTeX renderer; otherwise it uses the maintained built-in PDF renderer. A LaTeX compilation error stops the build instead of silently changing renderers. The installer does not install TeX or require Pandoc. Review Desk is prebuilt and needs no Node.js or npm. See [docs/INSTALL.md](docs/INSTALL.md) for skill-only, Claude-only, Codex-only, and project-local installs.
 
 </details>
 
@@ -69,15 +72,16 @@ Use $econ-review in quick mode and identify the three largest submission risks.
 Use $econ-review to reconstruct the theory and empirical design before giving detailed comments.
 ```
 
-`quick` gives you the biggest risks fast. `full` goes through every section, table, figure, equation, footnote, and appendix. When it finishes, open `review/README.md` and start there.
+`quick` gives you the biggest risks fast. `full` goes through every section, table, figure, equation, footnote, and appendix. When it finishes, open `review/paper-review.pdf`; use `review/README.md` for the file map and next-round workflow.
 
 ## Why you can trust the comments
 
 AI feedback on papers usually fails in one of two ways: it makes things up, or it hands you a generic checklist. This skill was built specifically against both:
 
-- **It reads your paper before it judges it.** It re-derives your key equations from your own assumptions and traces how each table was produced. Comments come from understanding the paper, not from pattern-matching on keywords.
-- **Every comment quotes the paper.** The exact sentence, table cell, or figure — read from the rendered PDF pages, so a garbled text extraction can't produce a phantom error.
+- **It reads your paper before it judges it.** It reconstructs the argument first and, where the supplied inputs permit, re-derives key equations and traces reported results. Comments come from understanding the paper, not from pattern-matching on keywords.
+- **It checks comments against the source.** Quotations, equations, tables, and figures are checked against the supplied source or rendered PDF pages when those inputs are available; reviewer-derived comparisons and calculations are labeled in plain language instead of presented as quotations.
 - **It argues with itself before it argues with you.** Before a major comment reaches the report, the skill searches your paper and appendix for the strongest reply you could make. If your reply would win, the comment is deleted.
+- **It checks the paper's contribution against live literature.** It turns each novelty, priority, and important citation claim into a targeted economics search. It screens candidate papers against that claim, confirms authors, dates, and versions, and reads the available full text before calling a citation missing or a contribution overstated. When decisive evidence is unavailable, it says the conclusion is limited.
 - **It is fair about data limits.** If your data can't do something, you say so in the paper, and your claims stay within those limits, that is not a flaw — and the review won't treat it as one.
 - **It checks what fits your paper.** Difference-in-differences, IV, and RDD checks switch on only when your paper actually uses those designs. No demands for robustness checks that make no sense for your setting.
 
@@ -93,18 +97,19 @@ It won't write your paper, estimate your acceptance odds, or invent citations. W
 
 ## The Review Desk (optional)
 
-A local web viewer for working through a long review: read the overall assessment first, go comment by comment in importance or paper order, mark each one fixed / challenged / deferred, and export your progress for the next round. Everything stays on your machine — no uploads, no accounts.
+A local web viewer for working through a long review. For every comment, add your instruction or disagreement, choose P0/P1/P2, and make one clear decision: keep it **Open**, mark it **Ready for review** after a change or reasoned response, or **Set aside** because it should return later, does not apply, or cannot be addressed. Review Desk then builds a prioritized task plan and a structured response template for your implementation agents. The next review checks every carried concern and runs a fresh full-paper sweep for new problems. Everything stays on your machine—no uploads or accounts.
 
-```bash
-cd review-viewer && nvm use && npm ci && npm run dev
-```
+The recommended installer includes a verified, prebuilt copy with
+`--with-review-desk`; it prints one stable Python launch command and opens
+`http://127.0.0.1:48127/`. Users do not need Node.js or npm. Node is required
+only to change or rebuild the viewer; see [review-viewer/README.md](review-viewer/README.md).
 
 ## Roadmap
 
 - A measured benchmark with published precision and recall — before any comparative claims
 - More design-specific checks (RCT, shift-share, synthetic control, structural, macro-VAR)
-- Follow-up rounds as a first-class workflow: challenge a comment, request a deeper look, re-review a revision
-- **A hosted version** — upload a PDF, get the full review, no command line: join the waitlist at [econreview.ai](https://econreview.ai)
+- Round-by-round usability improvements for author, implementation-agent, and re-review handoffs
+- **A hosted version** — upload a PDF and receive the full review without a command line. Coming later.
 
 ## Related projects
 
@@ -118,9 +123,7 @@ PDF backends, the output contract, the validation suite, and the release process
 
 ## License
 
-<!-- TODO before public launch: finalize the outbound license decision (AGPL-3.0 planned)
-     and replace this section. Until then the current text is accurate. -->
-License to be finalized before public release; until then the code and documentation are all rights reserved, and the install commands are for the copyright holder and users covered by a separate written agreement. Third-party components remain under their own licenses (see `THIRD_PARTY_NOTICES.md`). Commercial licensing and the hosted version: [econreview.ai](https://econreview.ai).
+License to be finalized before public release; until then the code and documentation are all rights reserved, and the install commands are for the copyright holder and users covered by a separate written agreement. Third-party components remain under their own licenses (see `THIRD_PARTY_NOTICES.md`). Commercial licensing and the hosted version are planned.
 
 ---
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
 import re
 import shutil
 import stat
@@ -163,15 +164,56 @@ def docling_runtime_version() -> str | None:
     return ";".join(components)
 
 
-def docling_executable() -> str | None:
+def docling_executable(system: str | None = None) -> str | None:
     """Find Docling in PATH or beside the active Python interpreter."""
     discovered = shutil.which("docling")
     if discovered:
         return discovered
     # Do not resolve the interpreter symlink: virtual environments commonly
     # link Python to a base installation while keeping console scripts local.
-    sibling = Path(sys.executable).with_name("docling")
+    executable_name = "docling.exe" if (system or platform.system()) == "Windows" else "docling"
+    sibling = Path(sys.executable).with_name(executable_name)
     return str(sibling) if sibling.is_file() and os.access(sibling, os.X_OK) else None
+
+
+def _docling_environment(*, allow_model_downloads: bool, system: str | None = None) -> dict[str, str]:
+    """Build a small backend environment without breaking native Windows.
+
+    Windows subprocesses and Python launchers may need the system root,
+    executable-extension lookup, user profile, and native temporary/cache
+    locations even when the converter itself is already resolved absolutely.
+    """
+    allowed = {
+        "PATH", "HOME", "TMPDIR", "XDG_CACHE_HOME", "HF_HOME", "TORCH_HOME",
+        "DOCLING_ARTIFACTS_PATH", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE",
+        "DYLD_LIBRARY_PATH",
+    }
+    if (system or platform.system()) == "Windows":
+        allowed.update({
+            "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE",
+            "APPDATA", "LOCALAPPDATA", "TEMP", "TMP",
+        })
+    if allow_model_downloads:
+        allowed.update({"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"})
+    environment = {key: value for key, value in os.environ.items() if key in allowed}
+    environment.update({"LC_ALL": "C", "TZ": "UTC"})
+    if not allow_model_downloads:
+        environment.update({"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
+    return environment
+
+
+def _replace_local_path_variants(text: str, local_path: Path, replacement: str) -> str:
+    """Replace native and slash-normalized forms of one local path."""
+    native = str(local_path)
+    variants = {
+        native,
+        local_path.as_posix(),
+        native.replace("\\", "/"),
+        native.replace("/", "\\"),
+    }
+    for value in sorted((value for value in variants if value), key=len, reverse=True):
+        text = text.replace(value, replacement)
+    return text
 
 
 def _top_left_bbox(prov: dict[str, Any], page_height: float) -> list[float] | None:
@@ -329,19 +371,7 @@ def run_docling(
         "--enrich-formula" if enrich_formulas else "--no-enrich-formula",
         "-v",
     ]
-    allowed_environment = {
-        "PATH", "HOME", "TMPDIR", "XDG_CACHE_HOME", "HF_HOME", "TORCH_HOME",
-        "DOCLING_ARTIFACTS_PATH", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE",
-        "DYLD_LIBRARY_PATH",
-    }
-    if allow_model_downloads:
-        allowed_environment.update({"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"})
-    environment = {
-        key: value for key, value in os.environ.items() if key in allowed_environment
-    }
-    environment.update({"LC_ALL": "C", "TZ": "UTC"})
-    if not allow_model_downloads:
-        environment.update({"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
+    environment = _docling_environment(allow_model_downloads=allow_model_downloads)
     try:
         result = subprocess.run(
             command,
@@ -369,7 +399,6 @@ def run_docling(
     # same portable-path, type, count, and size boundary used for receipts.
     # This must happen before reading or rewriting any converter-created file.
     _safe_artifacts(proposal_dir, relative_root)
-    stage_text = str(stage)
     proposal_text = relative_root
     for path in sorted(proposal_dir.rglob("*")):
         if not path.is_file() or path.suffix.casefold() not in {".md", ".json"}:
@@ -377,7 +406,7 @@ def run_docling(
         raw = path.read_text(encoding="utf-8")
         # Docling's referenced-image export writes absolute output paths. Keep
         # the proposal movable and private by replacing the staging prefix.
-        raw = raw.replace(stage_text + "/proposals/docling", proposal_text)
+        raw = _replace_local_path_variants(raw, proposal_dir, proposal_text)
         _private_write(path, raw.encode("utf-8"))
 
     document_files = [
@@ -395,9 +424,13 @@ def run_docling(
     )
 
     log = ((result.stdout or b"") + b"\n" + (result.stderr or b"")).decode("utf-8", "replace")
-    log = log.replace(str(pdf), "<source.pdf>").replace(stage_text, "<package>")
+    log = _replace_local_path_variants(log, pdf, "<source.pdf>")
+    log = _replace_local_path_variants(log, stage, "<package>")
     redactions = {
         os.environ.get("HOME"): "<home>", os.environ.get("TMPDIR"): "<temp>",
+        os.environ.get("USERPROFILE"): "<home>", os.environ.get("TEMP"): "<temp>",
+        os.environ.get("TMP"): "<temp>", os.environ.get("APPDATA"): "<app-data>",
+        os.environ.get("LOCALAPPDATA"): "<app-data>",
         os.environ.get("XDG_CACHE_HOME"): "<cache>", os.environ.get("HF_HOME"): "<model-cache>",
         os.environ.get("TORCH_HOME"): "<model-cache>",
     }
@@ -405,7 +438,7 @@ def run_docling(
         ((raw, replacement) for raw, replacement in redactions.items() if raw),
         key=lambda row: len(row[0]), reverse=True,
     ):
-        log = log.replace(raw, replacement)
+        log = _replace_local_path_variants(log, Path(raw), replacement)
     log = re.sub(r"(https?://)[^/\s:@]+:[^@\s]+@", r"\1<redacted>@", log)
     revisions = sorted(set(
         (match.group(1), match.group(2))

@@ -6,10 +6,10 @@ const CORE_REVIEW_FILES = new Set([
   "review-manifest.json",
 ]);
 
-const LEGACY_DOCUMENT_NAMES = new Set([
+const REVIEW_DOCUMENT_NAMES = new Set([
   "readme.md",
   "report.md",
-  "writing-report.md",
+  "editing-comments.md",
   "fix-plan.md",
   "reconstruction.md",
   "reader-claim-audit.md",
@@ -60,6 +60,11 @@ export function normalizePackagePath(path: string) {
     throw new Error(`Unsafe relative path in the selected package: ${path}`);
   }
   return parts.join("/");
+}
+
+/** Normalize the Unicode form supplied by an OS file picker, then enforce the package contract. */
+export function normalizeSelectedPackagePath(path: string) {
+  return normalizePackagePath(path.normalize("NFC"));
 }
 
 /** Find the one directory that contains a findings/run pair. Its name is deliberately unrestricted. */
@@ -142,7 +147,7 @@ export function selectManuscriptPath(options: {
   const sources = Array.from(options.sourcePaths || []).filter(Boolean);
   const candidates = Array.from(options.paths, normalizePackagePath).filter((path) => {
     const name = basename(path).toLowerCase();
-    if (!/\.(md|markdown|txt)$/i.test(name) || LEGACY_DOCUMENT_NAMES.has(name) || CORE_REVIEW_FILES.has(name)) return false;
+    if (!/\.(md|markdown|txt)$/i.test(name) || REVIEW_DOCUMENT_NAMES.has(name) || CORE_REVIEW_FILES.has(name)) return false;
     const relative = relativeToReviewRoot(path, options.reviewRoot);
     if (relative && declared.has(relative.toLowerCase())) return false;
     return true;

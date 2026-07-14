@@ -14,6 +14,8 @@
       "id": "CLM-01",
       "anchor_ids": ["ANC-01"],
       "is_headline": true,
+      "literature_facing": true,
+      "literature_exclusion_basis": null,
       "canonical_supported_claim": "The equilibrium action is unique away from the equality boundary; both actions are optimal at equality absent a tie-breaking rule.",
       "load_bearing_qualifiers": ["away from the equality boundary", "absent a tie-breaking rule"],
       "finding_ids": ["LOGIC-01"],

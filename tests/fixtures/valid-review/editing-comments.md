@@ -1,10 +1,10 @@
-# Writing report
+# Editing comments
 
 <!-- review-navigation:start -->
-> **Review package:** [Start here](README.md) · [Referee report](report.md) · [Writing report](writing-report.md) · [Revision plan](fix-plan.md) · [Audit trail](evidence/verification.md)
+> **Review files:** [Start here](README.md) · [Referee report](report.md) · [Editing comments](editing-comments.md) · [Revision plan](fix-plan.md)
 <!-- review-navigation:end -->
 
-## Writing assessment
+## Editing assessment
 
 The synthetic manuscript is concise and readable. One objective subject-verb agreement error requires correction; no broader prose problem is present.
 
@@ -14,21 +14,21 @@ The synthetic manuscript is concise and readable. One objective subject-verb agr
 
 - The synthetic manuscript states its model and proposition compactly.
 
-## Highest-return writing revisions
+## Highest-return editing revisions
 
-1. **`WRT-01` — The proposition summary has a subject-verb agreement error.** Replace “characterize” with “characterizes.”
+1. **The proposition summary has a subject-verb agreement error.** Replace “characterize” with “characterizes.”
 
 ## Section-by-section reader audit
 
-| Section | Current job | What works | Reader friction | Revision direction | Findings |
+| Section | Current job | What works | Reader friction | Revision direction | Related comments |
 |---|---|---|---|---|---|
-| Complete synthetic manuscript | State the model, proposition, and boundary prediction. | The economic object and boundary case are easy to locate. | One subject-verb agreement error interrupts the proposition summary. | Correct the verb while preserving the concise structure. | `WRT-01` |
+| Complete synthetic manuscript | State the model, proposition, and boundary prediction. | The economic object and boundary case are easy to locate. | One subject-verb agreement error interrupts the proposition summary. | Correct the verb while preserving the concise structure. | Comment 1: The proposition summary has a subject-verb agreement error |
 
 ## Terminology, definitions, and notation
 
 The fixture uses its equilibrium and boundary terminology consistently. No notation variant requires harmonization.
 
-| Object | Status | Preferred form | Variants checked | Locations checked | Findings |
+| Object | Status | Preferred form | Variants checked | Locations checked | Related comments |
 |---|---|---|---|---|---|
 | equilibrium action | consistent | equilibrium action | equilibrium action | Complete synthetic manuscript | — |
 
@@ -38,15 +38,17 @@ The synthetic fixture contains no tables or figures, so no exhibit-writing issue
 
 ## Mechanics and copyedit inventory
 
-### WRT-01: Grammar
+### 1. Grammar
+<!-- writing_group_id: WRT-01; render_verification: verified_render -->
 
-**Result:** Issue. **Priority:** required copyedit. **Findings:** `WRT-01`
+<!-- occurrence_source: main_manuscript; render_verification: verified_render -->
+- **Section 3, paragraph 2:** Replace “The proposition characterize the model's comparative static.” with “The proposition characterizes the model's comparative static.”
 
-- **Section 3, paragraph 2:** “The proposition characterize the model's comparative static.” → “The proposition characterizes the model's comparative static.” _(main manuscript; verified render)_
+See Comment 1: The proposition summary has a subject-verb agreement error for the full explanation and revision request.
 
-**Reader consequence:** The sentence states the paper's main proposition, making the agreement error unusually visible.
+**Why it matters:** The sentence states the paper's main proposition, making the agreement error unusually visible.
 
-**Checked:** The singular grammatical subject is visible in the source and rendered fixture.
+The singular grammatical subject is visible in the source and rendered fixture.
 
 ## Style and writing improvements
 
@@ -56,7 +58,7 @@ No additional style revision is recommended beyond the prioritized items above.
 
 No costly repetition or conflicting duplicate framing was identified.
 
-## Detailed Writing Comments (1)
+## Detailed Editing Comments (1)
 
 ### 1. Section 3: The proposition summary has a subject-verb agreement error
 <!-- finding_id: WRT-01 -->

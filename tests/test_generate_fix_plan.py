@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import importlib.util
 import copy
+import json
 import re
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -20,25 +23,72 @@ SPEC.loader.exec_module(MODULE)
 
 
 class GenerateFixPlanTests(unittest.TestCase):
-    def test_each_finding_id_appears_only_in_its_heading(self) -> None:
+    def test_each_finding_id_appears_once_in_a_hidden_link(self) -> None:
         output = MODULE.render(FIXTURE)
-        finding_ids = re.findall(r"^### ([A-Z][A-Z0-9_-]*-[0-9]{2,}):", output, re.MULTILINE)
+        finding_ids = re.findall(r"^<!-- finding_id: ([A-Z][A-Z0-9_-]*-[0-9]{2,}) -->$", output, re.MULTILINE)
         self.assertTrue(finding_ids)
         for finding_id in finding_ids:
             self.assertEqual(
                 re.findall(rf"\b{re.escape(finding_id)}\b", output),
                 [finding_id],
             )
+            self.assertNotRegex(
+                output,
+                re.compile(rf"^### .*{re.escape(finding_id)}", re.MULTILINE),
+            )
+        numbers = [int(value) for value in re.findall(r"^### Comment ([0-9]+):", output, re.MULTILINE)]
+        self.assertEqual(numbers, list(range(1, len(numbers) + 1)))
+        self.assertEqual(len(numbers), len(finding_ids))
 
     def test_actions_are_checkable_and_completion_language_is_explained(self) -> None:
         output = MODULE.render(FIXTURE)
-        headings = re.findall(r"^### ([A-Z][A-Z0-9_-]*-[0-9]{2,}):", output, re.MULTILINE)
+        headings = re.findall(r"^### Comment [0-9]+:", output, re.MULTILINE)
         checkboxes = re.findall(r"^- \[ \] \*\*Action:\*\*", output, re.MULTILINE)
         self.assertEqual(len(checkboxes), len(headings))
-        self.assertIn("A checked box is an author progress marker, not reviewer verification", output)
-        self.assertIn("**Ready for recheck**", output)
+        self.assertIn("Work from P0 to P2", output)
+        self.assertIn("A later review confirms whether each revision resolves the concern", output)
         self.assertIn("Unless an item says otherwise, the current design can support", output)
         self.assertNotIn("- **Feasibility:** The current design can support", output)
+        self.assertNotIn("Audit trail", output)
+        self.assertNotIn("review-actions.json", output)
+        self.assertNotIn("Review Desk", output)
+        self.assertNotIn("**Ready for recheck**", output)
+
+    def test_dependency_order_is_severity_first_then_decision_role(self) -> None:
+        base = copy.deepcopy(MODULE.load(FIXTURE / "findings.json")["findings"][0])
+        rows = []
+        for finding_id, severity, role, rank in (
+            ("MINOR-01", "minor", "potentially_dispositive", 1),
+            ("CRIT-01", "critical", "potentially_dispositive", 99),
+            ("MAJOR-02", "major", "revision_value", 2),
+            ("MAJOR-01", "major", "potentially_dispositive", 50),
+        ):
+            row = copy.deepcopy(base)
+            row.update({
+                "id": finding_id,
+                "severity": severity,
+                "decision_role": role,
+                "importance_rank": rank,
+            })
+            row["fix"]["dependencies"] = []
+            rows.append(row)
+        self.assertEqual(
+            [row["id"] for row in MODULE.dependency_order(rows)],
+            ["CRIT-01", "MAJOR-01", "MAJOR-02", "MINOR-01"],
+        )
+        self.assertEqual(MODULE.bucket(rows[1]), "P0")
+
+    def test_render_rejects_critical_finding_without_p0_classification(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "review"
+            shutil.copytree(FIXTURE, target)
+            ledger_path = target / "findings.json"
+            ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+            row = ledger["findings"][0]
+            row.update({"severity": "critical", "decision_role": "revision_value", "essential": False})
+            ledger_path.write_text(json.dumps(ledger, indent=2) + "\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "critical.*potentially_dispositive.*essential.*P0"):
+                MODULE.render(target)
 
     def test_canonical_resolution_and_payoff_render_without_reconstruction(self) -> None:
         ledger = MODULE.load(FIXTURE / "findings.json")

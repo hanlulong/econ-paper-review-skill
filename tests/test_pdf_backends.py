@@ -196,6 +196,51 @@ class PdfBackendTests(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.BackendError, "review root is not portable"):
                 MODULE._safe_artifacts(root, "evidence/../outside")
 
+    def test_windows_docling_console_script_and_runtime_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scripts = Path(tmp) / "Scripts"
+            scripts.mkdir()
+            python = scripts / "python.exe"
+            executable = scripts / "docling.exe"
+            python.write_bytes(b"")
+            executable.write_bytes(b"")
+            executable.chmod(0o700)
+            with mock.patch.object(MODULE.shutil, "which", return_value=None), \
+                    mock.patch.object(MODULE.sys, "executable", str(python)):
+                self.assertEqual(MODULE.docling_executable("Windows"), str(executable))
+
+        windows_environment = {
+            "PATH": r"C:\\tools",
+            "SYSTEMROOT": r"C:\\Windows",
+            "USERPROFILE": r"C:\\Users\\reviewer",
+            "LOCALAPPDATA": r"C:\\Users\\reviewer\\AppData\\Local",
+            "TEMP": r"C:\\Users\\reviewer\\AppData\\Local\\Temp",
+            "PATHEXT": ".COM;.EXE;.BAT;.CMD",
+            "UNRELATED_SECRET": "do-not-forward",
+        }
+        with mock.patch.dict(MODULE.os.environ, windows_environment, clear=True):
+            selected = MODULE._docling_environment(
+                allow_model_downloads=False,
+                system="Windows",
+            )
+        for name in ("SYSTEMROOT", "USERPROFILE", "LOCALAPPDATA", "TEMP", "PATHEXT"):
+            self.assertEqual(selected[name], windows_environment[name])
+        self.assertNotIn("UNRELATED_SECRET", selected)
+        self.assertEqual(selected["HF_HUB_OFFLINE"], "1")
+
+    def test_docling_path_rewrite_handles_native_and_opposite_slashes(self) -> None:
+        local = Path("stage") / "proposals" / "docling"
+        native = str(local)
+        opposite = native.replace("/", "\\")
+        rewritten = MODULE._replace_local_path_variants(
+            f"{native}/image.png\n{opposite}\\image.png\n",
+            local,
+            "evidence/pdf-ingestion/SRC-01/proposals/docling",
+        )
+        self.assertNotIn(native, rewritten)
+        self.assertNotIn(opposite, rewritten)
+        self.assertEqual(rewritten.count("evidence/pdf-ingestion/SRC-01/proposals/docling"), 2)
+
     @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFO creation unavailable")
     def test_backend_artifacts_reject_non_regular_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

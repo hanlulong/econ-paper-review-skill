@@ -102,6 +102,21 @@ def compatible_pdf_runtime() -> bool:
     return all(shutil.which(command) for command in ("pdfinfo", "pdftotext", "pdftoppm"))
 
 
+class PdfCommandDiscoveryTests(unittest.TestCase):
+    def test_windows_python_console_script_is_found_beside_interpreter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            scripts = Path(tmp) / "Scripts"
+            scripts.mkdir()
+            python = scripts / "python.exe"
+            markitdown = scripts / "markitdown.exe"
+            python.write_bytes(b"")
+            markitdown.write_bytes(b"")
+            markitdown.chmod(0o700)
+            with mock.patch.object(MODULE.shutil, "which", return_value=None), \
+                    mock.patch.object(MODULE.sys, "executable", str(python)):
+                self.assertEqual(MODULE.command_path("markitdown", "Windows"), str(markitdown))
+
+
 class PdfXmlSanitizationTests(unittest.TestCase):
     def test_xml_forbidden_control_is_removed_only_from_parser_input_and_recorded(self) -> None:
         fixture = (
@@ -591,7 +606,11 @@ class PdfIngestionTests(unittest.TestCase):
                     "--markitdown-proposal", check=False,
                 )
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("optional backend markitdown is unavailable", result.stderr)
+                self.assertRegex(
+                    result.stderr,
+                    r"(?:optional backend markitdown is (?:unavailable|unsupported)|"
+                    r"--markitdown-proposal requires the local markitdown command)",
+                )
         self.assertIn("network: forbidden by default", self.run_cli("doctor").stdout)
 
     @unittest.skipUnless(shutil.which("markitdown"), "compatible MarkItDown command is not installed")

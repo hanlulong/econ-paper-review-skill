@@ -2,7 +2,7 @@
 
 Synthesize only verified, surviving findings. Do not use synthesis to create new concerns.
 
-Under the current contract, create `synthesis.json` and a cohesive referee opening from verified substance findings. Separate technical severity from decision relevance and repairability. Writing-channel findings are synthesized separately in `writing-report.md`. If a writing problem obscures the science, changes an estimand or claim, or exposes unsupported load-bearing source use, reclassify it as substance before synthesis. Legacy contracts retain their documented presentation.
+Under the current contract, create `synthesis.json` and a cohesive referee opening from verified substance findings. Separate technical severity from decision relevance and repairability. Writing-channel findings are synthesized separately in `editing-comments.md`. If a writing problem obscures the science, changes an estimand or claim, or exposes unsupported load-bearing source use, reclassify it as substance before synthesis. Legacy contracts retain their documented presentation.
 
 Synthesis is a projection of canonical evidence, not a new evidence layer. Link each strength, assessment statement, posture rationale, convincingness judgment, concern rationale, and upgrade condition to the claim IDs, finding IDs, and evidence IDs that support it. A strength must be source-grounded just as a criticism is. If a sentence cannot be linked, narrow it, mark it bounded, or remove it.
 
@@ -66,7 +66,7 @@ Use broad qualitative tiers across contract versions:
 - **Standard field/general:** sound, useful, and appropriately positioned contribution with correct claims and adequate transparency.
 - **Regional/specialized:** credible contribution whose audience or external scope is narrower.
 
-Treat these as qualitative bars, not acceptance probabilities. The substance report may use a user-supplied venue or broad tier to calibrate posture. Add candidate-journal recommendations and submission sequencing to `writing-report.md` only when the user explicitly requests venue analysis. If venue analysis is not requested, do not add a placeholder section.
+Treat these as qualitative bars, not acceptance probabilities. The substance report may use a user-supplied venue or broad tier to calibrate posture. Add candidate-journal recommendations and submission sequencing to `editing-comments.md` only when the user explicitly requests venue analysis. If venue analysis is not requested, do not add a placeholder section.
 
 ## 4. Write the referee opening
 

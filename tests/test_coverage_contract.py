@@ -426,6 +426,48 @@ class CoverageContractTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
             self.assertEqual(MODULE.validate_review(target), [])
 
+    def test_bibliography_is_an_internal_source_for_boundary_and_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.copy_fixture(tmp)
+            bibliography = "@article{example2020, title={A Synthetic Reference}}\n"
+            (target / "references.bib").write_text(bibliography, encoding="utf-8")
+            digest = hashlib.sha256(bibliography.encode("utf-8")).hexdigest()
+            manifest_path = target / "evidence" / "source-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["sources"].append({
+                "id": "SRC-02",
+                "role": "bibliography",
+                "path": "references.bib",
+                "media_type": "application/x-bibtex",
+                "sha256": digest,
+                "extraction": None,
+            })
+            manifest["anchors"].append({
+                "id": "ANC-04",
+                "source_id": "SRC-02",
+                "kind": "scope",
+                "start_char": 0,
+                "end_char": len(bibliography),
+                "content_sha256": digest,
+                "locator": "Complete supplied bibliography",
+            })
+            write_json(manifest_path, manifest)
+            resign(target)
+
+            errors = MODULE.validate_review(target)
+            self.assertTrue(any(
+                "assessment boundary omits in-scope manifest sources: SRC-02" in error
+                for error in errors
+            ), errors)
+            self.assertTrue(any(
+                "coverage lacks a scope-anchored unit for in-scope sources: SRC-02" in error
+                for error in errors
+            ), errors)
+            self.assertTrue(any(
+                "source anchors missing from coverage units: ANC-04" in error
+                for error in errors
+            ), errors)
+
     def test_replication_capability_requires_a_qualifying_active_burden(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = self.copy_fixture(tmp)

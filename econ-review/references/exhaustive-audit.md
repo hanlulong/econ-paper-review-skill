@@ -1,6 +1,6 @@
 # Exhaustive Audit Protocol
 
-Use this protocol in `full` mode. Keep the editorial synthesis selective while making the detailed-comment inventory comprehensive. Apply no length limit to the report or to an individual comment; use enough space to establish the evidence, consequence, fairness, and fix.
+Use this protocol in `full` mode. Keep the editorial synthesis selective while making discovery and the detailed-comment inventory comprehensive. Apply no page, word, token, or per-comment prose limit; use enough space to establish the evidence, consequence, fairness, and fix.
 
 ## Contents
 
@@ -16,10 +16,12 @@ Use this protocol in `full` mode. Keep the editorial synthesis selective while m
 Record in `run.json.comment_policy`:
 
 - `minimum_target`: the user's requested minimum; use `0` when none is requested. Do not infer a target from paper family or a universal number.
-- `maximum`: `null`. A current full review has no comment cap. If the user requests a fixed-size deliverable, use `quick` mode or clarify the conflict rather than silently calling a truncated inventory exhaustive.
+- `maximum`: `null`, retained as the deprecated aggregate cap for compatibility.
+- `substance_maximum`: `100`, the author-facing Detailed Comments capacity.
+- `writing_maximum`: `30`, the author-facing Detailed Editing Comments capacity.
 - `exhaustive`: set `true` only after completing source-derived coverage and any sweep triggered by the conditions below.
 
-A minimum is a search and coverage obligation, not permission to invent issues. If fewer comments survive after the required sweeps, ship fewer and record a source-specific shortfall rather than padding. That documented shortfall is valid completion evidence when source coverage and every activated burden are otherwise complete.
+A minimum is a search and coverage obligation, not permission to invent issues. The channel maxima are publication capacities, not search limits, targets, or permission to omit: continue discovery until coverage closes, report every verified active issue, and never pad or suppress. If fewer comments survive after the required sweeps, ship fewer and record a source-specific shortfall. If true-root consolidation leaves more than 100 substance or 30 writing survivors, preserve all survivors, record the overflow, and pause completion for explicit user resolution rather than truncating.
 
 ## 2. Build the coverage matrix
 
@@ -31,7 +33,7 @@ Build source-derived review units in `review/evidence/coverage.json` for every m
 - reference list and data/code availability statement;
 - appendix section, table, figure, and technical derivation.
 
-For each unit record `checked_no_issue`, finding IDs, `bounded`, or `not_applicable`, plus its source and anchor IDs. Every internal source—manuscript, appendix, supplement, supplied code, and supplied data dictionary—must also appear in the assessment boundary, needs a complete-source `scope` anchor, and has every anchor assigned to a review unit. Equation, table, figure, and code-range anchors also require a matching typed unit; hiding them inside one generic whole-paper row is not coverage. External literature records remain in the separate external-source ledger. This is an anchored completeness guarantee: it does not prove that a defective source manifest discovered every semantic heading or object, so reconcile the manifest inventory against the complete rendered source before declaring it complete.
+For each unit record `checked_no_issue`, finding IDs, `bounded`, or `not_applicable`, plus its source and anchor IDs. Every internal source—manuscript, appendix, supplement, supplied bibliography, supplied code, and supplied data dictionary—must also appear in the assessment boundary, needs a complete-source `scope` anchor, and has every anchor assigned to a review unit. Equation, table, figure, and code-range anchors also require a matching typed unit; hiding them inside one generic whole-paper row is not coverage. External literature records remain in the separate external-source ledger. This is an anchored completeness guarantee: it does not prove that a defective source manifest discovered every semantic heading or object, so reconcile the manifest inventory against the complete rendered source before declaring it complete.
 
 Mirror the readable matrix in `review/evidence/coverage.json` using `assets/coverage.schema.json`. Derive the unit inventory from the source manifest rather than asking the reviewer to attest that it is complete. Record activated inferential burdens, every checked unit, linked finding IDs, and structured second-sweep state. Generate the readable matrix from this state.
 
@@ -117,7 +119,7 @@ Do not include generic requests such as “discuss more literature,” “engage
 
 For critical and major candidates, use an independent refuter when possible. For every minor candidate, at least check the surrounding paragraph, notes, relevant appendix, and definitions before keeping it.
 
-Merge candidates when one fix resolves all repeated instances. Keep separate comments when different locations require different corrections or when aggregation would hide distinct consequences. List all relevant locations inside the retained finding. Aggregation controls the number of distinct comments; it must not erase evidence or shorten the explanation.
+Merge candidates only when one root cause produces the same consequence and one fix resolves every occurrence. Keep separate comments when locations require different corrections or when aggregation would hide distinct consequences. List every material location inside the retained finding. Aggregation must not erase evidence, shorten the explanation, or serve only to fit a channel capacity.
 
 Delete:
 
@@ -135,14 +137,13 @@ For every retained data-related candidate, record whether the source is avoidabl
 
 Assign unique consecutive ranks `1..N` for every surviving distinct issue:
 
-1. critical essential findings;
-2. major essential findings;
-3. other major findings;
-4. minor correctness and interpretation findings;
-5. minor reproducibility, exposition, notation, citation, and presentation findings;
-6. informational items only when they require action.
+1. all critical findings (each must be potentially dispositive and essential before submission);
+2. major findings, ordered by decision role and consequence;
+3. minor correctness and interpretation findings;
+4. minor reproducibility, exposition, notation, citation, and presentation findings;
+5. informational items only when they require action.
 
-Within a tier, rank by expected effect on validity and publishability, then by the payoff-to-effort ratio. Use manuscript order only as a tie-breaker.
+Never interleave severities: every critical finding precedes every major finding, and so on. Within a severity tier, rank by decision role, expected effect on validity and publishability, then by the payoff-to-effort ratio. Use manuscript order only as a tie-breaker. Treat the critical threshold as a substantive, evidence-backed judgment about a central claim and plausible rejection risk; do not promote an issue because it recurs, sounds technical, or helps fill a tier.
 
 ## 7. Run the second sweep
 
@@ -155,9 +156,10 @@ Run a cold second sweep when:
 - candidate overlap suggests one agent dominated the inventory.
 - source-derived coverage or an activated burden remains thin relative to the manuscript objects it contains.
 - a headline economic link, load-bearing comparison, related-result edge, promised evidence object, headline magnitude, or broad transport claim lacks a source-specific audit row.
+- either author-facing channel has reached its capacity; capacity is not evidence that discovery is complete.
 
 The second sweep searches for missed issues; it does not relax the admission standard. Record new candidates, rejected candidates with reasons, and the final coverage result.
 
 ## 8. Verify every detailed comment
 
-Apply the full evidence and locator checks to every comment. For minor substantive comments, the author-reply analysis may be brief but must establish fairness. For objective mechanical corrections, exact source/render verification replaces adversarial rebuttal. Ensure every active ledger item appears exactly once in the appropriate detailed section, in rank order, and in the fix plan.
+Apply the full evidence and locator checks to every comment. For minor substantive comments, the author-reply analysis may be brief but must establish fairness. For objective mechanical corrections, exact source/render verification replaces adversarial rebuttal. Ensure every active ledger item appears exactly once in the appropriate detailed section, in rank order, and in the fix plan. A capacity overflow is a completion pause, never a reason to hide an active ledger item.

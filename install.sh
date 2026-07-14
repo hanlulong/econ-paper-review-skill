@@ -20,12 +20,23 @@ Install econ-review for Claude Code and/or Codex.
 
 Usage:
   ./install.sh [--global | --local [directory]] [--all | --claude | --codex] [--dry-run]
+  ./install.sh --setup [managed-setup options]
 
 Examples:
   ./install.sh
   ./install.sh --global --codex
   ./install.sh --local /path/to/project --all
   ./install.sh --local . --dry-run
+  ./install.sh --setup --global --all --with-review-desk
+
+The default command preserves the lightweight copy-only installer. --setup
+delegates to the cross-platform Python installer, which creates or reuses a
+managed core runtime and checks Poppler. Native Windows users should run:
+  py -3 scripts/install_econ_review.py --global --all --with-review-desk
+
+The explicit --with-review-desk option installs a verified prebuilt viewer and
+loopback-only Python launcher. It does not require Node.js or npm. Omit that
+option to preserve skill-only managed setup.
 
 Local checkouts install directly. Remote installation is disabled unless both
 ECON_REVIEW_ARCHIVE_URL (HTTPS) and ECON_REVIEW_ARCHIVE_SHA256 (64 hex digits)
@@ -42,6 +53,22 @@ fail() {
 require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "$1 is required"
 }
+
+SETUP_REQUESTED=0
+SETUP_ARGS=()
+for argument in "$@"; do
+  if [ "$argument" = "--setup" ]; then
+    SETUP_REQUESTED=1
+  else
+    SETUP_ARGS+=("$argument")
+  fi
+done
+if [ "$SETUP_REQUESTED" -eq 1 ]; then
+  require_command python3
+  [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/scripts/install_econ_review.py" ] \
+    || fail "--setup requires a complete local checkout; run scripts/install_econ_review.py from the repository"
+  exec python3 "$SCRIPT_DIR/scripts/install_econ_review.py" "${SETUP_ARGS[@]}"
+fi
 
 set_mode() {
   [ -z "$MODE_SEEN" ] || [ "$MODE_SEEN" = "$1" ] || fail "choose only one of --global and --local"
@@ -444,3 +471,4 @@ if [ "$DRY_RUN" -eq 1 ]; then
 else
   echo "econ-review installation complete."
 fi
+echo "Restart or reload Codex and Claude Code sessions so they discover the installed skill."

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   equationEvidencePresentation,
   hasDelimitedMath,
+  prepareReviewMarkdown,
 } from "../lib/review-equation-presentation.ts";
 
 test("keeps a rendered-transcription sentence literal instead of wrapping it in KaTeX", () => {
@@ -72,4 +73,13 @@ test("does not mistake a currency sign or empty payload for a raw equation", () 
     kind: "prose",
     content: "No equation evidence is available.",
   });
+});
+
+test("renders isolated legacy subscripts without rewriting prose, code, links, or existing math", () => {
+  assert.equal(
+    prepareReviewMarkdown("Revenue is R_b times b_j, while funding is R times b_j."),
+    "Revenue is $R_{b}$ times $b_{j}$, while funding is R times $b_{j}$.",
+  );
+  assert.equal(prepareReviewMarkdown("Keep finding_id and source_manifest.json literal."), "Keep finding_id and source_manifest.json literal.");
+  assert.equal(prepareReviewMarkdown("Use `R_b`, [source_x](https://example.org/source_x), and $b_j$."), "Use `R_b`, [source_x](https://example.org/source_x), and $b_j$.");
 });

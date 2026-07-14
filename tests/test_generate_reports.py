@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -28,7 +29,7 @@ class GenerateReportsTests(unittest.TestCase):
         synthesis = MODULE.load(FIXTURE / "synthesis.json")
         run = MODULE.load(FIXTURE / "run.json")
         self.assertEqual(MODULE.render_report(ledger, synthesis), (FIXTURE / "report.md").read_text(encoding="utf-8"))
-        self.assertEqual(MODULE.render_writing_report(FIXTURE, ledger), (FIXTURE / "writing-report.md").read_text(encoding="utf-8"))
+        self.assertEqual(MODULE.render_writing_report(FIXTURE, ledger), (FIXTURE / "editing-comments.md").read_text(encoding="utf-8"))
         self.assertEqual(
             MODULE.render_landing_page(FIXTURE, ledger, synthesis, run, include_writing=True),
             (FIXTURE / "README.md").read_text(encoding="utf-8"),
@@ -48,6 +49,22 @@ class GenerateReportsTests(unittest.TestCase):
             self.assertIn("[Start here](README.md)", rendered)
             self.assertIn("[Revision plan](fix-plan.md)", rendered)
 
+    def test_internal_ids_and_verification_labels_stay_out_of_visible_report_copy(self) -> None:
+        ledger = MODULE.load(FIXTURE / "findings.json")
+        synthesis = MODULE.load(FIXTURE / "synthesis.json")
+        report = MODULE.render_report(ledger, synthesis)
+        writing = MODULE.render_writing_report(FIXTURE, ledger)
+        visible_report = re.sub(r"<!--.*?-->", "", report, flags=re.DOTALL)
+        visible_writing = re.sub(r"<!--.*?-->", "", writing, flags=re.DOTALL)
+        for visible in (visible_report, visible_writing):
+            self.assertNotRegex(visible, r"\b(?:LOGIC|WRT)-\d{2}\b")
+        for audit_label in ("Linked findings", "verified render", "**Result:**", "**Checked:**"):
+            self.assertNotIn(audit_label, visible_writing)
+            self.assertNotIn(audit_label, visible_report)
+        self.assertIn("This can be corrected within the current design.", visible_report)
+        self.assertIn("The proposition characterizes the model's comparative static.", visible_writing)
+        self.assertIn("**Why it matters:**", visible_writing)
+
     def test_landing_page_is_viewer_optional_and_maps_manifest_documents(self) -> None:
         landing = MODULE.render_landing_page(
             FIXTURE,
@@ -58,10 +75,152 @@ class GenerateReportsTests(unittest.TestCase):
         )
         self.assertIn("contain the full review", landing)
         self.assertIn("local Review Desk is optional", landing)
-        self.assertIn("[evidence/reconstruction.md](evidence/reconstruction.md)", landing)
-        self.assertIn("Review coverage at a glance", landing)
+        self.assertNotIn("evidence/reconstruction.md", landing)
+        self.assertIn("## What was reviewed", landing)
+        self.assertIn("## What could not be checked", landing)
+        self.assertIn("## Review files", landing)
         self.assertIn("1 source fully read", landing)
         self.assertNotIn("## Assessment Boundary", landing)
+        for internal_label in ("Audit trail", "SHA-256", "schema_version", "finalization receipt"):
+            self.assertNotIn(internal_label, landing)
+
+    def test_active_rows_are_globally_severity_first_even_when_ranks_are_stale(self) -> None:
+        ledger = MODULE.load(FIXTURE / "findings.json")
+        base = json.loads(json.dumps(ledger["findings"][0]))
+        rows = []
+        for finding_id, severity, role, rank in (
+            ("MINOR-01", "minor", "potentially_dispositive", 1),
+            ("CRIT-01", "critical", "potentially_dispositive", 99),
+            ("MAJOR-02", "major", "revision_value", 2),
+            ("MAJOR-01", "major", "potentially_dispositive", 50),
+        ):
+            row = json.loads(json.dumps(base))
+            row.update({
+                "id": finding_id,
+                "severity": severity,
+                "decision_role": role,
+                "importance_rank": rank,
+                "report_channel": "substance",
+            })
+            rows.append(row)
+        ledger["findings"] = rows
+        self.assertEqual(
+            [row["id"] for row in MODULE.active_rows(ledger, "substance")],
+            ["CRIT-01", "MAJOR-01", "MAJOR-02", "MINOR-01"],
+        )
+
+    def test_prior_round_progress_is_opening_context_and_an_overview_document(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "review"
+            shutil.copytree(FIXTURE, target)
+            run_path = target / "run.json"
+            run = json.loads(run_path.read_text(encoding="utf-8"))
+            run["prior_round"] = {
+                "prior_findings_path": "evidence/prior-round/prior-findings.json",
+                "review_actions_path": "evidence/prior-round/review-actions.json",
+                "revision_tasks_path": "evidence/prior-round/revision-tasks.json",
+                "agent_response_path": None,
+            }
+            run_path.write_text(json.dumps(run, indent=2) + "\n", encoding="utf-8")
+            reconciliation = {
+                "review_id": run["review_id"],
+                "records": [
+                    {"outcome": "resolved"},
+                    {"outcome": "partly_resolved"},
+                    {"outcome": "unchanged"},
+                    {"outcome": "superseded"},
+                    {"outcome": "user_excluded"},
+                ],
+                "new_finding_ids": ["NEW-01", "NEW-02"],
+            }
+            evidence = target / "evidence"
+            (evidence / "round-reconciliation.json").write_text(
+                json.dumps(reconciliation, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            (evidence / "round-reconciliation.md").write_text(
+                "# What Changed Since the Prior Review\n\nReviewer-owned evidence.\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), str(target)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            report = (target / "report.md").read_text(encoding="utf-8")
+            self.assertIn("## Progress since the prior review", report)
+            self.assertIn("1 prior comment resolved", report)
+            self.assertIn("3 prior comments still active", report)
+            self.assertIn("1 prior comment excluded by the user", report)
+            self.assertIn("2 new issues", report)
+            self.assertLess(
+                report.index("## Progress since the prior review"),
+                report.index("## Recommendation and main grounds"),
+            )
+
+            manifest = json.loads(
+                (target / "review-manifest.json").read_text(encoding="utf-8")
+            )
+            progress = next(
+                row
+                for row in manifest["documents"]
+                if row["path"] == "evidence/round-reconciliation.md"
+            )
+            self.assertEqual(progress, {
+                "id": "round-progress",
+                "title": "What changed since the prior review",
+                "group": "overview",
+                "path": "evidence/round-reconciliation.md",
+                "order": 20,
+            })
+            paths = [row["path"] for row in manifest["documents"]]
+            self.assertLess(paths.index("report.md"), paths.index(progress["path"]))
+            self.assertLess(paths.index(progress["path"]), paths.index("editing-comments.md"))
+            landing = (target / "README.md").read_text(encoding="utf-8")
+            self.assertIn("[what changed since the prior review]", landing)
+
+            checked = subprocess.run(
+                [sys.executable, str(SCRIPT), str(target), "--check"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+
+    def test_prior_round_report_generation_requires_reconciliation_markdown(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "review"
+            shutil.copytree(FIXTURE, target)
+            run_path = target / "run.json"
+            run = json.loads(run_path.read_text(encoding="utf-8"))
+            run["prior_round"] = {
+                "prior_findings_path": "evidence/prior-round/prior-findings.json",
+                "review_actions_path": "evidence/prior-round/review-actions.json",
+                "revision_tasks_path": "evidence/prior-round/revision-tasks.json",
+                "agent_response_path": None,
+            }
+            run_path.write_text(json.dumps(run, indent=2) + "\n", encoding="utf-8")
+            (target / "evidence" / "round-reconciliation.json").write_text(
+                json.dumps({
+                    "review_id": run["review_id"],
+                    "records": [],
+                    "new_finding_ids": [],
+                }, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), str(target)],
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "run.json.prior_round requires evidence/round-reconciliation.md",
+                result.stderr,
+            )
 
     def test_generator_creates_required_v3_manifest_when_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -72,8 +231,8 @@ class GenerateReportsTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             manifest = json.loads((target / "review-manifest.json").read_text(encoding="utf-8"))
             paths = [row["path"] for row in manifest["documents"]]
-            self.assertEqual(paths[:4], ["README.md", "report.md", "writing-report.md", "fix-plan.md"])
-            self.assertIn("evidence/figures.md", paths)
+            self.assertEqual(paths, ["README.md", "report.md", "editing-comments.md", "fix-plan.md"])
+            self.assertFalse(any(path.startswith("evidence/") for path in paths))
             self.assertNotIn("synthetic-paper.md", paths)
 
     def test_generator_rejects_nonportable_manifest_document_paths(self) -> None:
@@ -112,6 +271,52 @@ class GenerateReportsTests(unittest.TestCase):
         synthesis["other_major_finding_ids"] = []
         rendered = MODULE.render_report(ledger, synthesis)
         self.assertIn("No verified issue currently meets", rendered)
+
+    def test_verified_material_comparators_are_named_in_the_referee_report(self) -> None:
+        external = {
+            "schema_version": "0.4",
+            "sources": [{
+                "id": "EXT-01",
+                "title": "A Synthetic Closest Result",
+                "url": "https://example.org/closest",
+                "bibliographic_metadata": {
+                    "authors": [{"name": "Alex Example"}],
+                    "first_public_date": "2024-03-15",
+                },
+            }],
+            "frontier_audit": {
+                "literature_comparisons": [{
+                    "id": "LIT-CMP-01",
+                    "source_id": "EXT-01",
+                    "relation_type": "closest_antecedent",
+                    "assessment_state": "supported",
+                    "source_contribution": "The prior paper establishes the same boundary result",
+                    "overlap": "Both papers characterize the equality boundary",
+                    "surviving_difference": "the reviewed paper applies the result to a broader environment",
+                }],
+            },
+        }
+
+        rendered = MODULE.render_report(
+            MODULE.load(FIXTURE / "findings.json"),
+            MODULE.load(FIXTURE / "synthesis.json"),
+            external_sources=external,
+        )
+
+        self.assertIn("## Contribution and closest literature", rendered)
+        self.assertIn("Alex Example (2024)", rendered)
+        self.assertIn("[A Synthetic Closest Result](<https://example.org/closest>)", rendered)
+        self.assertIn("The reviewed paper remains distinct because", rendered)
+        self.assertNotIn("LIT-CMP-01", rendered)
+
+    def test_bounded_or_background_literature_is_not_promoted_as_a_verified_comparator(self) -> None:
+        external = MODULE.load(FIXTURE / "evidence" / "external-sources.json")
+        rendered = MODULE.render_report(
+            MODULE.load(FIXTURE / "findings.json"),
+            MODULE.load(FIXTURE / "synthesis.json"),
+            external_sources=external,
+        )
+        self.assertNotIn("## Contribution and closest literature", rendered)
 
     def test_upgrade_condition_lead_in_is_grammatical_with_imperative_bullets(self) -> None:
         rendered = MODULE.render_report(
@@ -153,12 +358,12 @@ class GenerateReportsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "review"
             shutil.copytree(FIXTURE, target)
-            report_path = target / "writing-report.md"
+            report_path = target / "editing-comments.md"
             report_path.write_text(
-                "# Writing report\n\n"
+                "# Editing comments\n\n"
                 "## Assessment Boundary\n\nStale internal scope prose.\n\n"
                 "## Journal fit and submission strategy\n\nUnrequested stale advice.\n\n"
-                "## Detailed Writing Comments (0)\n",
+                "## Detailed Editing Comments (0)\n",
                 encoding="utf-8",
             )
 
@@ -206,10 +411,10 @@ class GenerateReportsTests(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            report = (target / "writing-report.md").read_text(encoding="utf-8")
+            report = (target / "editing-comments.md").read_text(encoding="utf-8")
             self.assertIn("## Journal fit and submission strategy", report)
             self.assertIn("A current venue-specific bar could not be verified.", report)
-            self.assertIn("**Related findings:** —", report)
+            self.assertIn("**Related comments:** —", report)
 
     def test_current_journal_fit_requires_https_and_nonfuture_dates(self) -> None:
         ledger = MODULE.load(FIXTURE / "findings.json")
@@ -342,7 +547,7 @@ class GenerateReportsTests(unittest.TestCase):
             for field in ("assessment_summary", "terminology_summary", "exhibit_summary"):
                 writing.pop(field)
             writing_path.write_text(json.dumps(writing, indent=2) + "\n", encoding="utf-8")
-            report_path = target / "writing-report.md"
+            report_path = target / "editing-comments.md"
             report = report_path.read_text(encoding="utf-8").replace(
                 "The synthetic manuscript is concise and readable.",
                 "Legacy preamble prose remains immutable.",
@@ -409,15 +614,15 @@ class GenerateReportsTests(unittest.TestCase):
             ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
             ledger["findings"] = [row for row in ledger["findings"] if row.get("report_channel") != "writing"]
             ledger_path.write_text(json.dumps(ledger, indent=2) + "\n", encoding="utf-8")
-            (target / "writing-report.md").unlink()
+            (target / "editing-comments.md").unlink()
             result = subprocess.run([sys.executable, str(SCRIPT), str(target)], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertFalse((target / "writing-report.md").exists())
+            self.assertFalse((target / "editing-comments.md").exists())
             landing = (target / "README.md").read_text(encoding="utf-8")
-            self.assertNotIn("[Writing report](writing-report.md)", landing)
+            self.assertNotIn("[Editing comments](editing-comments.md)", landing)
             report = (target / "report.md").read_text(encoding="utf-8")
-            self.assertNotIn("writing report", report.lower())
-            self.assertNotIn("The companion writing report contains", report)
+            self.assertNotIn("editing comments", report.lower())
+            self.assertNotIn("The companion editing comments contains", report)
 
     def test_malformed_fix_fails_cleanly_without_traceback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

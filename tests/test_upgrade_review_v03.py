@@ -81,6 +81,21 @@ class UpgradeReviewV03Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid decision_role 'urgent'"):
             MODULE.rerank(rows)
 
+    def test_rerank_is_severity_first_then_decision_role(self) -> None:
+        rows = [
+            {"id": "MINOR-01", "decision_role": "potentially_dispositive", "status": "open", "severity": "minor", "importance_rank": 1},
+            {"id": "CRIT-01", "decision_role": "potentially_dispositive", "status": "open", "severity": "critical", "importance_rank": 4},
+            {"id": "MAJOR-02", "decision_role": "revision_value", "status": "open", "severity": "major", "importance_rank": 2},
+            {"id": "MAJOR-01", "decision_role": "potentially_dispositive", "status": "open", "severity": "major", "importance_rank": 3},
+        ]
+        MODULE.rerank(rows)
+        ranked = [row["id"] for row in sorted(rows, key=lambda row: row["importance_rank"])]
+        self.assertEqual(ranked, ["CRIT-01", "MAJOR-01", "MAJOR-02", "MINOR-01"])
+
+    def test_migration_classifies_critical_as_potentially_dispositive(self) -> None:
+        row = {"severity": "critical", "essential": False, "report_channel": "substance"}
+        self.assertEqual(MODULE.decision_role(row), "potentially_dispositive")
+
     def test_full_migration_rolls_back_both_files_when_second_write_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "review"

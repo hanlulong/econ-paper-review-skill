@@ -22,6 +22,7 @@ FILE_CONTRACT = Path("scripts/public-release-files.json")
 SCAN_ROOTS = (
     Path(".github"),
     Path("benchmarks"),
+    Path("docs"),
     Path("econ-review"),
     Path("review-viewer"),
     Path("scripts"),
@@ -29,6 +30,7 @@ SCAN_ROOTS = (
 )
 EXCLUDED_RELATIVE_PREFIXES = {Path("benchmarks/reviews")}
 ROOT_FILES = {
+    Path(".gitattributes"),
     Path(".gitignore"),
     Path("LICENSE"),
     Path("README.md"),
@@ -57,6 +59,7 @@ EXCLUDED_DIRECTORY_NAMES = {
     "node_modules",
     "outputs",
     "public",
+    "static-dist",
     "venv",
     "work",
 }
@@ -102,6 +105,12 @@ WINDOWS_RESERVED_BASENAMES = frozenset(
     | {f"com{number}" for number in range(1, 10)}
     | {f"lpt{number}" for number in range(1, 10)}
 )
+REVIEW_DESK_THIRD_PARTY_NOTICE = "app/THIRD_PARTY_NOTICES.txt"
+REVIEW_DESK_THIRD_PARTY_MANIFEST = "app/third-party-licenses/manifest.json"
+REVIEW_DESK_KATEX_FONT_LICENSE = "app/third-party-licenses/katex-fonts/KATEX-FONTS-OFL-1.1.txt"
+REVIEW_DESK_REQUIRED_RUNTIME_PACKAGES = frozenset(
+    {"katex", "react", "react-dom", "react-markdown", "rehype-katex", "remark-gfm", "remark-math"}
+)
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -126,8 +135,15 @@ def _reject_json_constant(value: str) -> None:
 
 
 def _release_mode(path: Path) -> int:
-    """Canonicalize modes so archives do not depend on checkout umasks."""
-    return 0o755 if stat.S_IMODE(path.stat().st_mode) & 0o111 else 0o644
+    """Return a host-independent archive mode.
+
+    Native Windows does not preserve POSIX executable bits in a checkout.  A
+    mode derived from ``stat`` therefore made Windows-built archives differ
+    from macOS/Linux builds and left ``install.sh`` non-executable after a
+    later POSIX extraction.  Public entry points are executable by contract;
+    all other source files are data.
+    """
+    return 0o755 if path.name == "install.sh" or path.suffix.casefold() == ".py" else 0o644
 
 
 def _safe_relative(raw: str) -> Path:
@@ -236,6 +252,208 @@ def _scan_content(root: Path, files: list[Path]) -> None:
         raise ValueError("privacy scan failed:\n  " + "\n  ".join(sorted(findings)))
 
 
+def _scan_review_desk_licenses(archive: zipfile.ZipFile, expected: set[str]) -> None:
+    required = {
+        REVIEW_DESK_THIRD_PARTY_NOTICE,
+        REVIEW_DESK_THIRD_PARTY_MANIFEST,
+        REVIEW_DESK_KATEX_FONT_LICENSE,
+    }
+    if not required.issubset(expected):
+        raise ValueError("Review Desk release is missing embedded third-party notices or licenses")
+    manifest_bytes = archive.read(REVIEW_DESK_THIRD_PARTY_MANIFEST)
+    manifest = json.loads(
+        manifest_bytes,
+        object_pairs_hook=_reject_duplicate_pairs,
+        parse_constant=_reject_json_constant,
+    )
+    if (
+        not isinstance(manifest, dict)
+        or set(manifest) != {"generated_from", "packages", "schema_version", "supplemental_assets"}
+        or manifest.get("schema_version") != "1"
+        or manifest.get("generated_from") != "Vite client output module graph and package-lock.json"
+        or manifest_bytes != _canonical_json(manifest)
+    ):
+        raise ValueError("Review Desk third-party license manifest has an invalid contract")
+
+    packages = manifest.get("packages")
+    if not isinstance(packages, list) or not packages:
+        raise ValueError("Review Desk third-party package inventory must be a non-empty array")
+    keys: list[tuple[str, str]] = []
+    referenced: set[str] = set()
+    notice_bytes = archive.read(REVIEW_DESK_THIRD_PARTY_NOTICE)
+    try:
+        notice = notice_bytes.decode("utf-8")
+    except UnicodeError as exc:
+        raise ValueError(f"Review Desk third-party notice is not UTF-8: {exc}") from exc
+    if not notice or not notice.endswith("\n"):
+        raise ValueError("Review Desk third-party notice must be non-empty and newline-terminated")
+    for package in packages:
+        if not isinstance(package, dict) or set(package) != {
+            "declared_license",
+            "license_files",
+            "name",
+            "version",
+        }:
+            raise ValueError("Review Desk third-party package record has an invalid contract")
+        name = package.get("name")
+        version = package.get("version")
+        declared_license = package.get("declared_license")
+        license_files = package.get("license_files")
+        if not all(isinstance(value, str) and value for value in (name, version, declared_license)):
+            raise ValueError("Review Desk third-party package identity must use non-empty strings")
+        if (
+            not isinstance(license_files, list)
+            or not license_files
+            or not all(isinstance(path, str) and path for path in license_files)
+            or len(license_files) != len(set(license_files))
+        ):
+            raise ValueError(f"Review Desk third-party package has invalid license files: {name}@{version}")
+        keys.append((name, version))
+        if f"{name} {version}" not in notice:
+            raise ValueError(f"Review Desk third-party notice omits {name}@{version}")
+        for license_path in license_files:
+            if (
+                not license_path.startswith("app/third-party-licenses/packages/")
+                or license_path not in expected
+                or not archive.read(license_path)
+            ):
+                raise ValueError(f"Review Desk package references a missing or empty license: {license_path}")
+            referenced.add(license_path)
+    if keys != sorted(keys) or len(keys) != len(set(keys)):
+        raise ValueError("Review Desk third-party package records must be sorted and unique")
+    missing = REVIEW_DESK_REQUIRED_RUNTIME_PACKAGES - {name for name, _version in keys}
+    if missing:
+        raise ValueError("Review Desk third-party inventory omits: " + ", ".join(sorted(missing)))
+
+    supplemental = manifest.get("supplemental_assets")
+    if not isinstance(supplemental, list) or len(supplemental) != 1 or not isinstance(supplemental[0], dict):
+        raise ValueError("Review Desk third-party inventory must contain one KaTeX font record")
+    font = supplemental[0]
+    if (
+        set(font) != {"component", "copyright", "declared_license", "license_files", "reserved_font_names"}
+        or font.get("component") != "KaTeX font assets"
+        or font.get("declared_license") != "SIL Open Font License 1.1"
+        or font.get("license_files") != [REVIEW_DESK_KATEX_FONT_LICENSE]
+        or not isinstance(font.get("reserved_font_names"), list)
+        or not font["reserved_font_names"]
+        or not all(isinstance(name, str) and name for name in font["reserved_font_names"])
+        or not isinstance(font.get("copyright"), str)
+        or not font["copyright"]
+    ):
+        raise ValueError("Review Desk third-party inventory has an invalid KaTeX font record")
+    if not archive.read(REVIEW_DESK_KATEX_FONT_LICENSE):
+        raise ValueError("Review Desk KaTeX font license is empty")
+    referenced.add(REVIEW_DESK_KATEX_FONT_LICENSE)
+    if "KaTeX font assets" not in notice or "SIL Open Font License 1.1" not in notice:
+        raise ValueError("Review Desk third-party notice omits the KaTeX font license")
+
+    emitted = {
+        name
+        for name in expected
+        if name.startswith("app/third-party-licenses/") and name != REVIEW_DESK_THIRD_PARTY_MANIFEST
+    }
+    if emitted != referenced:
+        raise ValueError("Review Desk license files differ from its embedded third-party inventory")
+
+
+def _scan_review_desk_bundle(path: Path) -> None:
+    """Fail closed if the distributable viewer is stale, unsafe, or private."""
+
+    with zipfile.ZipFile(path) as archive:
+        infos = archive.infolist()
+        names: set[str] = set()
+        folded: set[str] = set()
+        for info in infos:
+            name = info.filename
+            pure = PurePosixPath(name)
+            if (
+                info.is_dir()
+                or info.flag_bits & 0x1
+                or pure.is_absolute()
+                or ".." in pure.parts
+                or "\\" in name
+                or ":" in name
+                or name != pure.as_posix()
+                or stat.S_IFMT(info.external_attr >> 16) not in {0, stat.S_IFREG}
+            ):
+                raise ValueError(f"unsafe Review Desk release entry: {name}")
+            if name.casefold() in folded:
+                raise ValueError(f"duplicate or case-colliding Review Desk release entry: {name}")
+            folded.add(name.casefold())
+            names.add(name)
+        manifest_name = "bundle-manifest.json"
+        if manifest_name not in names:
+            raise ValueError("Review Desk release is missing bundle-manifest.json")
+        manifest = json.loads(
+            archive.read(manifest_name),
+            object_pairs_hook=_reject_duplicate_pairs,
+            parse_constant=_reject_json_constant,
+        )
+        if (
+            not isinstance(manifest, dict)
+            or set(manifest) != {"files", "package", "schema_version"}
+            or manifest.get("package") != "econ-review-desk"
+            or manifest.get("schema_version") != "1"
+            or not isinstance(manifest.get("files"), list)
+        ):
+            raise ValueError("Review Desk release has an invalid manifest contract")
+        if archive.read(manifest_name) != _canonical_json(manifest):
+            raise ValueError("Review Desk release manifest is not canonical JSON")
+        expected = {manifest_name}
+        previous = ""
+        for record in manifest["files"]:
+            if not isinstance(record, dict) or set(record) != {"path", "sha256", "size"}:
+                raise ValueError("Review Desk release manifest has an invalid file record")
+            name = record.get("path")
+            digest = record.get("sha256")
+            size = record.get("size")
+            if not isinstance(name, str) or name <= previous:
+                raise ValueError("Review Desk release records must be sorted and unique")
+            previous = name
+            pure = PurePosixPath(name)
+            if (
+                pure.is_absolute()
+                or ".." in pure.parts
+                or "\\" in name
+                or ":" in name
+                or name != pure.as_posix()
+                or pure.suffix.casefold() == ".map"
+                or "node_modules" in pure.parts
+                or "reviews" in pure.parts
+            ):
+                raise ValueError(f"forbidden Review Desk release content: {name}")
+            if name not in names:
+                raise ValueError(f"Review Desk release is missing a declared file: {name}")
+            data = archive.read(name)
+            if (
+                not isinstance(size, int)
+                or isinstance(size, bool)
+                or size != len(data)
+                or not isinstance(digest, str)
+                or digest != _sha256(data)
+            ):
+                raise ValueError(f"Review Desk release file does not match its manifest: {name}")
+            expected.add(name)
+            if SENSITIVE_FILENAME.search(pure.name):
+                raise ValueError(f"Review Desk release contains a sensitive filename: {name}")
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            for label, pattern in SENSITIVE_CONTENT.items():
+                if pattern.search(text):
+                    raise ValueError(f"Review Desk release contains possible {label}: {name}")
+        if names != expected:
+            raise ValueError("Review Desk release entries differ from its manifest")
+        if not {
+            "app/index.html",
+            "launch_installed_review_desk.py",
+            "launch_review_desk.py",
+        }.issubset(expected):
+            raise ValueError("Review Desk release is missing a required entry point")
+        _scan_review_desk_licenses(archive, expected)
+
+
 def public_files(root: Path) -> list[Path]:
     """Return the exact, stable, symlink-free public file contract."""
     root = root.resolve()
@@ -258,6 +476,9 @@ def public_files(root: Path) -> list[Path]:
         if not path.is_file() or path.is_symlink():
             raise ValueError(f"required public file is missing or unsafe: {relative.as_posix()}")
     _scan_content(root, files)
+    viewer_bundle = Path("review-viewer/release/review-desk.zip")
+    if viewer_bundle in declared:
+        _scan_review_desk_bundle(root / viewer_bundle)
     return files
 
 

@@ -1,8 +1,8 @@
 import { parseStrictJson } from "./strict-json.ts";
 import { normalizePackagePath } from "./local-review-package.ts";
 
-export const REVIEW_ACTIONS_SCHEMA_VERSION = "0.3" as const;
-const SUPPORTED_REVIEW_ACTIONS_SCHEMA_VERSIONS = new Set(["0.1", "0.2", REVIEW_ACTIONS_SCHEMA_VERSION]);
+export const REVIEW_ACTIONS_SCHEMA_VERSION = "0.4" as const;
+const SUPPORTED_REVIEW_ACTIONS_SCHEMA_VERSIONS = new Set(["0.1", "0.2", "0.3", REVIEW_ACTIONS_SCHEMA_VERSION]);
 export const REVIEW_ACTIONS_KIND = "econ-review-actions" as const;
 
 export const REVIEW_ACTION_DISPOSITIONS = [
@@ -10,9 +10,14 @@ export const REVIEW_ACTION_DISPOSITIONS = [
   "ready_for_recheck",
   "challenged",
   "deferred",
+  "not_relevant",
+  "not_addressable",
 ] as const;
 
+export const REVIEW_ACTION_PRIORITIES = ["P0", "P1", "P2"] as const;
+
 export type ReviewActionDisposition = (typeof REVIEW_ACTION_DISPOSITIONS)[number];
+export type ReviewActionPriority = (typeof REVIEW_ACTION_PRIORITIES)[number];
 export type LegacyWorkspaceStatus = "open" | "addressed" | "parked";
 
 export type ReviewActionHistoryEntry = {
@@ -23,6 +28,8 @@ export type ReviewActionHistoryEntry = {
 export const REVIEW_ACTION_EVENT_TYPES = [
   "disposition_changed",
   "note_revised",
+  "priority_changed",
+  "reviewed_changed",
   "imported",
   "reversed",
 ] as const;
@@ -33,6 +40,8 @@ export type ReviewActionEvent = {
   at: string;
   disposition?: ReviewActionDisposition;
   note?: string | null;
+  user_priority?: ReviewActionPriority | null;
+  reviewed?: boolean;
   parent_event_id?: string | null;
   origin?: "local" | "import";
 };
@@ -42,6 +51,8 @@ export type ReviewActionEntry = {
   disposition: ReviewActionDisposition;
   response_note: string;
   changed_locations: string[];
+  user_priority: ReviewActionPriority | null;
+  reviewed: boolean;
   updated_at: string;
   status_history: ReviewActionHistoryEntry[];
   events: ReviewActionEvent[];
@@ -82,6 +93,7 @@ export type ReviewActionsReconciliation = {
   matched_finding_ids: string[];
   unmatched_entry_ids: string[];
   untouched_finding_ids: string[];
+  rereview_required_finding_ids: string[];
   review_id_matches: boolean;
   fingerprint_matches: boolean;
   warnings: ReconciliationWarning[];
@@ -107,6 +119,7 @@ const DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:
 const MAX_NOTE_CHARS = 10_000;
 const MAX_LOCATION_CHARS = 1_000;
 const DISPOSITIONS = new Set<string>(REVIEW_ACTION_DISPOSITIONS);
+const PRIORITIES = new Set<string>(REVIEW_ACTION_PRIORITIES);
 const EVENT_TYPES = new Set<string>(REVIEW_ACTION_EVENT_TYPES);
 const LEGACY_STATUSES = new Set<string>(["open", "addressed", "parked"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -156,6 +169,12 @@ function assertFindingId(value: unknown, label: string): asserts value is string
 function assertDisposition(value: unknown, label: string): asserts value is ReviewActionDisposition {
   if (typeof value !== "string" || !DISPOSITIONS.has(value)) {
     throw new Error(`${label} has an unsupported disposition`);
+  }
+}
+
+function assertPriority(value: unknown, label: string): asserts value is ReviewActionPriority | null {
+  if (!(value === null || (typeof value === "string" && PRIORITIES.has(value)))) {
+    throw new Error(`${label} must be P0, P1, P2, or null`);
   }
 }
 
@@ -263,18 +282,27 @@ function legacyEvents(
   return events;
 }
 
-function cloneEvents(value: unknown, label: string): ReviewActionEvent[] {
+function cloneEvents(value: unknown, label: string, sourceVersion: "0.3" | "0.4" = REVIEW_ACTIONS_SCHEMA_VERSION): ReviewActionEvent[] {
   if (!Array.isArray(value) || !value.length) throw new Error(`${label} must contain at least one event`);
   let previousTime = -Infinity;
   let previousId: string | null = null;
   const ids = new Set<string>();
   return value.map((raw, index) => {
     if (!isRecord(raw)) throw new Error(`${label}[${index}] must be an object`);
-    assertExactKeys(raw, ["event_id", "type", "at", "disposition", "note", "parent_event_id", "origin"], `${label}[${index}]`);
+    assertExactKeys(
+      raw,
+      sourceVersion === "0.4"
+        ? ["event_id", "type", "at", "disposition", "note", "user_priority", "reviewed", "parent_event_id", "origin"]
+        : ["event_id", "type", "at", "disposition", "note", "parent_event_id", "origin"],
+      `${label}[${index}]`,
+    );
     if (typeof raw.event_id !== "string" || !UUID.test(raw.event_id) || ids.has(raw.event_id)) {
       throw new Error(`${label}[${index}].event_id must be a unique UUID`);
     }
     if (typeof raw.type !== "string" || !EVENT_TYPES.has(raw.type)) throw new Error(`${label}[${index}].type is unsupported`);
+    if (sourceVersion === "0.3" && ["priority_changed", "reviewed_changed"].includes(raw.type)) {
+      throw new Error(`${label}[${index}].type is unsupported under action schema v0.3`);
+    }
     assertDateTime(raw.at, `${label}[${index}].at`);
     if (Date.parse(raw.at) < previousTime) throw new Error(`${label} must be chronological`);
     if ((raw.parent_event_id ?? null) !== previousId) throw new Error(`${label}[${index}] must reference the preceding event as parent`);
@@ -282,19 +310,35 @@ function cloneEvents(value: unknown, label: string): ReviewActionEvent[] {
     const type = raw.type as ReviewActionEventType;
     if (type === "disposition_changed") {
       assertDisposition(raw.disposition, `${label}[${index}].disposition`);
-      if (raw.note !== undefined) throw new Error(`${label}[${index}] disposition events cannot carry a note`);
+      if (raw.note !== undefined || raw.user_priority !== undefined || raw.reviewed !== undefined) {
+        throw new Error(`${label}[${index}] disposition events cannot carry another state field`);
+      }
     } else if (type === "reversed") {
       if (raw.disposition === undefined && raw.note === undefined) throw new Error(`${label}[${index}] reversal must carry a disposition or note`);
       if (raw.disposition !== undefined) assertDisposition(raw.disposition, `${label}[${index}].disposition`);
       if (!(raw.note === undefined || raw.note === null || typeof raw.note === "string") || (typeof raw.note === "string" && raw.note.length > MAX_NOTE_CHARS)) {
         throw new Error(`${label}[${index}].note must be null or text of at most ${MAX_NOTE_CHARS} characters`);
       }
+      if (raw.user_priority !== undefined || raw.reviewed !== undefined) throw new Error(`${label}[${index}] reversal cannot carry priority or reviewed state`);
     } else if (type === "note_revised") {
       if (!(raw.note === null || typeof raw.note === "string") || (typeof raw.note === "string" && raw.note.length > MAX_NOTE_CHARS)) {
         throw new Error(`${label}[${index}].note must be null or text of at most ${MAX_NOTE_CHARS} characters`);
       }
-      if (raw.disposition !== undefined) throw new Error(`${label}[${index}] note events cannot carry a disposition`);
-    } else if (raw.disposition !== undefined || raw.note !== undefined) {
+      if (raw.disposition !== undefined || raw.user_priority !== undefined || raw.reviewed !== undefined) {
+        throw new Error(`${label}[${index}] note events cannot carry another state field`);
+      }
+    } else if (type === "priority_changed") {
+      if (!("user_priority" in raw)) throw new Error(`${label}[${index}] priority events must carry user_priority`);
+      assertPriority(raw.user_priority, `${label}[${index}].user_priority`);
+      if (raw.disposition !== undefined || raw.note !== undefined || raw.reviewed !== undefined) {
+        throw new Error(`${label}[${index}] priority events cannot carry another state field`);
+      }
+    } else if (type === "reviewed_changed") {
+      if (typeof raw.reviewed !== "boolean") throw new Error(`${label}[${index}] reviewed events must carry a boolean`);
+      if (raw.disposition !== undefined || raw.note !== undefined || raw.user_priority !== undefined) {
+        throw new Error(`${label}[${index}] reviewed events cannot carry another state field`);
+      }
+    } else if (raw.disposition !== undefined || raw.note !== undefined || raw.user_priority !== undefined || raw.reviewed !== undefined) {
       throw new Error(`${label}[${index}] import events cannot carry state fields`);
     }
     const event: ReviewActionEvent = {
@@ -306,6 +350,8 @@ function cloneEvents(value: unknown, label: string): ReviewActionEvent[] {
     };
     if (raw.disposition !== undefined) event.disposition = raw.disposition as ReviewActionDisposition;
     if (raw.note !== undefined) event.note = raw.note as string | null;
+    if ("user_priority" in raw) event.user_priority = raw.user_priority as ReviewActionPriority | null;
+    if (raw.reviewed !== undefined) event.reviewed = raw.reviewed as boolean;
     ids.add(event.event_id);
     previousId = event.event_id;
     previousTime = Date.parse(event.at);
@@ -313,17 +359,22 @@ function cloneEvents(value: unknown, label: string): ReviewActionEvent[] {
   });
 }
 
-function cloneEntry(value: unknown, label: string, sourceVersion: "0.1" | "0.2" | "0.3" = REVIEW_ACTIONS_SCHEMA_VERSION): ReviewActionEntry {
+function cloneEntry(value: unknown, label: string, sourceVersion: "0.1" | "0.2" | "0.3" | "0.4" = REVIEW_ACTIONS_SCHEMA_VERSION): ReviewActionEntry {
   if (!isRecord(value)) throw new Error(`${label} must be an object`);
   assertExactKeys(
     value,
-    sourceVersion === "0.3"
-      ? ["finding_id", "disposition", "response_note", "changed_locations", "updated_at", "status_history", "events"]
-      : ["finding_id", "disposition", "response_note", "changed_locations", "updated_at", "status_history"],
+    sourceVersion === "0.4"
+      ? ["finding_id", "disposition", "response_note", "changed_locations", "user_priority", "reviewed", "updated_at", "status_history", "events"]
+      : sourceVersion === "0.3"
+        ? ["finding_id", "disposition", "response_note", "changed_locations", "updated_at", "status_history", "events"]
+        : ["finding_id", "disposition", "response_note", "changed_locations", "updated_at", "status_history"],
     label,
   );
   assertFindingId(value.finding_id, `${label}.finding_id`);
   assertDisposition(value.disposition, `${label}.disposition`);
+  if (sourceVersion !== "0.4" && ["not_relevant", "not_addressable"].includes(value.disposition)) {
+    throw new Error(`${label}.disposition is unsupported under action schema v${sourceVersion}`);
+  }
   if (typeof value.response_note !== "string" || value.response_note.length > MAX_NOTE_CHARS) {
     throw new Error(`${label}.response_note must be text of at most ${MAX_NOTE_CHARS} characters`);
   }
@@ -334,6 +385,13 @@ function cloneEntry(value: unknown, label: string, sourceVersion: "0.1" | "0.2" 
   });
   if (new Set(changedLocations).size !== changedLocations.length) {
     throw new Error(`${label}.changed_locations must not contain duplicates`);
+  }
+  const userPriority = sourceVersion === "0.4" ? value.user_priority : null;
+  assertPriority(userPriority, `${label}.user_priority`);
+  const reviewed = sourceVersion === "0.4" ? value.reviewed : false;
+  if (typeof reviewed !== "boolean") throw new Error(`${label}.reviewed must be a boolean`);
+  if (["not_relevant", "not_addressable"].includes(value.disposition) && !reviewed) {
+    throw new Error(`${label}.${value.disposition} must be marked reviewed`);
   }
   if (sourceVersion === "0.1" && value.disposition === "ready_for_recheck" && !value.response_note.trim() && !changedLocations.length) {
     throw new Error(`${label} needs an author response or changed location under action schema v0.1`);
@@ -349,11 +407,13 @@ function cloneEntry(value: unknown, label: string, sourceVersion: "0.1" | "0.2" 
   if (Date.parse(statusHistory.at(-1)!.at) > Date.parse(value.updated_at)) {
     throw new Error(`${label}.updated_at cannot precede its final status history entry`);
   }
-  const events = sourceVersion === "0.3"
-    ? cloneEvents(value.events, `${label}.events`)
+  const events = sourceVersion === "0.3" || sourceVersion === "0.4"
+    ? cloneEvents(value.events, `${label}.events`, sourceVersion)
     : legacyEvents(value.finding_id, statusHistory, value.response_note, value.updated_at);
   let replayDisposition: ReviewActionDisposition = "open";
   let replayNote = "";
+  let replayPriority: ReviewActionPriority | null = null;
+  let replayReviewed = false;
   const replayHistory: ReviewActionHistoryEntry[] = [];
   for (const event of events) {
     if (event.type === "disposition_changed" || event.type === "reversed") {
@@ -364,9 +424,18 @@ function cloneEntry(value: unknown, label: string, sourceVersion: "0.1" | "0.2" 
       if (event.type === "reversed" && event.note !== undefined) replayNote = event.note || "";
     } else if (event.type === "note_revised") {
       replayNote = event.note || "";
+    } else if (event.type === "priority_changed") {
+      replayPriority = event.user_priority ?? null;
+    } else if (event.type === "reviewed_changed") {
+      replayReviewed = Boolean(event.reviewed);
     }
   }
-  if (replayDisposition !== value.disposition || replayNote !== value.response_note) {
+  if (
+    replayDisposition !== value.disposition
+    || replayNote !== value.response_note
+    || replayPriority !== userPriority
+    || replayReviewed !== reviewed
+  ) {
     throw new Error(`${label} current state must equal replayed events`);
   }
   if (replayHistory.length !== statusHistory.length || replayHistory.some((item, index) => (
@@ -378,6 +447,8 @@ function cloneEntry(value: unknown, label: string, sourceVersion: "0.1" | "0.2" 
     disposition: value.disposition,
     response_note: value.response_note,
     changed_locations: changedLocations,
+    user_priority: userPriority,
+    reviewed,
     updated_at: value.updated_at,
     status_history: statusHistory,
     events,
@@ -429,7 +500,7 @@ export function parseReviewActions(value: unknown): ReviewActionsPayload {
     throw new Error("source_manuscripts must have unique paths and be case-unambiguous");
   }
   if (!Array.isArray(raw.entries)) throw new Error("entries must be an array");
-  const sourceVersion = raw.schema_version as "0.1" | "0.2" | "0.3";
+  const sourceVersion = raw.schema_version as "0.1" | "0.2" | "0.3" | "0.4";
   const entries = raw.entries.map((entry, index) => cloneEntry(entry, `entries[${index}]`, sourceVersion));
   const ids = entries.map((entry) => entry.finding_id);
   if (new Set(ids).size !== ids.length) throw new Error("entries must have unique finding IDs");
@@ -472,7 +543,9 @@ export function generateReviewActionsPayload(options: {
   const canonicalEntries = entries.map((entry, index) => cloneEntry(
     entry,
     `entries[${index}]`,
-    Array.isArray((entry as Partial<ReviewActionEntry>).events) ? "0.3" : "0.2",
+    "user_priority" in entry && "reviewed" in entry
+      ? "0.4"
+      : Array.isArray((entry as Partial<ReviewActionEntry>).events) ? "0.3" : "0.2",
   ));
   return parseReviewActions({
     schema_version: REVIEW_ACTIONS_SCHEMA_VERSION,
@@ -527,6 +600,8 @@ export function migrateLegacyWorkspace(value: unknown, at = new Date().toISOStri
       disposition,
       response_note: candidate.note,
       changed_locations: [],
+      user_priority: null,
+      reviewed: false,
       updated_at: migrationTime,
       status_history: [{ disposition, at: migrationTime }],
       events: [{
@@ -553,7 +628,7 @@ export function migrateLegacyWorkspace(value: unknown, at = new Date().toISOStri
 export function updateReviewAction(
   current: ReviewActionEntry | undefined,
   findingId: string,
-  patch: Partial<Pick<ReviewActionEntry, "disposition" | "response_note" | "changed_locations">>,
+  patch: Partial<Pick<ReviewActionEntry, "disposition" | "response_note" | "changed_locations" | "user_priority" | "reviewed">>,
   at = new Date().toISOString(),
   eventOptions: { type?: "disposition_changed" | "reversed"; origin?: "local" | "import" } = {},
 ): ReviewActionEntry {
@@ -566,6 +641,8 @@ export function updateReviewAction(
         disposition: "open",
         response_note: "",
         changed_locations: [],
+        user_priority: null,
+        reviewed: false,
         updated_at: at,
         status_history: [{ disposition: "open", at }],
         events: [{
@@ -594,6 +671,23 @@ export function updateReviewAction(
   if (new Set(normalizedLocations).size !== normalizedLocations.length) {
     throw new Error("action changed_locations must not contain duplicates");
   }
+  const userPriority = patch.user_priority === undefined ? base.user_priority : patch.user_priority;
+  assertPriority(userPriority, "action user_priority");
+  const reviewed = patch.reviewed ?? base.reviewed;
+  if (typeof reviewed !== "boolean") throw new Error("action reviewed must be a boolean");
+  if (["not_relevant", "not_addressable"].includes(disposition) && !reviewed) {
+    throw new Error(`action ${disposition} must be marked reviewed`);
+  }
+  const locationsUnchanged = normalizedLocations.length === base.changed_locations.length
+    && normalizedLocations.every((location, index) => location === base.changed_locations[index]);
+  if (
+    current
+    && disposition === base.disposition
+    && responseNote === base.response_note
+    && locationsUnchanged
+    && userPriority === base.user_priority
+    && reviewed === base.reviewed
+  ) return base;
   const statusHistory = base.status_history.map((entry) => ({ ...entry }));
   if (disposition !== base.disposition) statusHistory.push({ disposition, at });
   const events = base.events.map((event) => ({ ...event }));
@@ -616,11 +710,25 @@ export function updateReviewAction(
     note: responseNote || null,
     origin: eventOptions.origin || "local",
   });
+  if (userPriority !== base.user_priority) appendEvent({
+    type: "priority_changed",
+    at,
+    user_priority: userPriority,
+    origin: eventOptions.origin || "local",
+  });
+  if (reviewed !== base.reviewed) appendEvent({
+    type: "reviewed_changed",
+    at,
+    reviewed,
+    origin: eventOptions.origin || "local",
+  });
   return cloneEntry({
     finding_id: findingId,
     disposition,
     response_note: responseNote,
     changed_locations: normalizedLocations,
+    user_priority: userPriority,
+    reviewed,
     updated_at: at,
     status_history: statusHistory,
     events,
@@ -641,10 +749,53 @@ export function recordReviewActionImport(entry: ReviewActionEntry, at = new Date
   return cloneEntry({ ...checked, updated_at: effectiveAt, events }, `action ${entry.finding_id}`);
 }
 
-/** Reconcile exact canonical IDs. A different review ID is never applied; a revised fingerprint is warned but allowed. */
+const ROUND_EXCLUSIONS = new Set<ReviewActionDisposition>(["not_relevant", "not_addressable"]);
+const ROUND_ACTIVE_DISPOSITIONS = new Set<ReviewActionDisposition>(["open", "ready_for_recheck", "challenged"]);
+
+function nextActionTimestamp(entry: ReviewActionEntry, requestedAt: string): string {
+  assertDateTime(requestedAt, "round rollover timestamp");
+  const previous = Date.parse(entry.updated_at);
+  const requested = Date.parse(requestedAt);
+  const next = Math.max(requested, previous + 1);
+  const rendered = new Date(next).toISOString();
+  // RFC 3339 in this contract intentionally uses a four-digit year. At the
+  // representable ceiling, retaining the previous timestamp is still
+  // monotonic and keeps the append-only event chain valid.
+  return /^\d{4}-/.test(rendered) ? rendered : entry.updated_at;
+}
+
+/**
+ * Carry an exact-ID action into a changed-fingerprint review round.
+ *
+ * Notes, personal priority, changed locations, and the complete event trail
+ * remain intact. Active workflow claims reopen and all surviving comments must
+ * be considered again. Explicit reviewed exclusions retain their reviewed
+ * state because the v0.4 contract requires it; they normally do not survive as
+ * active findings in the next ledger.
+ */
+export function rolloverReviewActionForNextRound(
+  entryValue: ReviewActionEntry,
+  at = new Date().toISOString(),
+): ReviewActionEntry {
+  const entry = cloneEntry(entryValue, `action ${entryValue.finding_id}`);
+  const preservesReviewedExclusion = ROUND_EXCLUSIONS.has(entry.disposition);
+  const disposition = ROUND_ACTIVE_DISPOSITIONS.has(entry.disposition) ? "open" : entry.disposition;
+  const reviewed = preservesReviewedExclusion ? true : false;
+  if (disposition === entry.disposition && reviewed === entry.reviewed) return entry;
+  return updateReviewAction(
+    entry,
+    entry.finding_id,
+    { disposition, reviewed },
+    nextActionTimestamp(entry, at),
+    { origin: "import" },
+  );
+}
+
+/** Reconcile exact canonical IDs. A different review ID is never applied; a revised fingerprint starts a safe new-round rollover. */
 export function reconcileReviewActions(
   payloadValue: unknown,
   current: { review_id: string; review_fingerprint: string; finding_ids: string[] },
+  options: { rollover_at?: string } = {},
 ): ReviewActionsReconciliation {
   const payload = parseReviewActions(payloadValue);
   assertNonemptyString(current.review_id, "current review_id");
@@ -666,7 +817,9 @@ export function reconcileReviewActions(
   if (!fingerprintMatches) {
     warnings.push({
       code: "fingerprint_mismatch",
-      message: "The review ledger changed after these actions were exported. Only exact surviving finding IDs can be reconciled.",
+      message: reviewIdMatches
+        ? "The review ledger changed after these actions were exported. Notes and personal priorities were carried forward for exact surviving finding IDs, but current comments must be reviewed again; active workflow states were reopened. Explicit not-relevant or not-addressable exclusions remain reviewed if their exact IDs still survive."
+        : "The action file also has a different review fingerprint. No actions were applied because its review ID does not match the current review.",
     });
   }
 
@@ -684,11 +837,20 @@ export function reconcileReviewActions(
       message: `${unmatchedEntryIds.length} action ${unmatchedEntryIds.length === 1 ? "entry does" : "entries do"} not match an exact current finding ID.`,
     });
   }
+  const reconciledEntries = matchedEntries.map((entry) => (
+    fingerprintMatches
+      ? cloneEntry(entry, `entry ${entry.finding_id}`)
+      : rolloverReviewActionForNextRound(entry, options.rollover_at)
+  ));
+  const rereviewRequiredIds = fingerprintMatches ? [] : reconciledEntries
+    .filter((entry) => !ROUND_EXCLUSIONS.has(entry.disposition))
+    .map((entry) => entry.finding_id);
   return {
-    entries: Object.fromEntries(matchedEntries.map((entry) => [entry.finding_id, cloneEntry(entry, `entry ${entry.finding_id}`)])),
+    entries: Object.fromEntries(reconciledEntries.map((entry) => [entry.finding_id, entry])),
     matched_finding_ids: matchedEntries.map((entry) => entry.finding_id),
     unmatched_entry_ids: unmatchedEntryIds,
     untouched_finding_ids: findingIds.filter((findingId) => !matchedIds.has(findingId)),
+    rereview_required_finding_ids: rereviewRequiredIds,
     review_id_matches: reviewIdMatches,
     fingerprint_matches: fingerprintMatches,
     warnings,
@@ -722,6 +884,8 @@ function entriesAreIdentical(left: ReviewActionEntry, right: ReviewActionEntry):
   return left.finding_id === right.finding_id
     && left.disposition === right.disposition
     && left.response_note === right.response_note
+    && left.user_priority === right.user_priority
+    && left.reviewed === right.reviewed
     && left.updated_at === right.updated_at
     && left.changed_locations.length === right.changed_locations.length
     && left.changed_locations.every((value, index) => value === right.changed_locations[index])

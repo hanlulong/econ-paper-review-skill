@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.3",
+  "schema_version": "0.4",
   "review_id": "synthetic-valid-001",
   "search_confidentiality": "forbidden",
   "sources": [],
@@ -10,11 +10,20 @@
       "theoretical result"
     ],
     "assessed_at": "2026-07-13",
+    "manuscript_literature_cutoff": {
+      "status": "unresolved",
+      "date": null,
+      "basis": "The synthetic manuscript gives no literature cutoff, and outbound search is forbidden."
+    },
     "query_families": [
       {
         "id": "QRYF-01",
         "family": "economic question and closest mechanism",
         "rationale": "This family would identify the nearest result against which the uniqueness claim should be compared.",
+        "discovery_route": "mechanism_or_model_search",
+        "claim_ids": [
+          "LIT-CLM-01"
+        ],
         "status": "blocked_by_policy",
         "query_logs": [],
         "boundary": {
@@ -26,6 +35,84 @@
       }
     ],
     "closest_papers": [],
+    "work_families": [],
+    "claim_assessments": [
+      {
+        "id": "LIT-CLM-01",
+        "internal_claim_ids": [
+          "CLM-01"
+        ],
+        "claim_type": "contribution",
+        "claim_text": "The manuscript presents a uniqueness result over the stated parameter domain.",
+        "manuscript_anchor_ids": [
+          "ANC-01"
+        ],
+        "contribution_dimensions": [
+          "theoretical result"
+        ],
+        "source_ids_under_assessment": [],
+        "query_family_ids": [
+          "QRYF-01"
+        ],
+        "assessment": "bounded",
+        "assessment_note": "The result can be assessed internally, but its priority and incremental contribution cannot be established without a live search.",
+        "fair_restatement": "The manuscript establishes its stated result internally; no external novelty conclusion is made.",
+        "finding_ids": []
+      }
+    ],
+    "literature_comparisons": [],
+    "candidate_screening": [],
+    "claim_search_coverage": [
+      {
+        "claim_id": "LIT-CLM-01",
+        "query_family_ids": [
+          "QRYF-01"
+        ],
+        "discovery_routes": [
+          "mechanism_or_model_search"
+        ],
+        "status": "bounded",
+        "boundary": {
+          "reason": "outbound_search_forbidden",
+          "affected_scope": "Priority and incremental-contribution search",
+          "impact": "The claim is not compared with external literature.",
+          "completion_condition": "Permit a confidentiality-safe outbound literature search."
+        }
+      }
+    ],
+    "search_closure": {
+      "status": "bounded",
+      "covered_claim_ids": [],
+      "independent_discovery_routes": [],
+      "screened_candidate_ids": [],
+      "unresolved_candidate_ids": [],
+      "citation_chaining": {
+        "backward": {
+          "status": "bounded",
+          "query_log_ids": [],
+          "note": "No citation-chain search was authorized."
+        },
+        "forward": {
+          "status": "bounded",
+          "query_log_ids": [],
+          "note": "No citation-chain search was authorized."
+        }
+      },
+      "recent_frontier_coverage": {
+        "status": "bounded",
+        "query_log_ids": [],
+        "searched_through": null,
+        "note": "No current-frontier search was authorized."
+      },
+      "final_zero_yield_rounds": [],
+      "stopping_basis": "Search closure cannot be claimed because outbound literature search is forbidden.",
+      "boundary": {
+        "reason": "outbound_search_forbidden",
+        "affected_scope": "Claim-level literature closure",
+        "impact": "No claim-level frontier conclusion is made.",
+        "completion_condition": "Permit a confidentiality-safe outbound literature search."
+      }
+    },
     "boundary": {
       "reason": "outbound_search_forbidden",
       "affected_scope": "Closest-paper and priority assessment",

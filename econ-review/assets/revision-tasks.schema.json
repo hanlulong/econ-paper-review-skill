@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openecon.ai/econ-review/revision-tasks.schema.json",
+  "title": "econ-review revision tasks",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "kind", "plan_id", "source_review_id",
+    "source_review_fingerprint", "generated_at", "all_comments_reviewed",
+    "handoff_ready", "tasks", "excluded"
+  ],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "kind": {"const": "econ-review-revision-tasks"},
+    "plan_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Content-derived identifier over the review identity, timestamp, readiness state, tasks, and exclusions."
+    },
+    "source_review_id": {"$ref": "#/$defs/trimmed_text"},
+    "source_review_fingerprint": {
+      "$ref": "#/$defs/trimmed_text",
+      "description": "Lowercase SHA-256 of the exact BOM-free UTF-8 findings.json bytes loaded by Review Desk."
+    },
+    "generated_at": {"type": "string", "format": "date-time"},
+    "all_comments_reviewed": {"type": "boolean"},
+    "handoff_ready": {"type": "boolean"},
+    "tasks": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {"$ref": "#/$defs/task"}
+    },
+    "excluded": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {"$ref": "#/$defs/excluded_task"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"handoff_ready": {"const": true}},
+        "required": ["handoff_ready"]
+      },
+      "then": {
+        "properties": {
+          "all_comments_reviewed": {"const": true},
+          "tasks": {
+            "items": {
+              "properties": {
+                "reviewed": {"const": true},
+                "user_priority": {"enum": ["P0", "P1", "P2"]},
+                "user_comment": {"type": "string", "pattern": "\\S"}
+              }
+            }
+          },
+          "excluded": {
+            "items": {
+              "properties": {
+                "reviewed": {"const": true},
+                "user_comment": {"type": "string", "pattern": "\\S"}
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "trimmed_text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 20000,
+      "pattern": "^\\S(?:[\\s\\S]*\\S)?$"
+    },
+    "optional_text": {"type": "string", "maxLength": 20000},
+    "finding_id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_-]*-[0-9]{2,}$"},
+    "priority": {"enum": ["P0", "P1", "P2", null]},
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "finding_id", "user_priority", "reviewed", "disposition", "user_comment", "title",
+        "issue", "relevant_text", "suggestions", "done_when", "source_location"
+      ],
+      "properties": {
+        "finding_id": {"$ref": "#/$defs/finding_id"},
+        "user_priority": {"$ref": "#/$defs/priority"},
+        "reviewed": {"type": "boolean"},
+        "disposition": {"enum": ["open", "ready_for_recheck", "challenged"]},
+        "user_comment": {"type": "string", "maxLength": 10000},
+        "title": {"$ref": "#/$defs/trimmed_text"},
+        "issue": {"$ref": "#/$defs/trimmed_text"},
+        "relevant_text": {"$ref": "#/$defs/optional_text"},
+        "suggestions": {"$ref": "#/$defs/trimmed_text"},
+        "done_when": {"$ref": "#/$defs/trimmed_text"},
+        "source_location": {"$ref": "#/$defs/trimmed_text"}
+      }
+    },
+    "excluded_task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finding_id", "disposition", "user_priority", "reviewed", "user_comment", "title"],
+      "properties": {
+        "finding_id": {"$ref": "#/$defs/finding_id"},
+        "disposition": {"enum": ["deferred", "not_relevant", "not_addressable"]},
+        "user_priority": {"$ref": "#/$defs/priority"},
+        "reviewed": {"type": "boolean"},
+        "user_comment": {"type": "string", "maxLength": 10000},
+        "title": {"$ref": "#/$defs/trimmed_text"}
+      }
+    }
+  }
+}

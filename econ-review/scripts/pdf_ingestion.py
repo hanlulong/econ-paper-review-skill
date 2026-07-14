@@ -138,8 +138,13 @@ def safe_relative(value: str | Path) -> str:
         raise IngestionError(f"path must be safe and relative: {value} ({exc})") from exc
 
 
-def command_path(name: str) -> str | None:
-    return shutil.which(name)
+def command_path(name: str, system: str | None = None) -> str | None:
+    discovered = shutil.which(name)
+    if discovered:
+        return discovered
+    executable_name = f"{name}.exe" if (system or os.name) in {"nt", "Windows"} else name
+    sibling = Path(sys.executable).with_name(executable_name)
+    return str(sibling) if sibling.is_file() and os.access(sibling, os.X_OK) else None
 
 
 def run(command: list[str], *, timeout: int = 300, text: bool = False) -> subprocess.CompletedProcess[Any]:
@@ -246,6 +251,13 @@ def doctor() -> int:
         else:
             print(_doctor_python_line(status, "optional", label=label))
     print("network: forbidden by default; Mathpix requires explicit upload and retention authorization")
+    if required_failure:
+        print(
+            "PDF ingestion: ACTION NEEDED — refresh the managed runtime or make "
+            "the required Poppler tools available, then run this check again"
+        )
+    else:
+        print("PDF ingestion: READY")
     return 1 if required_failure else 0
 
 

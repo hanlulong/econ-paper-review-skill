@@ -1,6 +1,8 @@
 {
   "schema_version": "0.4",
   "review_id": "synthetic-valid-001",
+  "paper_title": "A Boundary Case in a Static Signaling Model",
+  "assessment_date": "2026-07-13",
   "status": "complete",
   "mode": "full",
   "target": {
@@ -35,6 +37,8 @@
   "comment_policy": {
     "minimum_target": 1,
     "maximum": null,
+    "substance_maximum": 100,
+    "writing_maximum": 30,
     "exhaustive": true
   },
   "stage_status": {
@@ -49,8 +53,8 @@
   },
   "gates_loaded": [],
   "counts": {
-    "critical": 0,
-    "major": 1,
+    "critical": 1,
+    "major": 0,
     "minor": 1,
     "info": 0,
     "essential": 1

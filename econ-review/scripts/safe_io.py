@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import stat
@@ -22,6 +23,39 @@ _WINDOWS_RESERVED_BASENAMES = frozenset(
 
 class StrictJsonError(ValueError):
     """Raised when JSON is syntactically accepted by Python but contract-ambiguous."""
+
+
+def is_link_or_junction(path: Path) -> bool:
+    """Return true for symbolic links and native Windows junctions."""
+    try:
+        if path.is_symlink():
+            return True
+        junction_check = getattr(path, "is_junction", None)
+        return bool(junction_check and junction_check())
+    except OSError:
+        # A path whose link state cannot be inspected is not safe to traverse.
+        return True
+
+
+def require_valid_pdf_bytes(value: bytes, *, label: str = "PDF") -> None:
+    """Require a structurally readable PDF with at least one real page."""
+    if not value.startswith(b"%PDF-"):
+        raise ValueError(f"{label} does not have a PDF header")
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(io.BytesIO(value), strict=True)
+        if len(reader.pages) < 1:
+            raise ValueError(f"{label} has no pages")
+        # Force page-tree and media-box resolution instead of accepting only
+        # a superficially parseable trailer.
+        for page in (reader.pages[0], reader.pages[-1]):
+            if float(page.mediabox.width) <= 0 or float(page.mediabox.height) <= 0:
+                raise ValueError(f"{label} has an invalid page size")
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"{label} is not a structurally readable PDF: {exc}") from exc
 
 
 def _reject_duplicate_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -96,6 +130,8 @@ def canonical_portable_path(value: str) -> str:
 
 
 def _contained_path(root: Path, relative: str | Path, *, create_parents: bool) -> Path:
+    if is_link_or_junction(root):
+        raise ValueError(f"review directory must not be a link or junction: {root}")
     root = root.resolve(strict=True)
     rel = Path(relative)
     if rel.is_absolute() or not rel.parts or ".." in rel.parts:
@@ -103,17 +139,17 @@ def _contained_path(root: Path, relative: str | Path, *, create_parents: bool) -
     current = root
     for part in rel.parts[:-1]:
         current = current / part
-        if current.exists() or current.is_symlink():
+        if current.exists() or is_link_or_junction(current):
             mode = current.lstat().st_mode
-            if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
+            if is_link_or_junction(current) or stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
                 raise ValueError(f"path component is not a real directory: {current}")
         elif create_parents:
             current.mkdir(mode=0o755)
         else:
             raise FileNotFoundError(current)
     destination = root / rel
-    if destination.is_symlink():
-        raise ValueError(f"refusing symbolic-link destination: {destination}")
+    if is_link_or_junction(destination):
+        raise ValueError(f"refusing link or junction destination: {destination}")
     try:
         destination.resolve(strict=False).relative_to(root)
     except ValueError as exc:
@@ -142,6 +178,23 @@ def safe_read_json(root: Path, relative: str | Path) -> Any:
     return strict_json_loads(safe_read_bytes(root, relative))
 
 
+def _fsync_parent_directory(path: Path) -> None:
+    """Persist a rename where directory file descriptors are supported.
+
+    Native Windows does not permit ``os.open`` on directories.  Attempting the
+    POSIX durability step there raises after ``os.replace`` has already
+    committed the new file, which makes an otherwise successful write look
+    failed and leaves callers unable to roll it back reliably.
+    """
+    if os.name == "nt":
+        return
+    directory_fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
 def atomic_write_bytes(root: Path, relative: str | Path, value: bytes) -> Path:
     destination = _contained_path(root, relative, create_parents=True)
     descriptor, temporary = tempfile.mkstemp(prefix=f".{destination.name}.", dir=destination.parent)
@@ -153,11 +206,7 @@ def atomic_write_bytes(root: Path, relative: str | Path, value: bytes) -> Path:
         if destination.is_symlink():
             raise ValueError(f"refusing symbolic-link destination: {destination}")
         os.replace(temporary, destination)
-        directory_fd = os.open(destination.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        _fsync_parent_directory(destination.parent)
     except Exception:
         try:
             os.unlink(temporary)

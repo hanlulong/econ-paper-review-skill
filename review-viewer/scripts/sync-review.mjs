@@ -20,12 +20,18 @@ import {
 } from "../lib/review-finalization.ts";
 import { validateReviewRegistry } from "../lib/review-registry.ts";
 
-if (process.env.ALLOW_PUBLISH !== "1") {
+const arguments_ = process.argv.slice(2);
+const cliAuthorized = arguments_.length === 1 && arguments_[0] === "--allow-publish";
+if (process.env.ALLOW_PUBLISH !== "1" && !cliAuthorized) {
   console.error([
     "Refusing to copy review manuscripts and findings into public build assets.",
-    "Set ALLOW_PUBLISH=1 only after confirming every bundled review is cleared for publication.",
+    "Set ALLOW_PUBLISH=1, or use the explicit bundled npm script, only after confirming every bundled review is cleared for publication.",
     "For confidential reviews, run npm run dev and use the local file picker instead.",
   ].join("\n"));
+  process.exit(1);
+}
+if (arguments_.length && !cliAuthorized) {
+  console.error("Unsupported sync-review argument. Use only --allow-publish for an explicitly cleared bundled review.");
   process.exit(1);
 }
 

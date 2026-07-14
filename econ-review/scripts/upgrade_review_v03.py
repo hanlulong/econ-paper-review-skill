@@ -2,8 +2,8 @@
 """Upgrade a v0.2 review ledger to the v0.3 referee-synthesis contract.
 
 The migration is intentionally paper-agnostic. It preserves findings and prose,
-adds decision metadata from existing verified state, and re-ranks by decision
-role. A human reviewer must still create and verify synthesis.json.
+adds decision metadata from existing verified state, and re-ranks by severity
+and decision role. A human reviewer must still create and verify synthesis.json.
 """
 
 from __future__ import annotations
@@ -24,6 +24,13 @@ ROLE_ORDER = {
     "posture_material": 1,
     "revision_value": 2,
     "polish": 3,
+}
+
+SEVERITY_ORDER = {
+    "critical": 0,
+    "major": 1,
+    "minor": 2,
+    "info": 3,
 }
 
 
@@ -52,7 +59,7 @@ def titles_from_report(path: Path) -> dict[str, str]:
 
 
 def decision_role(row: dict[str, Any]) -> str:
-    if row.get("essential") is True:
+    if row.get("essential") is True or row.get("severity") == "critical":
         return "potentially_dispositive"
     if row.get("report_channel", "substance") == "writing":
         return "polish"
@@ -97,7 +104,12 @@ def rerank(rows: list[Any]) -> None:
         if not isinstance(rank, int) or isinstance(rank, bool) or rank < 1:
             raise ValueError(f"finding {finding_id} has invalid importance_rank {rank!r}")
         active.append(row)
-    active.sort(key=lambda row: (ROLE_ORDER[row["decision_role"]], row.get("importance_rank", 10**9)))
+    active.sort(key=lambda row: (
+        SEVERITY_ORDER.get(str(row.get("severity")), 99),
+        ROLE_ORDER[row["decision_role"]],
+        row.get("importance_rank", 10**9),
+        str(row.get("id") or ""),
+    ))
     for rank, row in enumerate(active, start=1):
         row["importance_rank"] = rank
 
@@ -140,7 +152,7 @@ def migrate(review_dir: Path, rerank_only: bool = False) -> None:
 
     titles = {}
     titles.update(titles_from_report(review_dir / "report.md"))
-    titles.update(titles_from_report(review_dir / "writing-report.md"))
+    titles.update(titles_from_report(review_dir / "editing-comments.md"))
     rows = ledger.get("findings")
     if not isinstance(rows, list):
         raise ValueError("findings.json must contain a findings array")

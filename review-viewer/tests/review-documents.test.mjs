@@ -19,8 +19,12 @@ test("validates arbitrary review documents and rejects ambiguous manifests", asy
   const fixtureManifest = await readFile(new URL("review-manifest.json", FIXTURE), "utf8");
   const parsed = validateReviewDocumentManifest(fixtureManifest);
   assert.equal(parsed.review_id, "synthetic-valid-001");
-  assert.equal(parsed.documents.length, 13);
-  assert.equal(parsed.documents[0].path, "README.md");
+  assert.deepEqual(parsed.documents.map((document) => document.path), [
+    "README.md",
+    "report.md",
+    "editing-comments.md",
+    "fix-plan.md",
+  ]);
 
   const arbitrary = validateReviewDocumentManifest({
     schema_version: "0.1",
@@ -145,7 +149,7 @@ test("heading slugs match generated numbered report anchors", () => {
   assert.equal(markdownHeadingSlug(""), "section");
 });
 
-test("discovers manifest documents and conservative legacy report groups", () => {
+test("discovers manifest documents and conservative standard report groups", () => {
   const manifest = {
     schema_version: "0.1",
     review_id: "arbitrary-review",
@@ -168,29 +172,35 @@ test("discovers manifest documents and conservative legacy report groups", () =>
     /references missing files: overview\/editorial\.md/,
   );
 
-  const legacy = discoverReviewDocuments([
+  const discovered = discoverReviewDocuments([
     "notes.md",
     "README.md",
     "report.md",
+    "editing-comments.md",
     "writing-report.md",
     "fix-plan.md",
     "reports/mechanism-note.md",
     "plan/round-two.md",
     "evidence/custom-proof-audit.md",
   ]);
-  assert.deepEqual(legacy.map((document) => document.path), [
+  assert.deepEqual(discovered.map((document) => document.path), [
     "README.md",
     "report.md",
-    "writing-report.md",
+    "editing-comments.md",
     "reports/mechanism-note.md",
     "fix-plan.md",
     "plan/round-two.md",
     "evidence/custom-proof-audit.md",
   ]);
-  assert.equal(legacy.some((document) => document.path === "notes.md"), false);
+  assert.equal(discovered.some((document) => document.path === "notes.md"), false);
+  assert.equal(discovered.some((document) => document.path === "writing-report.md"), false);
+  assert.deepEqual(
+    discovered.find((document) => document.path === "editing-comments.md"),
+    { id: "editing-comments", title: "Editing comments", group: "reports", path: "editing-comments.md", order: 10 },
+  );
 });
 
-test("the synthetic manifest covers every report and audit Markdown file", async () => {
+test("the synthetic manifest exposes every author-facing document and keeps audit working papers internal", async () => {
   const manifest = validateReviewDocumentManifest(await readFile(new URL("review-manifest.json", FIXTURE), "utf8"));
   const entries = await readdir(FIXTURE, { recursive: true, withFileTypes: true });
   const markdown = entries
@@ -201,7 +211,11 @@ test("the synthetic manifest covers every report and audit Markdown file", async
     })
     .filter((path) => path !== "synthetic-paper.md")
     .sort();
-  assert.deepEqual(manifest.documents.map((document) => document.path).sort(), markdown);
+  const authorFacing = markdown.filter((path) => !path.startsWith("evidence/"));
+  const internalAudits = markdown.filter((path) => path.startsWith("evidence/"));
+  assert.deepEqual(manifest.documents.map((document) => document.path).sort(), authorFacing);
+  assert.ok(internalAudits.length > 0, "the fixture must exercise internal audit working papers");
+  assert.equal(manifest.documents.some((document) => document.path.startsWith("evidence/")), false);
 });
 
 test("every synced manifest reference exists and remains inside its synthetic bundle", async () => {
@@ -225,7 +239,7 @@ test("every synced manifest reference exists and remains inside its synthetic bu
         const parent = candidate.parentPath.replace(new URL(base).pathname.replace(/\/$/, ""), "").replace(/^\//, "");
         return parent ? `${parent}/${candidate.name}` : candidate.name;
       })
-      .filter((path) => !sourceMarkdown.has(path))
+      .filter((path) => !sourceMarkdown.has(path) && !path.startsWith("evidence/"))
       .sort();
     assert.deepEqual(
       bundledMarkdown,

@@ -28,6 +28,37 @@ export function hasDelimitedMath(content: string): boolean {
   );
 }
 
+const MARKDOWN_PROTECTED_SPAN = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`|\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(^|[^\\])\$(?!\s)(?:\\.|[^$\n])+?\$(?!\d)|!?\[[^\]\n]*\]\([^)\n]+\)|<https?:\/\/[^>\n]+>)/gm;
+const SIMPLE_UNDELIMITED_SUBSCRIPT = /(?<![\p{L}\p{N}_])([\p{L}])_\{?([\p{L}\p{N}]+)\}?(?![\p{L}\p{N}_])/gu;
+
+/**
+ * Make isolated TeX-style variables readable in otherwise ordinary prose.
+ *
+ * Canonical review text should delimit mathematics explicitly. Older reviews
+ * sometimes contain prose such as `R_b times b_j`, however. Wrapping only a
+ * single-letter base with a subscript removes the raw underscores without
+ * guessing that filenames, snake_case fields, links, code, or existing math
+ * are equations.
+ */
+export function prepareReviewMarkdown(content: string): string {
+  let cursor = 0;
+  const output: string[] = [];
+  for (const match of content.matchAll(MARKDOWN_PROTECTED_SPAN)) {
+    const index = match.index ?? 0;
+    const leading = match[2] || "";
+    const protectedStart = index + leading.length;
+    const plain = content.slice(cursor, protectedStart);
+    output.push(plain.replace(SIMPLE_UNDELIMITED_SUBSCRIPT, (_value, base, subscript) => `$${base}_{${subscript}}$`));
+    output.push(content.slice(protectedStart, index + match[0].length));
+    cursor = index + match[0].length;
+  }
+  output.push(content.slice(cursor).replace(
+    SIMPLE_UNDELIMITED_SUBSCRIPT,
+    (_value, base, subscript) => `$${base}_{${subscript}}$`,
+  ));
+  return output.join("");
+}
+
 function proseWordProfile(content: string) {
   const withoutTexCommands = content
     .replace(/\\(?:begin|end)\s*\{[^}]*\}/g, " ")

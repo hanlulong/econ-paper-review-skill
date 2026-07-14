@@ -5,6 +5,7 @@ import {
   inferReviewPackageRoot,
   matchReferencedImagePaths,
   normalizePackagePath,
+  normalizeSelectedPackagePath,
   referencedExhibitHashes,
   referencedExhibitPaths,
   relativeToReviewRoot,
@@ -55,6 +56,7 @@ test("rejects missing, multiple, duplicate, and unsafe package roots", () => {
   for (const portable of ["review/console.md", "review/com10.md", "review/lpt0.png"]) {
     assert.equal(normalizePackagePath(portable), portable);
   }
+  assert.equal(normalizeSelectedPackagePath("review/e\u0301vidence.md"), "review/\u00e9vidence.md");
 });
 
 test("selects only a source-matched manuscript when run metadata is available", () => {
@@ -85,7 +87,7 @@ test("rejects ambiguous manuscript matches and permits one unambiguous individua
     sourcePaths: ["paper.md"],
   }), /Multiple manuscript files match/);
   assert.equal(selectManuscriptPath({
-    paths: ["findings.json", "run.json", "draft.md", "README.md", "report.md"],
+    paths: ["findings.json", "run.json", "draft.md", "README.md", "report.md", "editing-comments.md"],
     reviewRoot: "",
   }), "draft.md");
 });

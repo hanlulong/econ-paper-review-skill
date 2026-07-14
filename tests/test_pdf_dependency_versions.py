@@ -122,6 +122,7 @@ class PdfDependencyGateTests(unittest.TestCase):
             with contextlib.redirect_stdout(required_output):
                 self.assertEqual(INGESTION.doctor(), 1)
             self.assertIn("required; unsupported", required_output.getvalue())
+            self.assertIn("PDF ingestion: ACTION NEEDED", required_output.getvalue())
 
         with mock.patch.object(INGESTION, "command_version", side_effect=command_versions), \
                 mock.patch.object(INGESTION, "check_manifest", return_value=[compatible]), \
@@ -133,6 +134,7 @@ class PdfDependencyGateTests(unittest.TestCase):
             with contextlib.redirect_stdout(optional_output):
                 self.assertEqual(INGESTION.doctor(), 0)
             self.assertIn("Docling: 1.9 (optional; unsupported", optional_output.getvalue())
+            self.assertIn("PDF ingestion: READY", optional_output.getvalue())
 
     def test_ingestion_required_version_gate_runs_before_pdf_commands(self) -> None:
         args = argparse.Namespace(

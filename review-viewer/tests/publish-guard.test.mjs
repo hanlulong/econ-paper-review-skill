@@ -31,6 +31,17 @@ test("generated review assets are ignored at both repository scopes", async () =
   assert.match(viewerIgnore, /^\/public\/reviews\/$/m);
 });
 
+test("viewer npm scripts use native-Windows-compatible environment handling", async () => {
+  const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  for (const name of ["dev", "dev:bundled", "build", "build:bundled", "start"]) {
+    assert.doesNotMatch(packageJson.scripts[name], /(?:^|&&\s*)[A-Z_][A-Z0-9_]*=/);
+  }
+  assert.match(packageJson.scripts["dev:bundled"], /--allow-publish/);
+  assert.match(packageJson.scripts["build:bundled"], /--allow-publish/);
+  const harness = await readFile(new URL("../scripts/test-viewer.mjs", import.meta.url), "utf8");
+  assert.match(harness, /process\.platform === "win32" \? "npm\.cmd" : "npm"/);
+});
+
 test("authorized sync stages and validates before replacing published assets", async () => {
   const source = await readFile(new URL("../scripts/sync-review.mjs", import.meta.url), "utf8");
   assert.match(source, /prepareBundle/);

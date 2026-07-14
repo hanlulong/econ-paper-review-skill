@@ -35,6 +35,11 @@
             "items": {"type": "string", "pattern": "^ANC-[0-9]{2,}$"}
           },
           "is_headline": {"type": "boolean"},
+          "literature_facing": {
+            "type": "boolean",
+            "description": "True when the claim makes or carries a material novelty, contribution, priority, attribution, literature-coverage, citation-support, contradiction, or replication statement that must be closed in the literature ledger."
+          },
+          "literature_exclusion_basis": {"type": ["string", "null"], "minLength": 1},
           "canonical_supported_claim": {"type": "string", "minLength": 1},
           "load_bearing_qualifiers": {"type": "array", "items": {"type": "string"}},
           "finding_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
@@ -630,7 +635,16 @@
         "required": ["argument_audit"],
         "properties": {
           "claim_families": {
-            "items": {"required": ["anchor_ids"]}
+            "items": {
+              "required": ["anchor_ids", "literature_facing", "literature_exclusion_basis"],
+              "allOf": [
+                {
+                  "if": {"properties": {"literature_facing": {"const": true}}, "required": ["literature_facing"]},
+                  "then": {"properties": {"literature_exclusion_basis": {"type": "null"}}},
+                  "else": {"properties": {"literature_exclusion_basis": {"type": "string", "minLength": 1}}}
+                }
+              ]
+            }
           }
         }
       }

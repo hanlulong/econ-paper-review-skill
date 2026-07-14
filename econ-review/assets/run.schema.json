@@ -12,6 +12,9 @@
   "properties": {
     "schema_version": {"enum": ["0.1", "0.2", "0.3", "0.4"]},
     "review_id": {"type": "string", "minLength": 1},
+    "paper_title": {"type": "string", "minLength": 1, "maxLength": 240},
+    "assessment_date": {"type": "string", "format": "date"},
+    "prior_round": {"$ref": "#/$defs/prior_round"},
     "status": {"enum": ["draft", "awaiting_checkpoint", "blocked", "verification_failed", "complete"]},
     "mode": {"enum": ["quick", "full"]},
     "target": {
@@ -80,7 +83,21 @@
       "required": ["minimum_target", "maximum", "exhaustive"],
       "properties": {
         "minimum_target": {"type": "integer", "minimum": 0},
-        "maximum": {"type": ["integer", "null"], "minimum": 1},
+        "maximum": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Legacy aggregate comment cap. New full reviews set this to null and use the two channel capacities below."
+        },
+        "substance_maximum": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Author-facing Detailed Comments capacity. This is not a discovery stopping rule or target."
+        },
+        "writing_maximum": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Author-facing Detailed Editing Comments capacity. This is not a discovery stopping rule or target."
+        },
         "exhaustive": {"type": "boolean"}
       }
     },
@@ -153,6 +170,38 @@
     }
   },
   "$defs": {
+    "package_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))\\S(?:[^\\r\\n]*\\S)?$"
+    },
+    "prior_snapshot_path": {
+      "allOf": [
+        {"$ref": "#/$defs/package_path"},
+        {"pattern": "^evidence/prior-round/[A-Za-z0-9][A-Za-z0-9._-]*\\.json$"}
+      ]
+    },
+    "prior_round": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prior_findings_path", "review_actions_path", "revision_tasks_path",
+        "agent_response_path"
+      ],
+      "properties": {
+        "prior_findings_path": {"$ref": "#/$defs/prior_snapshot_path"},
+        "review_actions_path": {"$ref": "#/$defs/prior_snapshot_path"},
+        "revision_tasks_path": {"$ref": "#/$defs/prior_snapshot_path"},
+        "agent_response_path": {
+          "oneOf": [
+            {"$ref": "#/$defs/prior_snapshot_path"},
+            {"type": "null"}
+          ]
+        }
+      },
+      "description": "Activates next-round adjudication from immutable prior-round snapshots stored inside this review package."
+    },
     "stage": {"enum": ["pending", "in_progress", "passed", "bounded", "failed", "not_applicable"]},
     "burden": {
       "type": "object",
@@ -214,6 +263,13 @@
     }
   },
   "allOf": [
+    {
+      "if": {
+        "properties": {"schema_version": {"enum": ["0.1", "0.2", "0.3"]}},
+        "required": ["schema_version"]
+      },
+      "then": {"not": {"required": ["prior_round"]}}
+    },
     {
       "if": {"properties": {"schema_version": {"const": "0.4"}}, "required": ["schema_version"]},
       "then": {"required": ["activated_burdens"]}
