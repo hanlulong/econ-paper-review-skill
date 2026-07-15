@@ -3,7 +3,7 @@
 set -euo pipefail
 
 MODE="global"
-PLATFORM="all"
+PLATFORM=""
 TARGET=""
 DRY_RUN=0
 MODE_SEEN=""
@@ -14,6 +14,9 @@ TEMP_DIR=""
 ACTIVE_STAGE=""
 ACTIVE_BACKUP=""
 ACTIVE_DESTINATION=""
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+BACKUP_ROOT="$HOME/.openeconai/backups/econ-review/$RUN_ID"
+BACKUPS_CREATED=0
 
 usage() {
   cat <<'EOF'
@@ -24,10 +27,10 @@ Usage:
   ./scripts/install.sh --setup [managed-setup options]
 
 Examples:
-  ./scripts/install.sh
   ./scripts/install.sh --global --codex
+  ./scripts/install.sh --global --all
   ./scripts/install.sh --local /path/to/project --all
-  ./scripts/install.sh --local . --dry-run
+  ./scripts/install.sh --local . --codex --dry-run
   ./scripts/install.sh --setup --global --all --with-review-desk
 
 The default command preserves the lightweight copy-only installer. --setup
@@ -125,6 +128,23 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+[ -n "$PLATFORM" ] || fail "choose exactly one of --claude, --codex, or --all"
+
+if [ "$MODE" = "global" ]; then
+  if { [ "$PLATFORM" = "all" ] || [ "$PLATFORM" = "claude" ]; } && [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
+    case "$CLAUDE_CONFIG_DIR" in
+      /*) ;;
+      *) fail "CLAUDE_CONFIG_DIR must be an absolute path" ;;
+    esac
+  fi
+  if { [ "$PLATFORM" = "all" ] || [ "$PLATFORM" = "codex" ]; } && [ -n "${CODEX_HOME:-}" ]; then
+    case "$CODEX_HOME" in
+      /*) ;;
+      *) fail "CODEX_HOME must be an absolute path when inspected for legacy migration" ;;
+    esac
+  fi
+fi
 
 cleanup() {
   status=$?
@@ -260,6 +280,149 @@ try:
 except OSError:
     current = False
 raise SystemExit(0 if current else 1)
+PY
+}
+
+backup_name() {
+  printf '%s' "$1" | sed 's#[^A-Za-z0-9._-]#_#g'
+}
+
+preserve_copy() {
+  source_path="$1"
+  original_path="$2"
+  name="$(backup_name "$original_path")"
+  name_length="${#name}"
+  if [ "$name_length" -gt 160 ]; then
+    name_offset=$((name_length - 160))
+    name="${name:$name_offset:160}"
+  fi
+  path_hash="$(python3 - "$original_path" <<'PY'
+import hashlib
+import sys
+
+print(hashlib.sha256(sys.argv[1].encode("utf-8")).hexdigest()[:12])
+PY
+)"
+  name="$name-$path_hash"
+  central_backup="$BACKUP_ROOT/$name"
+  unsafe_ancestor="$(skill_destination_is_safe "$central_backup")" \
+    && central_safe=1 \
+    || central_safe=0
+  if [ "$central_safe" -eq 1 ]; then
+    if mkdir -p "$BACKUP_ROOT" && mv -- "$source_path" "$central_backup"; then
+      BACKUPS_CREATED=1
+      echo "Preserved prior copy: $central_backup"
+      return 0
+    fi
+  fi
+  original_parent="$(dirname -- "$original_path")"
+  if [ "$(basename -- "$original_parent")" != "skills" ]; then
+    return 1
+  fi
+  client_root="$(dirname -- "$original_parent")"
+  local_backup="$client_root/.openeconai-inactive/econ-review/$RUN_ID/$name"
+  unsafe_ancestor="$(skill_destination_is_safe "$local_backup")" \
+    || return 1
+  mkdir -p "$(dirname -- "$local_backup")" || return 1
+  if mv -- "$source_path" "$local_backup"; then
+    BACKUPS_CREATED=1
+    echo "Preserved prior copy on its original volume: $local_backup"
+    return 0
+  fi
+  return 1
+}
+
+paths_overlap() {
+  python3 - "$1" "$2" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+try:
+    if os.path.samefile(sys.argv[1], sys.argv[2]):
+        raise SystemExit(0)
+except OSError:
+    pass
+
+
+def forms(raw):
+    path = Path(raw).expanduser()
+    values = (path.absolute(), path.resolve(strict=False))
+    return [os.path.normcase(os.path.normpath(str(value))) for value in values]
+
+
+def contains(left, right):
+    try:
+        return os.path.commonpath((left, right)) in {left, right}
+    except (OSError, ValueError):
+        return False
+
+
+first = forms(sys.argv[1])
+second = forms(sys.argv[2])
+raise SystemExit(0 if any(contains(left, right) for left in first for right in second) else 1)
+PY
+}
+
+legacy_parent_is_safe() {
+  python3 - "$1" "$HOME" "${CODEX_HOME:-$HOME/.codex}" <<'PY'
+import os
+import stat
+import sys
+from pathlib import Path
+
+legacy = Path(os.path.abspath(os.path.expanduser(sys.argv[1])))
+home = Path(os.path.abspath(os.path.expanduser(sys.argv[2])))
+configured = Path(os.path.abspath(os.path.expanduser(sys.argv[3])))
+boundary = home if legacy == home or home in legacy.parents else configured
+path = legacy.parent
+while True:
+    try:
+        metadata = path.lstat()
+    except OSError:
+        pass
+    else:
+        attributes = getattr(metadata, "st_file_attributes", 0)
+        if stat.S_ISLNK(metadata.st_mode) or attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
+            print(path)
+            raise SystemExit(1)
+    if path == boundary:
+        break
+    if boundary not in path.parents:
+        print(path)
+        raise SystemExit(1)
+    path = path.parent
+PY
+}
+
+skill_destination_is_safe() {
+  python3 - "$1" "$HOME" <<'PY'
+import os
+import stat
+import sys
+from pathlib import Path
+
+destination = Path(os.path.abspath(os.path.expanduser(sys.argv[1])))
+home = Path(os.path.abspath(os.path.expanduser(sys.argv[2])))
+try:
+    boundary = Path(os.path.commonpath((str(home), str(destination.parent))))
+except ValueError:
+    boundary = Path(destination.anchor)
+candidate = boundary
+for part in destination.parent.relative_to(boundary).parts:
+    candidate = candidate / part
+    try:
+        metadata = candidate.lstat()
+    except OSError:
+        continue
+    attributes = getattr(metadata, "st_file_attributes", 0)
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        or not stat.S_ISDIR(metadata.st_mode)
+    ):
+        print(candidate)
+        raise SystemExit(1)
 PY
 }
 
@@ -469,6 +632,9 @@ install_one() {
   destination="$2"
   label="$3"
 
+  unsafe_ancestor="$(skill_destination_is_safe "$destination")" \
+    || fail "refusing unsafe $label ancestor: $unsafe_ancestor"
+
   if skill_tree_is_current "$source_dir" "$destination"; then
     if [ "$DRY_RUN" -eq 1 ]; then
       echo "Would keep current $label: $destination"
@@ -520,11 +686,55 @@ PY
   fi
   ACTIVE_STAGE=""
   if [ -n "$ACTIVE_BACKUP" ]; then
-    rm -rf -- "$ACTIVE_BACKUP"
+    if ! preserve_copy "$ACTIVE_BACKUP" "$destination"; then
+      rm -rf -- "$destination"
+      mv -- "$ACTIVE_BACKUP" "$destination" || true
+      fail "failed to preserve the prior $label; the update was rolled back"
+    fi
   fi
   ACTIVE_BACKUP=""
   ACTIVE_DESTINATION=""
   echo "Installed $label: $destination"
+}
+
+migrate_legacy_codex_copy() {
+  current="$HOME/.agents/skills/econ-review"
+  default_legacy="$HOME/.codex/skills/econ-review"
+  configured_legacy="${CODEX_HOME:-$HOME/.codex}/skills/econ-review"
+  seen_legacy=""
+  if [ "$DRY_RUN" -eq 0 ]; then
+    skill_tree_is_current "$SOURCE_DIR" "$current" \
+      || fail "refusing legacy migration before the current Codex skill is verified"
+  fi
+  for legacy in "$default_legacy" "$configured_legacy"; do
+    [ "$legacy" != "$seen_legacy" ] || continue
+    seen_legacy="$legacy"
+    [ -e "$legacy" ] || [ -L "$legacy" ] || continue
+    if paths_overlap "$current" "$legacy"; then
+      echo "Skipped aliased legacy Codex path that resolves to the current skill: $legacy"
+      continue
+    fi
+    unsafe_ancestor="$(legacy_parent_is_safe "$legacy")" \
+      || fail "refusing legacy migration through a linked or junction ancestor: $unsafe_ancestor"
+    if skill_tree_is_current "$SOURCE_DIR" "$legacy"; then
+      if [ "$DRY_RUN" -eq 1 ]; then
+        echo "Would remove generated legacy Codex copy: $legacy"
+      else
+        rm -rf -- "$legacy"
+        echo "Removed generated legacy Codex copy: $legacy"
+      fi
+      continue
+    fi
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "Would preserve modified legacy Codex copy: $legacy"
+    elif ! preserve_copy "$legacy" "$legacy"; then
+      fail "could not preserve modified legacy Codex copy: $legacy"
+    fi
+  done
+  if [ "$DRY_RUN" -eq 0 ]; then
+    skill_tree_is_current "$SOURCE_DIR" "$current" \
+      || fail "the current Codex skill failed verification after legacy migration"
+  fi
 }
 
 require_command python3
@@ -545,7 +755,8 @@ if [ "$MODE" = "global" ]; then
     install_one "$SOURCE_DIR" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/econ-review" "Claude Code (global)"
   fi
   if [ "$PLATFORM" = "all" ] || [ "$PLATFORM" = "codex" ]; then
-    install_one "$SOURCE_DIR" "${CODEX_HOME:-$HOME/.codex}/skills/econ-review" "Codex (global)"
+    install_one "$SOURCE_DIR" "$HOME/.agents/skills/econ-review" "Codex (global)"
+    migrate_legacy_codex_copy
   fi
 else
   TARGET="${TARGET:-.}"
@@ -564,4 +775,11 @@ if [ "$DRY_RUN" -eq 1 ]; then
 else
   echo "econ-review installation complete."
 fi
-echo "Restart or reload Codex and Claude Code sessions so they discover the installed skill."
+if [ "$BACKUPS_CREATED" -eq 1 ]; then
+  echo "Backup locations were reported with each preserved copy above."
+fi
+case "$PLATFORM" in
+  claude) echo "Restart or reload Claude Code so it discovers the installed skill." ;;
+  codex) echo "Restart or reload Codex so it discovers the installed skill." ;;
+  all) echo "Restart or reload Claude Code and Codex so they discover the installed skill." ;;
+esac

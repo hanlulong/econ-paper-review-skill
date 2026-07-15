@@ -279,6 +279,140 @@ def destination_is_current(
     return True
 
 
+def managed_destination_is_intact(destination: Path) -> bool:
+    """Return whether an older direct install is complete and unmodified."""
+
+    if not destination.is_dir() or _is_link_or_junction(destination):
+        return False
+    state_path = destination / ".econ-review-install.json"
+    if not state_path.is_file() or _is_link_or_junction(state_path):
+        return False
+    try:
+        state = _strict_json_object(state_path.read_bytes(), "installed skill state")
+        source_manifest = state.get("source_manifest")
+        if (
+            set(state)
+            != {
+                "runtime_python",
+                "schema_version",
+                "source_manifest",
+                "source_tree_sha256",
+            }
+            or state.get("schema_version") != "1"
+            or not isinstance(source_manifest, dict)
+            or not source_manifest
+            or not all(
+                isinstance(relative, str)
+                and relative
+                and isinstance(digest, str)
+                and len(digest) == 64
+                for relative, digest in source_manifest.items()
+            )
+            or state.get("source_tree_sha256") != manifest_digest(source_manifest)
+            or not _tree_has_exact_membership(
+                destination,
+                set(source_manifest) | {".econ-review-install.json"},
+            )
+        ):
+            return False
+        for relative, digest in source_manifest.items():
+            candidate = destination / Path(*relative.split("/"))
+            if hashlib.sha256(candidate.read_bytes()).hexdigest() != digest:
+                return False
+    except (InstallError, OSError, UnicodeError, ValueError):
+        return False
+    return True
+
+
+def destination_matches_source(
+    destination: Path,
+    source_manifest: dict[str, str],
+) -> bool:
+    """Return whether an unmarked legacy copy exactly matches this source."""
+
+    if (
+        not destination.is_dir()
+        or _is_link_or_junction(destination)
+        or not _tree_has_exact_membership(destination, set(source_manifest))
+    ):
+        return False
+    try:
+        return all(
+            hashlib.sha256(
+                (destination / Path(*relative.split("/"))).read_bytes()
+            ).hexdigest()
+            == digest
+            for relative, digest in source_manifest.items()
+        )
+    except OSError:
+        return False
+
+
+def _path_present(path: Path) -> bool:
+    """Check for a path without following a broken link or junction."""
+
+    try:
+        path.lstat()
+    except OSError:
+        return False
+    return True
+
+
+def _backup_destination(source: Path) -> Path:
+    basename = "".join(
+        character if character.isalnum() or character in "._-" else "_"
+        for character in source.name
+    ).strip("_") or "skill"
+    source_digest = hashlib.sha256(str(source).encode("utf-8")).hexdigest()[:12]
+    label = f"{basename}-{source_digest}"
+    run = f"{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{uuid.uuid4().hex[:12]}"
+    return Path.home() / ".openeconai" / "backups" / "econ-review" / run / label
+
+
+def _same_volume_backup_destination(source: Path) -> Path:
+    """Return an inactive backup path beside, but never inside, a skills directory."""
+
+    if source.parent.name.casefold() != "skills":
+        raise InstallError(
+            f"cannot derive a safe same-volume backup root for prior installation: {source}"
+        )
+    client_root = source.parent.parent
+    if _is_link_or_junction(client_root) or not client_root.is_dir():
+        raise InstallError(f"refusing unsafe client root for same-volume backup: {client_root}")
+    backup_root = client_root / ".openeconai-inactive" / "econ-review"
+    for candidate in (backup_root.parent, backup_root):
+        if _path_present(candidate) and (
+            _is_link_or_junction(candidate) or not candidate.is_dir()
+        ):
+            raise InstallError(f"refusing unsafe same-volume backup ancestor: {candidate}")
+    central = _backup_destination(source)
+    return backup_root / central.parent.name / central.name
+
+
+def preserve_inactive_copy(source: Path) -> Path:
+    """Move one active path to a collision-proof, non-discovery backup."""
+
+    destination = _backup_destination(source)
+    try:
+        require_safe_skill_destination(destination, "backup")
+    except InstallError:
+        destination = _same_volume_backup_destination(source)
+        destination.parent.mkdir(parents=True, exist_ok=False)
+        source.rename(destination)
+        return destination
+    destination.parent.mkdir(parents=True, exist_ok=False)
+    try:
+        source.rename(destination)
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+        destination.parent.rmdir()
+        destination = _same_volume_backup_destination(source)
+        destination.parent.mkdir(parents=True, exist_ok=False)
+        source.rename(destination)
+    return destination
+
+
 def environment_path(name: str, fallback: Path) -> Path:
     raw = os.environ.get(name)
     if raw is None:
@@ -317,15 +451,27 @@ def support_scope_root(
     project_identity = str(project.resolve())
     if (system or platform.system()) == "Windows":
         project_identity = ntpath.normcase(project_identity)
-    project_key = hashlib.sha256(project_identity.encode("utf-8")).hexdigest()[:24]
+    # A 64-bit key keeps project scopes effectively collision-free while leaving
+    # enough room for the versioned Review Desk on classic Windows MAX_PATH.
+    project_key = hashlib.sha256(project_identity.encode("utf-8")).hexdigest()[:16]
     return root / "projects" / project_key
 
 
-def runtime_default(scope: str, project: Path | None, system: str | None = None) -> Path:
-    return support_scope_root(scope, project, system) / "runtime"
+def runtime_default(
+    scope: str,
+    project: Path | None,
+    system: str | None = None,
+    version_key: str | None = None,
+) -> Path:
+    root = support_scope_root(scope, project, system)
+    return root / "runtime" if version_key is None else root / "runtimes" / version_key
 
 
-def review_desk_default(scope: str, project: Path | None, system: str | None = None) -> Path:
+def review_desk_default(
+    scope: str,
+    project: Path | None,
+    system: str | None = None,
+) -> Path:
     return support_scope_root(scope, project, system) / "review-desk"
 
 
@@ -333,10 +479,14 @@ def support_descriptor_default(
     scope: str,
     project: Path | None,
     system: str | None = None,
+    version_key: str | None = None,
 ) -> Path:
     """Return mutable setup state outside a versioned plugin or skill tree."""
 
-    return support_scope_root(scope, project, system) / SUPPORT_DESCRIPTOR_NAME
+    root = support_scope_root(scope, project, system)
+    if version_key is None:
+        return root / SUPPORT_DESCRIPTOR_NAME
+    return root / "runtime-descriptors" / f"{version_key}.json"
 
 
 def support_lock_path(
@@ -358,6 +508,11 @@ def support_lock_path(
 def _paths_overlap(first: Path, second: Path) -> bool:
     """Compare both lexical and resolved forms so links cannot hide overlap."""
 
+    try:
+        if os.path.samefile(first, second):
+            return True
+    except OSError:
+        pass
     pairs = (
         (first.expanduser().absolute(), second.expanduser().absolute()),
         (first.expanduser().resolve(strict=False), second.expanduser().resolve(strict=False)),
@@ -371,6 +526,28 @@ def _paths_overlap(first: Path, second: Path) -> bool:
 def reject_source_overlap(path: Path, source: Path, label: str) -> None:
     if _paths_overlap(path, source):
         raise InstallError(f"{label} must not overlap the installed plugin or skill package: {path}")
+
+
+def require_safe_skill_destination(destination: Path, label: str) -> None:
+    """Reject linked, junction, or non-directory ancestors before skill writes."""
+
+    target_parent = destination.expanduser().absolute().parent
+    home = Path.home().expanduser().absolute()
+    try:
+        boundary = Path(os.path.commonpath((str(home), str(target_parent))))
+    except ValueError:
+        boundary = Path(target_parent.anchor)
+    candidate = boundary
+    try:
+        relative = target_parent.relative_to(boundary)
+    except ValueError as exc:
+        raise InstallError(f"cannot establish a safe boundary for {label}: {destination}") from exc
+    for part in relative.parts:
+        candidate = candidate / part
+        if _path_present(candidate) and (
+            _is_link_or_junction(candidate) or not candidate.is_dir()
+        ):
+            raise InstallError(f"refusing unsafe {label} ancestor: {candidate}")
 
 
 def require_safe_support_path(path: Path, scope_root: Path, label: str) -> None:
@@ -549,11 +726,13 @@ def cleanup_support_state(
     mutable_root = support_data_root()
     scoped_root = support_scope_root(scope, project)
     targets = (
-        (support_descriptor_default(scope, project), "runtime descriptor"),
-        (runtime_default(scope, project), "managed runtime"),
-        (review_desk_default(scope, project), "Review Desk"),
+        (support_descriptor_default(scope, project), "runtime descriptor", "file"),
+        (runtime_default(scope, project), "managed runtime", "directory"),
+        (review_desk_default(scope, project), "Review Desk", "directory"),
+        (scoped_root / "runtime-descriptors", "versioned runtime descriptors", "directory"),
+        (scoped_root / "runtimes", "versioned managed runtimes", "directory"),
     )
-    for path, label in targets:
+    for path, label, expected_kind in targets:
         require_safe_support_path(path, mutable_root, label)
         reject_source_overlap(path, source, label)
         if _is_link_or_junction(path):
@@ -561,9 +740,9 @@ def cleanup_support_state(
         if not path.exists():
             print(f"Would keep absent {label}: {path}" if dry_run else f"Already absent {label}: {path}")
             continue
-        if label == "runtime descriptor" and not path.is_file():
-            raise InstallError(f"refusing non-file runtime descriptor during cleanup: {path}")
-        if label != "runtime descriptor" and not path.is_dir():
+        if expected_kind == "file" and not path.is_file():
+            raise InstallError(f"refusing non-file {label} during cleanup: {path}")
+        if expected_kind == "directory" and not path.is_dir():
             raise InstallError(f"refusing non-directory {label} during cleanup: {path}")
         if dry_run:
             print(f"Would remove {label}: {path}")
@@ -753,7 +932,7 @@ def record_support_runtime(
     *,
     dry_run: bool,
 ) -> None:
-    """Record a verified runtime outside the immutable plugin package."""
+    """Record a verified runtime outside the installed skill package."""
 
     actual_runtime, actual_python = resolve_runtime_location(runtime)
     value = {
@@ -763,14 +942,14 @@ def record_support_runtime(
         "schema_version": "1",
     }
     if dry_run:
-        print(f"Would record managed runtime for plugin use: {descriptor}")
+        print(f"Would record managed runtime for Econ Review: {descriptor}")
         return
     if python.absolute() != actual_python.absolute():
         raise InstallError("managed Python path changed before its descriptor was written")
     if not runtime_is_reusable(runtime, source):
         raise InstallError("refusing to record a managed runtime that failed verification")
     _atomic_private_json(descriptor, value)
-    print(f"Recorded managed runtime for plugin use: {descriptor}")
+    print(f"Recorded managed runtime for Econ Review: {descriptor}")
 
 
 def recorded_runtime_python(descriptor: Path, source: Path) -> Path | None:
@@ -921,6 +1100,7 @@ def install_one(
     *,
     dry_run: bool,
 ) -> None:
+    require_safe_skill_destination(destination, label)
     if dry_run:
         state = (
             "already current"
@@ -929,15 +1109,14 @@ def install_one(
         )
         print(f"Would {state} {label}: {destination}")
         return
-    if destination.exists() and _is_link_or_junction(destination):
-        raise InstallError(f"refusing linked or junction skill destination: {destination}")
     if destination_is_current(destination, source_manifest, runtime_python):
         print(f"Already current {label}: {destination}")
         return
     destination.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix=".econ-review-stage-", dir=destination.parent))
-    backup = destination.with_name(f".{destination.name}.backup-{uuid.uuid4().hex}")
-    had_previous = destination.exists()
+    rollback = destination.with_name(f".{destination.name}.backup-{uuid.uuid4().hex}")
+    had_previous = _path_present(destination)
+    preserve_previous = had_previous and not managed_destination_is_intact(destination)
     try:
         for relative in files:
             target = stage / relative
@@ -954,19 +1133,118 @@ def install_one(
         )
         validate_source(stage)
         if had_previous:
-            destination.rename(backup)
+            destination.rename(rollback)
         stage.rename(destination)
     except BaseException:
         shutil.rmtree(stage, ignore_errors=True)
         if destination.exists() and not had_previous:
             shutil.rmtree(destination, ignore_errors=True)
-        if had_previous and backup.exists() and not destination.exists():
-            backup.rename(destination)
+        if had_previous and _path_present(rollback) and not _path_present(destination):
+            rollback.rename(destination)
         raise
     else:
-        if backup.exists():
-            shutil.rmtree(backup)
+        if _path_present(rollback):
+            if preserve_previous:
+                try:
+                    preserved = preserve_inactive_copy(rollback)
+                except BaseException:
+                    shutil.rmtree(destination, ignore_errors=True)
+                    rollback.rename(destination)
+                    raise InstallError(
+                        f"could not preserve the prior {label}; the update was rolled back"
+                    )
+                print(f"Preserved modified prior copy: {preserved}")
+            else:
+                shutil.rmtree(rollback)
     print(f"Installed {label}: {destination}")
+
+
+def legacy_codex_destinations() -> list[Path]:
+    """Return historical Codex direct-skill paths, without the current path."""
+
+    home = Path.home()
+    candidates = [home / ".codex" / "skills" / "econ-review"]
+    raw_codex_home = os.environ.get("CODEX_HOME")
+    if raw_codex_home:
+        codex_home = environment_path("CODEX_HOME", home / ".codex")
+        candidates.append(codex_home / "skills" / "econ-review")
+    current = home / ".agents" / "skills" / "econ-review"
+    unique: list[Path] = []
+    for candidate in candidates:
+        if candidate == current or candidate in unique:
+            continue
+        unique.append(candidate)
+    return unique
+
+
+def migrate_legacy_codex_copies(
+    source_manifest: dict[str, str],
+    runtime_python: Path | None,
+    *,
+    dry_run: bool,
+) -> None:
+    """Deactivate only historical Codex copies after the current install exists."""
+
+    current = Path.home() / ".agents" / "skills" / "econ-review"
+    home_boundary = Path.home().expanduser().absolute()
+    configured_root = environment_path("CODEX_HOME", home_boundary / ".codex")
+    if not dry_run and not destination_is_current(
+        current,
+        source_manifest,
+        runtime_python,
+    ):
+        raise InstallError("refusing legacy migration before the current Codex skill is verified")
+    for legacy in legacy_codex_destinations():
+        if not _path_present(legacy):
+            continue
+        if _paths_overlap(current, legacy):
+            print(f"Skipped aliased legacy Codex path that resolves to the current skill: {legacy}")
+            continue
+        legacy_absolute = legacy.expanduser().absolute()
+        configured_absolute = configured_root.expanduser().absolute()
+        boundary = (
+            home_boundary
+            if legacy_absolute == home_boundary or home_boundary in legacy_absolute.parents
+            else configured_absolute
+        )
+        ancestor = legacy_absolute.parent
+        while True:
+            if _path_present(ancestor) and _is_link_or_junction(ancestor):
+                raise InstallError(
+                    f"refusing legacy migration through a linked or junction ancestor: {ancestor}"
+                )
+            if ancestor == boundary:
+                break
+            if boundary not in ancestor.parents:
+                raise InstallError(
+                    f"legacy Codex path escapes its configured migration boundary: {legacy}"
+                )
+            ancestor = ancestor.parent
+        generated = managed_destination_is_intact(legacy) or destination_matches_source(
+            legacy,
+            source_manifest,
+        )
+        if dry_run:
+            action = "remove generated" if generated else "preserve modified"
+            print(f"Would {action} legacy Codex copy: {legacy}")
+            continue
+        if generated:
+            shutil.rmtree(legacy)
+            print(f"Removed generated legacy Codex copy: {legacy}")
+        else:
+            try:
+                preserved = preserve_inactive_copy(legacy)
+            except BaseException as exc:
+                raise InstallError(
+                    f"could not preserve legacy Codex copy {legacy}: {exc}"
+                ) from exc
+            print(f"Preserved modified legacy Codex copy: {preserved}")
+    if not dry_run and not destination_is_current(
+        current,
+        source_manifest,
+        runtime_python,
+    ):
+        raise InstallError("the current Codex skill failed verification after legacy migration")
 
 
 def _strict_json_object(data: bytes, label: str) -> dict[str, object]:
@@ -1429,12 +1707,18 @@ def installation_destinations(
         }
     else:
         home = Path.home()
-        claude_root = environment_path("CLAUDE_CONFIG_DIR", home / ".claude")
-        codex_root = environment_path("CODEX_HOME", home / ".codex")
-        choices = {
-            "claude": (claude_root / "skills" / "econ-review", "Claude Code (global)"),
-            "codex": (codex_root / "skills" / "econ-review", "Codex (global)"),
-        }
+        choices = {}
+        if agent in {"all", "claude"}:
+            claude_root = environment_path("CLAUDE_CONFIG_DIR", home / ".claude")
+            choices["claude"] = (
+                claude_root / "skills" / "econ-review",
+                "Claude Code (global)",
+            )
+        if agent in {"all", "codex"}:
+            choices["codex"] = (
+                home / ".agents" / "skills" / "econ-review",
+                "Codex (global)",
+            )
     keys = ("claude", "codex") if agent == "all" else (agent,)
     return [choices[key] for key in keys]
 
@@ -1513,7 +1797,7 @@ def parser() -> argparse.ArgumentParser:
         dest="agent",
         action="store_const",
         const="all",
-        help="install for both agents (default)",
+        help="install for both agents explicitly",
     )
     agent.add_argument(
         "--claude",
@@ -1523,7 +1807,7 @@ def parser() -> argparse.ArgumentParser:
         help="install for Claude Code only",
     )
     agent.add_argument("--codex", dest="agent", action="store_const", const="codex", help="install for Codex only")
-    root.set_defaults(agent="all")
+    root.set_defaults(agent=None)
     root.add_argument("--source", type=Path, help="trusted local econ-review skill directory")
     root.add_argument("--runtime-dir", type=Path, help="managed runtime location")
     root.add_argument("--refresh-runtime", action="store_true", help="rebuild the managed runtime")
@@ -1574,6 +1858,7 @@ def _perform_setup(
     """Apply or preview setup after validation and lock selection."""
 
     source_manifest = file_manifest(source, files)
+    core_version = requirements_digest(source / "requirements-core.txt")
     destinations = (
         []
         if args.support_only
@@ -1588,7 +1873,7 @@ def _perform_setup(
         runtime = (
             args.runtime_dir.expanduser().absolute()
             if args.runtime_dir
-            else runtime_default(scope, project)
+            else runtime_default(scope, project, version_key=core_version)
         )
         reject_source_overlap(runtime, source, "managed runtime")
         if default_runtime:
@@ -1625,8 +1910,15 @@ def _perform_setup(
             runtime_python,
             dry_run=args.dry_run,
         )
+    if scope == "global" and not args.support_only and args.agent in {"all", "codex"}:
+        migrate_legacy_codex_copies(
+            source_manifest,
+            runtime_python,
+            dry_run=args.dry_run,
+        )
     review_desk_path: Path | None = None
     if args.with_review_desk:
+        bundle = (args.review_desk_bundle or source / REVIEW_DESK_BUNDLE).expanduser().absolute()
         default_desk_root = review_desk_default(scope, project)
         configured_desk_root = os.environ.get("ECON_REVIEW_DESK_HOME")
         desk_root = (
@@ -1637,7 +1929,6 @@ def _perform_setup(
         reject_source_overlap(desk_root, source, "Review Desk destination")
         if args.review_desk_dir is None and configured_desk_root is None:
             require_safe_support_path(desk_root, mutable_root, "Review Desk destination")
-        bundle = (args.review_desk_bundle or source / REVIEW_DESK_BUNDLE).expanduser().absolute()
         review_desk_path = install_review_desk(
             bundle,
             desk_root,
@@ -1669,7 +1960,14 @@ def _perform_setup(
     if review_desk_path is not None:
         print("Review Desk is installed and ready without Node.js or npm.")
     if not args.support_only:
-        print("Restart or reload Codex and Claude Code sessions so they discover the installed skill.")
+        clients = {
+            "claude": "Claude Code",
+            "codex": "Codex",
+            "all": "Claude Code and Codex",
+        }
+        print(
+            f"Restart or reload {clients[args.agent]} so it discovers the installed skill."
+        )
     return 0 if healthy else 2
 
 
@@ -1682,8 +1980,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise InstallError("--review-desk-dir and --review-desk-bundle require --with-review-desk")
     if args.support_only and args.copy_only:
         raise InstallError("--support-only cannot be combined with --copy-only")
-    if args.support_only and args.agent != "all":
+    selected_agent = args.agent
+    if args.support_only and selected_agent is not None:
         raise InstallError("--support-only does not accept --claude or --codex")
+    if args.cleanup_support and selected_agent is not None:
+        raise InstallError("--cleanup-support does not accept --claude, --codex, or --all")
+    if args.runtime_path and selected_agent is not None:
+        raise InstallError("--runtime-path does not accept --claude, --codex, or --all")
+    if args.support_only or args.cleanup_support or args.runtime_path:
+        args.agent = "all"
+    elif selected_agent is None:
+        raise InstallError("choose exactly one of --claude, --codex, or --all")
     if args.confirm_cleanup and not args.cleanup_support:
         raise InstallError("--confirm-cleanup requires --cleanup-support")
     if args.cleanup_support and args.dry_run and args.confirm_cleanup:
@@ -1722,6 +2029,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     ):
         raise InstallError("--runtime-path cannot be combined with setup or installation options")
     files = validate_source(source)
+    core_version = requirements_digest(source / "requirements-core.txt")
     scope = "local" if args.local is not None else "global"
     project = None
     if scope == "local":
@@ -1729,7 +2037,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not project.is_dir() and not args.cleanup_support:
             raise InstallError(f"local project directory does not exist: {project}")
     mutable_root = support_data_root()
-    support_descriptor = support_descriptor_default(scope, project)
+    support_descriptor = support_descriptor_default(
+        scope,
+        project,
+        version_key=core_version,
+    )
     require_safe_support_path(support_descriptor, mutable_root, "runtime descriptor")
     reject_source_overlap(support_descriptor, source, "runtime descriptor")
     if args.cleanup_support:
@@ -1751,6 +2063,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.runtime_path:
         python = recorded_runtime_python(support_descriptor, source)
+        if python is None:
+            legacy_descriptor = support_descriptor_default(scope, project)
+            if legacy_descriptor != support_descriptor:
+                python = recorded_runtime_python(legacy_descriptor, source)
         if python is None:
             return 2
         print(python)

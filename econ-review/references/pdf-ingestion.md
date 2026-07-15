@@ -52,7 +52,8 @@ python3 "$SKILL_ROOT/scripts/pdf_ingestion.py" check review/evidence/pdf-ingesti
 
 Here `SKILL_ROOT` is the absolute directory containing the loaded `SKILL.md`,
 whether Claude Code installed it under `.claude/skills` or Codex installed it
-under `.codex/skills` or `.agents/skills`. Install core Python dependencies with
+under `.agents/skills`. A `.codex/skills` copy is a legacy migration source, not
+the current Codex destination. Install core Python dependencies with
 `python3 -m pip install -r "$SKILL_ROOT/requirements-core.txt"`; the optional
 Docling, MarkItDown, and Mathpix environments use the corresponding manifests
 beside it. Both `ingest` and `check` repeat the core version check before

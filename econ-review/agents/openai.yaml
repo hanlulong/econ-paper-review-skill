@@ -2,3 +2,6 @@ interface:
   display_name: "Econ Review"
   short_description: "Exhaustive, source-grounded economics paper review"
   default_prompt: "Use $econ-review in full mode to reconstruct this economics paper, run independent source-order and cross-cutting discovery passes to a zero-yield saturation round, verify every surviving issue, and produce a fair referee report with exhaustive detailed and editing comments plus a prioritized revision plan."
+
+policy:
+  allow_implicit_invocation: true

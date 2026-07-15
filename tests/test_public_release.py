@@ -92,7 +92,7 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertIn("${XDG_DATA_HOME:-$HOME/.local/share}/econ-review/", install)
         self.assertNotIn("${XDG_DATA_HOME:-~/.local/share}", install)
         self.assertIn("git pull --ff-only", install)
-        self.assertIn("Do not combine a native plugin and a direct skill copy", install)
+        self.assertIn("do not combine one with a standalone copy", install)
 
     def test_local_evaluation_handoffs_are_root_ignored(self) -> None:
         patterns = set((ROOT / ".gitignore").read_text(encoding="utf-8").splitlines())
@@ -342,7 +342,7 @@ class InstallerTests(unittest.TestCase):
     def test_local_install_uses_temp_home_and_replaces_existing_skill(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "home"
-            destination = home / ".codex" / "skills" / "econ-review"
+            destination = home / ".agents" / "skills" / "econ-review"
             destination.mkdir(parents=True)
             (destination / "old.txt").write_text("old", encoding="utf-8")
             result = self.run_installer(ROOT / "scripts" / "install.sh", "--global", "--codex", env={"HOME": str(home)})
@@ -357,7 +357,7 @@ class InstallerTests(unittest.TestCase):
     def test_repeat_install_skips_exact_tree_and_repairs_drift(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "home"
-            destination = home / ".codex" / "skills" / "econ-review"
+            destination = home / ".agents" / "skills" / "econ-review"
             arguments = ("--global", "--codex")
             environment = {"HOME": str(home)}
 
@@ -398,7 +398,171 @@ class InstallerTests(unittest.TestCase):
             )
             self.assertIn("dry run complete; no files changed", result.stdout)
             self.assertFalse((home / ".claude").exists())
-            self.assertFalse((home / ".codex").exists())
+            self.assertFalse((home / ".agents").exists())
+
+    def test_shell_installer_requires_an_explicit_client_selector(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            result = self.run_installer(
+                ROOT / "scripts" / "install.sh",
+                "--global",
+                env={"HOME": str(home)},
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("choose exactly one", result.stderr)
+            self.assertFalse((home / ".claude").exists())
+            self.assertFalse((home / ".agents").exists())
+
+    def test_shell_installer_skips_aliased_current_codex_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            alias = home / "alias"
+            alias.mkdir(parents=True)
+            result = self.run_installer(
+                ROOT / "scripts" / "install.sh",
+                "--global",
+                "--codex",
+                env={
+                    "HOME": str(home),
+                    "CODEX_HOME": str(alias / ".." / ".agents"),
+                },
+            )
+            current = home / ".agents" / "skills" / "econ-review"
+            self.assertTrue((current / "SKILL.md").is_file())
+            self.assertIn("Skipped aliased legacy Codex path", result.stdout)
+
+    def test_shell_backup_name_is_nonempty_and_collision_resistant(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            legacy = home / ".codex" / "skills" / "econ-review"
+            shutil.copytree(ROOT / "econ-review", legacy)
+            (legacy / "local-notes.md").write_text("preserve me", encoding="utf-8")
+            self.run_installer(
+                ROOT / "scripts" / "install.sh",
+                "--global",
+                "--codex",
+                env={"HOME": str(home)},
+            )
+            notes = list(
+                (home / ".openeconai" / "backups" / "econ-review").rglob("local-notes.md")
+            )
+            self.assertEqual(len(notes), 1)
+            self.assertRegex(notes[0].parent.name, r".+-[0-9a-f]{12}$")
+
+    @unittest.skipIf(os.name == "nt", "symlink creation is privilege-dependent on Windows")
+    def test_shell_installer_refuses_symlinked_canonical_ancestor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            outside = root / "outside-agents"
+            home.mkdir()
+            outside.mkdir()
+            (home / ".agents").symlink_to(outside, target_is_directory=True)
+            result = self.run_installer(
+                ROOT / "scripts" / "install.sh",
+                "--global",
+                "--codex",
+                env={"HOME": str(home)},
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("refusing unsafe Codex", result.stderr)
+            self.assertFalse((outside / "skills").exists())
+
+    def test_shell_case_only_codex_alias_never_removes_current(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            home.mkdir(parents=True)
+            uppercase_home = Path(str(home).upper())
+            try:
+                same_home = os.path.samefile(home, uppercase_home)
+            except OSError:
+                same_home = False
+            if not same_home:
+                self.skipTest("test requires a case-insensitive filesystem")
+            result = self.run_installer(
+                ROOT / "scripts" / "install.sh",
+                "--global",
+                "--codex",
+                env={
+                    "HOME": str(home),
+                    "CODEX_HOME": str(uppercase_home / ".AGENTS"),
+                },
+            )
+            current = home / ".agents" / "skills" / "econ-review"
+            self.assertTrue((current / "SKILL.md").is_file())
+            self.assertIn("Skipped aliased legacy Codex path", result.stdout)
+
+    def test_shell_backup_falls_back_outside_discovery_on_original_volume(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            claude_root = root / "external-volume" / ".claude"
+            installed = claude_root / "skills" / "econ-review"
+            shutil.copytree(ROOT / "econ-review", installed)
+            (installed / "local-notes.md").write_text("preserve me", encoding="utf-8")
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            fake_mv = fake_bin / "mv"
+            fake_mv.write_text(
+                "#!/bin/sh\n"
+                "last=''\n"
+                "for argument in \"$@\"; do last=\"$argument\"; done\n"
+                "case \"$last\" in\n"
+                "  \"$HOME/.openeconai/backups/\"*) exit 1 ;;\n"
+                "esac\n"
+                "exec \"$REAL_MV\" \"$@\"\n",
+                encoding="utf-8",
+            )
+            fake_mv.chmod(0o755)
+            result = self.run_installer(
+                ROOT / "scripts" / "install.sh",
+                "--global",
+                "--claude",
+                env={
+                    "HOME": str(home),
+                    "CLAUDE_CONFIG_DIR": str(claude_root),
+                    "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+                    "REAL_MV": shutil.which("mv") or "/bin/mv",
+                },
+            )
+            self.assertIn("original volume", result.stdout)
+            self.assertFalse((installed / "local-notes.md").exists())
+            backups = list(
+                (claude_root / ".openeconai-inactive" / "econ-review").rglob(
+                    "local-notes.md"
+                )
+            )
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_text(encoding="utf-8"), "preserve me")
+
+    @unittest.skipIf(os.name == "nt", "symlink creation is privilege-dependent on Windows")
+    def test_shell_backup_never_follows_linked_central_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            installed = home / ".claude/skills/econ-review"
+            shutil.copytree(ROOT / "econ-review", installed)
+            (installed / "local-notes.md").write_text("preserve me", encoding="utf-8")
+            outside = root / "outside-backups"
+            outside.mkdir()
+            (home / ".openeconai").symlink_to(outside, target_is_directory=True)
+            result = self.run_installer(
+                ROOT / "scripts" / "install.sh",
+                "--global",
+                "--claude",
+                env={"HOME": str(home)},
+            )
+            self.assertEqual(list(outside.rglob("local-notes.md")), [])
+            preserved = list(
+                (home / ".claude/.openeconai-inactive/econ-review").rglob(
+                    "local-notes.md"
+                )
+            )
+            self.assertEqual(len(preserved), 1)
+            self.assertEqual(preserved[0].read_text(encoding="utf-8"), "preserve me")
+            self.assertIn("original volume", result.stdout)
 
     def test_codex_and_claude_global_and_project_install_contracts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -413,7 +577,7 @@ class InstallerTests(unittest.TestCase):
             self.assertIn("Codex (global)", global_result.stdout)
             global_destinations = [
                 home / ".claude" / "skills" / "econ-review",
-                home / ".codex" / "skills" / "econ-review",
+                home / ".agents" / "skills" / "econ-review",
             ]
             for destination in global_destinations:
                 self.assertTrue((destination / "SKILL.md").is_file())
@@ -460,7 +624,8 @@ class InstallerTests(unittest.TestCase):
                 },
             )
             self.assertTrue((claude_root / "skills" / "econ-review" / "SKILL.md").is_file())
-            self.assertTrue((codex_root / "skills" / "econ-review" / "SKILL.md").is_file())
+            self.assertTrue((root / "home" / ".agents" / "skills" / "econ-review" / "SKILL.md").is_file())
+            self.assertFalse((codex_root / "skills" / "econ-review").exists())
 
     def test_remote_install_requires_url_and_checksum(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -492,8 +657,8 @@ class InstallerTests(unittest.TestCase):
                 },
             )
             self.assertIn("installation complete", result.stdout)
-            self.assertTrue((home / ".codex" / "skills" / "econ-review" / "SKILL.md").is_file())
-            self.assertTrue(os.access(home / ".codex" / "skills" / "econ-review" / "scripts" / "validate_review.py", os.X_OK))
+            self.assertTrue((home / ".agents" / "skills" / "econ-review" / "SKILL.md").is_file())
+            self.assertTrue(os.access(home / ".agents" / "skills" / "econ-review" / "scripts" / "validate_review.py", os.X_OK))
 
     def test_remote_archive_rejects_bad_checksum_extra_path_and_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -592,7 +757,7 @@ class InstallerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             home = root / "home"
-            destination = home / ".codex" / "skills" / "econ-review"
+            destination = home / ".agents" / "skills" / "econ-review"
             destination.mkdir(parents=True)
             marker = destination / "old.txt"
             marker.write_text("preserve me", encoding="utf-8")

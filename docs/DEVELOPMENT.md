@@ -29,16 +29,15 @@ expected.
 
 Use one installation method to avoid duplicate discovery. Remote installation is disabled unless both `ECON_REVIEW_ARCHIVE_URL` and the expected `ECON_REVIEW_ARCHIVE_SHA256` are supplied; the installer verifies the archive before safe extraction.
 
-The native plugin is the primary user path. `econ-review/` is the canonical,
-self-contained distribution unit: it carries both plugin manifests, the review
-and setup skills, all deterministic scripts, dependency contracts, and the
-verified Review Desk archive. Marketplace installation copies that immutable
-package; the explicit `econ-review-setup` workflow then runs a dry run and uses
-`scripts/setup_econ_review.py --support-only` to prepare mutable user-owned
-support files without copying another skill.
+The standalone skill is the primary user path. `econ-review/` is the canonical,
+self-contained distribution unit: it carries the review workflow, all
+deterministic scripts, dependency contracts, the verified Review Desk archive,
+and manifests for the optional native-plugin route. The managed standalone
+installer copies this package to the selected client's skill directory and
+prepares mutable user-owned support state outside that copy.
 
-For an alternative direct installation from a trusted checkout, the repository
-wrapper delegates to the same canonical setup tool. It creates or reuses one
+For direct installation from a trusted checkout, the repository wrapper
+delegates to the canonical setup tool. It creates or reuses one
 managed core runtime, installs for both agents, and runs the dependency and
 Poppler doctor:
 
@@ -58,25 +57,28 @@ package prerequisites beyond Python 3.10 itself. On macOS or Linux,
 `./scripts/install.sh --setup` delegates to the cross-platform managed installer.
 
 ```bash
-./scripts/install.sh                        # Claude Code and Codex, globally
+./scripts/install.sh --global --all         # Claude Code and Codex, explicitly
 ./scripts/install.sh --global --claude      # Claude Code only
 ./scripts/install.sh --global --codex       # Codex only
-./scripts/install.sh --local /path/to/repo  # project-local install
-./scripts/install.sh --dry-run              # inspect destinations without changing files
+./scripts/install.sh --local /path/to/repo --codex  # project-local Codex install
+./scripts/install.sh --global --codex --dry-run     # inspect one destination
 ```
 
 Without `--setup`, `scripts/install.sh` copies the `econ-review/` skill tree only; it
 does not change the active Python environment or install Poppler, Tesseract,
 Node.js, or the Review Desk. Global installs go to
 `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/econ-review` and
-`${CODEX_HOME:-$HOME/.codex}/skills/econ-review`; project installs go to
+`$HOME/.agents/skills/econ-review`; project installs go to
 `.claude/skills/econ-review` and `.agents/skills/econ-review`. Both direct and
 plugin-managed setup bind the verified interpreter through a user-owned
 descriptor in the platform product-data directory, outside copied skills,
 versioned plugin caches, and manuscript trees. The copied install manifest is
 an integrity record, not an executable runtime binding. This lets Claude Code
-and Codex share one runtime without mutating plugin files. Setup never silently
-installs administrator-managed system packages.
+and Codex reuse a compatible runtime without mutating plugin files. Runtime
+descriptors and environments are keyed by the core-requirements hash, so
+incompatible releases coexist instead of replacing support used by another
+installed copy. Setup never silently installs administrator-managed system
+packages.
 
 `--with-review-desk` verifies and installs the prebuilt static bundle under an
 immutable manifest-digest directory, then writes a stable Python dispatcher for

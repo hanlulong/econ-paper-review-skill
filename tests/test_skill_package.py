@@ -295,6 +295,29 @@ class SkillPackageValidationTests(unittest.TestCase):
             errors = MODULE.validate_skill_package(target)
             self.assertTrue(any("default_prompt" in error for error in errors), errors)
 
+    def test_implicit_invocation_must_remain_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.copy_skill(temporary)
+            metadata = target / "agents" / "openai.yaml"
+            metadata.write_text(
+                metadata.read_text(encoding="utf-8").replace(
+                    "allow_implicit_invocation: true",
+                    "allow_implicit_invocation: false",
+                ),
+                encoding="utf-8",
+            )
+            errors = MODULE.validate_skill_package(target)
+            self.assertTrue(
+                any("allow_implicit_invocation: true" in error for error in errors),
+                errors,
+            )
+
+    def test_claude_automatic_invocation_is_not_disabled(self) -> None:
+        skill = (ROOT / "econ-review" / "SKILL.md").read_text(encoding="utf-8")
+        frontmatter = skill.split("---", 2)[1]
+        self.assertNotIn("disable-model-invocation", frontmatter)
+        self.assertIn("Review economics papers", frontmatter)
+
     def test_duplicate_yaml_keys_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             target = self.copy_skill(temporary)

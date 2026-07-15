@@ -38,15 +38,17 @@ Every comment quotes the relevant manuscript text — or, when the issue comes f
 
 ## Install
 
-Works on macOS, Windows, and Linux. Paste this into Codex or Claude Code; your
-agent will install or update the plugin, migrate the former marketplace if
-needed, prepare its private runtime and Review Desk, and verify the result.
+Works on macOS, Windows, and Linux. The recommended installation is a
+standalone skill, which keeps the short `/econ-review` command in Claude Code
+and `$econ-review` mention in Codex. Paste this into either client:
 
 ```text
-Install or update Econ Review. Read and follow the complete instructions at
+Install or update Econ Review as a standalone skill for this client. Read and
+follow the complete instructions at
 https://github.com/hanlulong/econ-paper-review-skill/blob/main/INSTALL.md.
-Handle the entire installation and verification yourself; do not ask me to run
-commands. Report completion or the one genuine blocker.
+Handle installation, same-client migration, and verification yourself; keep
+exactly one active copy for this client, do not change the other client, and do
+not ask me to run commands. Report completion or the one genuine blocker.
 ```
 
 Use the same prompt later to update Econ Review; the workflow is idempotent and
@@ -56,7 +58,34 @@ reuses a compatible runtime. It needs an existing Python 3.10+ with working
 administrator access are not required.
 
 <details>
-<summary>Installing directly from the plugin interface</summary>
+<summary>Direct standalone installation from a checkout</summary>
+
+```bash
+git clone https://github.com/hanlulong/econ-paper-review-skill.git
+cd econ-paper-review-skill
+python3 scripts/install_econ_review.py --dry-run --global --all --with-review-desk
+python3 scripts/install_econ_review.py --global --all --with-review-desk
+```
+
+Use `--claude` or `--codex` instead of `--all` when installing for only one
+client. On native Windows, run
+`python scripts\install_econ_review.py --global --all --with-review-desk` in
+PowerShell. Use the machine's working Python 3.10+
+command; the optional `py` launcher is not required. If a compatible, working
+LuaLaTeX or Tectonic renderer is available, the report uses it; otherwise it
+uses the maintained built-in PDF renderer. Review Desk is prebuilt and needs no
+Node.js or npm. See [INSTALL.md](INSTALL.md) for migration, updates, source
+installation, and project-local setup.
+
+</details>
+
+<details>
+<summary>Optional native plugin installation</summary>
+
+Native plugins remain available for users who prefer marketplace-managed
+updates. Do not install both the standalone skill and native plugin in the same
+client. Plugin skills are namespaced: use `/econ-review:econ-review` in Claude
+Code or `$econ-review:econ-review` in Codex.
 
 Claude Code:
 
@@ -79,39 +108,30 @@ direct plugin install, send the agent this one message:
 Run econ-review-setup now and finish its user-level setup with Review Desk.
 ```
 
-The plugin already contains the complete review workflow and setup tool. The setup
-message may download only the declared core Python packages into econ-review's
-private environment; it never uploads a manuscript or silently installs system
-software. See [the installation guide](INSTALL.md) for migration, removal,
-and troubleshooting.
+The plugin already contains the complete review workflow and setup tool. The
+setup message may download only the declared core Python packages into Econ
+Review's private environment; it never uploads a manuscript or silently
+installs system software. See [the installation guide](INSTALL.md) for
+migration, removal, and troubleshooting.
 
 Never paste a token or package-index credential into chat or a shell command.
 
 </details>
 
-<details>
-<summary>Alternative source installation</summary>
-
-```bash
-git clone https://github.com/hanlulong/econ-paper-review-skill.git
-cd econ-paper-review-skill
-python3 scripts/install_econ_review.py --dry-run --global --all --with-review-desk
-python3 scripts/install_econ_review.py --global --all --with-review-desk
-```
-
-On native Windows, run `python scripts\install_econ_review.py --global --all --with-review-desk` in PowerShell. Use the machine's working Python 3.10+ command; the optional `py` launcher is not required. If a compatible, working LuaLaTeX or Tectonic renderer is available, the report uses it; otherwise it uses the maintained built-in PDF renderer. Review Desk is prebuilt and needs no Node.js or npm. See [INSTALL.md](INSTALL.md) for migration, updates, source installation, and project-local setup.
-
-</details>
-
 ## Use it
 
-Put your manuscript in your working directory — the PDF, plus the LaTeX or Markdown source if you have it — and ask:
+The skill can activate automatically from an ordinary paper-review request.
+Put your manuscript in your working directory — the PDF, plus the LaTeX or
+Markdown source if you have it — and ask:
 
 ```text
-Use the econ-review skill in full mode to review this paper for a leading field journal.
-Use the econ-review skill in quick mode and identify the three largest submission risks.
-Use the econ-review skill to reconstruct the theory and empirical design before giving detailed comments.
+Review this paper in full mode for a leading field journal.
+Review this paper in quick mode and identify the three largest submission risks.
+Reconstruct the theory and empirical design before giving detailed comments.
 ```
+
+To invoke the standalone skill explicitly, use `/econ-review` in Claude Code
+or `$econ-review` in Codex.
 
 `quick` gives you the biggest risks fast. `full` goes through every section, table, figure, equation, footnote, and appendix. When it finishes, open `review/paper-review.pdf`; use `review/README.md` for the file map and next-round workflow.
 
