@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 import stat
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -19,6 +21,11 @@ SPEC = importlib.util.spec_from_file_location("validate_skill_package", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader
 SPEC.loader.exec_module(MODULE)
+PLUGIN_VERSION = json.loads(
+    (ROOT / "econ-review" / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+)["version"]
+_VERSION_PARTS = tuple(int(part) for part in PLUGIN_VERSION.split("."))
+DRIFT_VERSION = f"{_VERSION_PARTS[0]}.{_VERSION_PARTS[1]}.{_VERSION_PARTS[2] + 1}"
 
 
 class SkillPackageValidationTests(unittest.TestCase):
@@ -32,7 +39,7 @@ class SkillPackageValidationTests(unittest.TestCase):
 
     def test_versioned_plugin_cache_package_passes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            target = Path(temporary) / "0.1.0"
+            target = Path(temporary) / PLUGIN_VERSION
             shutil.copytree(ROOT / "econ-review", target)
             self.assertEqual(MODULE.validate_skill_package(target), [])
 
@@ -70,7 +77,7 @@ class SkillPackageValidationTests(unittest.TestCase):
                 manifest = target / relative
                 manifest.write_text(
                     manifest.read_text(encoding="utf-8").replace(
-                        '"version": "0.1.0"',
+                        f'"version": "{PLUGIN_VERSION}"',
                         '"version": "release"',
                         1,
                     ),
@@ -97,10 +104,12 @@ class SkillPackageValidationTests(unittest.TestCase):
             Path(".claude-plugin/plugin.json"),
             Path(".codex-plugin/plugin.json"),
             Path("skills/econ-review/SKILL.md"),
+            Path("skills/econ-review-setup/SKILL.md"),
+            Path("assets/review-desk.zip"),
         )
         for relative in relatives:
             with self.subTest(relative=relative), tempfile.TemporaryDirectory() as temporary:
-                target = Path(temporary) / "0.1.0"
+                target = Path(temporary) / PLUGIN_VERSION
                 shutil.copytree(ROOT / "econ-review", target)
                 unsafe = (target / relative).resolve()
                 original = MODULE._is_link_or_junction
@@ -150,7 +159,11 @@ class SkillPackageValidationTests(unittest.TestCase):
             "wrong version": lambda target: (target / ".claude-plugin" / "plugin.json").write_text(
                 (target / ".claude-plugin" / "plugin.json")
                 .read_text(encoding="utf-8")
-                .replace('"version": "0.1.0"', '"version": "0.1.1"', 1),
+                .replace(
+                    f'"version": "{PLUGIN_VERSION}"',
+                    f'"version": "{DRIFT_VERSION}"',
+                    1,
+                ),
                 encoding="utf-8",
             ),
             "wrong name": lambda target: (target / ".claude-plugin" / "plugin.json").write_text(
@@ -168,7 +181,11 @@ class SkillPackageValidationTests(unittest.TestCase):
             "Codex version drift": lambda target: (target / ".codex-plugin" / "plugin.json").write_text(
                 (target / ".codex-plugin" / "plugin.json")
                 .read_text(encoding="utf-8")
-                .replace('"version": "0.1.0"', '"version": "0.1.1"', 1),
+                .replace(
+                    f'"version": "{PLUGIN_VERSION}"',
+                    f'"version": "{DRIFT_VERSION}"',
+                    1,
+                ),
                 encoding="utf-8",
             ),
             "missing plugin entry": lambda target: (
@@ -185,7 +202,7 @@ class SkillPackageValidationTests(unittest.TestCase):
         }
         for label, mutate in mutations.items():
             with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
-                target = Path(temporary) / "0.1.0"
+                target = Path(temporary) / PLUGIN_VERSION
                 shutil.copytree(ROOT / "econ-review", target)
                 mutate(target)
                 errors = MODULE.validate_skill_package(target)
@@ -202,6 +219,65 @@ class SkillPackageValidationTests(unittest.TestCase):
             (target / "LICENSE").write_text("\n", encoding="utf-8")
             errors = MODULE.validate_skill_package(target)
             self.assertTrue(any("LICENSE must not be empty" in error for error in errors), errors)
+
+    def test_complete_native_plugin_payload_is_required(self) -> None:
+        expected = {
+            Path("scripts/setup_econ_review.py"): "required runtime script",
+            Path("skills/econ-review-setup/SKILL.md"): "required plugin payload",
+            Path("assets/review-desk.zip"): "required plugin payload",
+        }
+        for relative, message in expected.items():
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as temporary:
+                target = self.copy_skill(temporary)
+                (target / relative).unlink()
+                errors = MODULE.validate_skill_package(target)
+                self.assertTrue(
+                    any(message in error and relative.as_posix() in error for error in errors),
+                    errors,
+                )
+
+    def test_setup_skill_frontmatter_is_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.copy_skill(temporary)
+            setup = target / "skills" / "econ-review-setup" / "SKILL.md"
+            setup.write_text(
+                setup.read_text(encoding="utf-8").replace(
+                    "name: econ-review-setup",
+                    "name: another-setup",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            errors = MODULE.validate_skill_package(target)
+            self.assertTrue(any("wrong setup-skill contract" in error for error in errors), errors)
+
+    def test_review_desk_payload_tampering_fails_manifest_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.copy_skill(temporary)
+            bundle = target / "assets" / "review-desk.zip"
+            rewritten = target / "assets" / "rewritten.zip"
+            with zipfile.ZipFile(bundle) as original, zipfile.ZipFile(rewritten, "w") as output:
+                for info in original.infolist():
+                    data = original.read(info.filename)
+                    if info.filename == "app/index.html":
+                        data += b"\n<!-- tampered -->\n"
+                    output.writestr(info, data)
+            rewritten.replace(bundle)
+            errors = MODULE.validate_skill_package(target)
+            self.assertTrue(any("content does not match its manifest" in error for error in errors), errors)
+
+    def test_payload_validation_never_executes_setup_code(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.copy_skill(temporary)
+            marker = Path(temporary) / "setup-code-executed"
+            setup = target / "scripts" / "setup_econ_review.py"
+            setup.write_text(
+                "from pathlib import Path\n"
+                f"Path({str(marker)!r}).write_text('executed', encoding='utf-8')\n",
+                encoding="utf-8",
+            )
+            MODULE.validate_skill_package(target)
+            self.assertFalse(marker.exists())
 
     def test_frontmatter_rejects_unsupported_keys(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

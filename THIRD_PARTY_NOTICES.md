@@ -4,7 +4,7 @@ This file records the present dependency boundary. It is not a substitute for
 legal advice. Recheck package versions and license terms before any public or
 commercial release.
 
-Policy links and terms below were last rechecked on 2026-07-13. A date-stamped
+Policy links and terms below were last rechecked on 2026-07-14. A date-stamped
 check is evidence of review, not a guarantee that provider terms remain
 unchanged.
 
@@ -15,6 +15,7 @@ unchanged.
 | `jsonschema` | MIT | Review-contract validation | Python dependency; not vendored |
 | `defusedxml` | Python Software Foundation license | Defensive parsing of Poppler-generated XHTML | Python dependency; not vendored |
 | `pdfplumber` / `pdfminer.six` | MIT | PDF geometry and table candidates | Python dependencies; not vendored |
+| `pypdfium2` / PDFium | Apache-2.0 or BSD-3-Clause for `pypdfium2`; BSD-style and additional dependency licenses for the distributed PDFium build | Cross-platform rendering dependency installed transitively by `pdfplumber`; not selected as the canonical ingestion backend | Python wheel dependency; not vendored |
 | `pypdf` | BSD-3-Clause | PDF structural and safety inspection | Python dependency; not vendored |
 | `reportlab` | BSD-3-Clause | Maintained PDF-report fallback when no supported TeX renderer is available | Python dependency; not vendored |
 | Bitstream Vera fonts (distributed by `reportlab`) | Bitstream Vera font license | Fixed fonts for the ReportLab fallback | Loaded from the separately installed ReportLab package; glyph subsets may be embedded in generated reports |
@@ -29,6 +30,12 @@ unchanged.
 Invoking a separately installed executable is not permission to redistribute
 its binary. If an online or desktop distribution later bundles Poppler or
 Tesseract, perform a new packaging and license review first.
+
+The `pypdfium2` wheels include a PDFium binary and build-specific license
+materials. Preserve and re-audit those notices if a future release vendors or
+redistributes the managed Python runtime. The current installer obtains the
+wheel through the declared Python dependency graph and does not copy it into
+the source repository or plugin archive.
 
 ReportLab 4.5.1 is pinned so fallback PDF bytes and line wrapping remain
 reproducible. Its packaged Bitstream Vera fonts provide a fixed cross-platform
@@ -61,7 +68,7 @@ The Review Desk's direct JavaScript dependencies are declared in
 `review-viewer/package.json`, and `package-lock.json` records the exact resolved
 tree. Development dependencies are downloaded by npm and are not checked into
 the source tree as `node_modules/`. The checked-in
-`review-viewer/release/review-desk.zip`, however, is a distributable compiled
+`econ-review/assets/review-desk.zip`, however, is a distributable compiled
 artifact and does contain third-party client code, CSS, and font files.
 
 Every static release build derives its shipped-package inventory from Vite's

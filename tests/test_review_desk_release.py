@@ -29,7 +29,10 @@ def load_module(name: str, path: Path):
     return module
 
 
-INSTALLER = load_module("install_econ_review_for_desk_tests", ROOT / "scripts" / "install_econ_review.py")
+INSTALLER = load_module(
+    "setup_econ_review_for_desk_tests",
+    ROOT / "econ-review" / "scripts" / "setup_econ_review.py",
+)
 LAUNCHER = load_module(
     "launch_review_desk_for_tests",
     ROOT / "review-viewer" / "scripts" / "launch_review_desk.py",
@@ -63,7 +66,7 @@ class ReviewDeskReleaseTests(unittest.TestCase):
     def install_release(self, root: Path) -> Path:
         with contextlib.redirect_stdout(io.StringIO()):
             return INSTALLER.install_review_desk(
-                ROOT / "review-viewer" / "release" / "review-desk.zip",
+                ROOT / "econ-review" / "assets" / "review-desk.zip",
                 root,
                 dry_run=False,
             )
@@ -83,12 +86,12 @@ class ReviewDeskReleaseTests(unittest.TestCase):
             )
 
     def test_checked_in_bundle_is_deterministic_and_runtime_free(self) -> None:
-        expected = (ROOT / "review-viewer" / "release" / "review-desk.zip").read_bytes()
+        expected = (ROOT / "econ-review" / "assets" / "review-desk.zip").read_bytes()
         BUILDER.verify_bundle_bytes(expected)
         if BUILDER.STATIC_ROOT.is_dir():
             self.assertEqual(BUILDER.build_bytes(), expected)
         manifest, records, digest = INSTALLER.verify_review_desk_bundle(
-            ROOT / "review-viewer" / "release" / "review-desk.zip"
+            ROOT / "econ-review" / "assets" / "review-desk.zip"
         )
         self.assertEqual(len(digest), 64)
         self.assertTrue(manifest.endswith(b"\n"))
@@ -103,7 +106,7 @@ class ReviewDeskReleaseTests(unittest.TestCase):
         self.assertIn("launch_review_desk.py", paths)
         self.assertFalse(any(str(path).endswith(".map") for path in paths))
         self.assertFalse(any("node_modules" in str(path) or "/reviews/" in str(path) for path in paths))
-        with zipfile.ZipFile(ROOT / "review-viewer" / "release" / "review-desk.zip") as archive:
+        with zipfile.ZipFile(ROOT / "econ-review" / "assets" / "review-desk.zip") as archive:
             self.assertEqual(
                 archive.read(BUILDER.FAVICON),
                 BUILDER.FAVICON_SOURCE.read_bytes(),

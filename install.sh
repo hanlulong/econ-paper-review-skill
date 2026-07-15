@@ -36,7 +36,7 @@ managed core runtime and checks Poppler. Native Windows users should run:
 
 The explicit --with-review-desk option installs a verified prebuilt viewer and
 loopback-only Python launcher. It does not require Node.js or npm. Omit that
-option to preserve skill-only managed setup.
+option to skip Review Desk.
 
 Local checkouts install directly. Remote installation is disabled unless both
 ECON_REVIEW_ARCHIVE_URL (HTTPS) and ECON_REVIEW_ARCHIVE_SHA256 (64 hex digits)

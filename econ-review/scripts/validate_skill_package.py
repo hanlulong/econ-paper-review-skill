@@ -5,19 +5,22 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import os
 import re
 import stat
 import sys
-from pathlib import Path
+import unicodedata
+import zipfile
+from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
 import yaml
 from jsonschema import Draft202012Validator, SchemaError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from safe_io import strict_json_load  # noqa: E402
+from safe_io import strict_json_load, strict_json_loads  # noqa: E402
 
 
 FRONTMATTER = re.compile(r"\A---\n(.*?)\n---(?:\n|\Z)", re.DOTALL)
@@ -43,8 +46,19 @@ REQUIRED_RUNTIME = {
     "query_source.py",
     "review_timing.py",
     "safe_io.py",
+    "setup_econ_review.py",
     "trust_spine.py",
     "validate_review.py",
+}
+REVIEW_DESK_BUNDLE = Path("assets/review-desk.zip")
+REVIEW_DESK_REQUIRED_FILES = {
+    "app/LICENSE.txt",
+    "app/THIRD_PARTY_NOTICES.txt",
+    "app/index.html",
+    "app/third-party-licenses/katex-fonts/KATEX-FONTS-OFL-1.1.txt",
+    "app/third-party-licenses/manifest.json",
+    "launch_installed_review_desk.py",
+    "launch_review_desk.py",
 }
 
 
@@ -251,6 +265,244 @@ def _validate_reference_navigation(root: Path, errors: list[str]) -> None:
             )
 
 
+def _safe_review_desk_member(raw: object) -> PurePosixPath:
+    reserved = {
+        "con", "prn", "aux", "nul", "clock$",
+        *(f"com{number}" for number in range(1, 10)),
+        *(f"lpt{number}" for number in range(1, 10)),
+    }
+    if (
+        not isinstance(raw, str)
+        or not raw
+        or "\\" in raw
+        or ":" in raw
+        or raw.startswith("/")
+        or raw != unicodedata.normalize("NFC", raw)
+        or any(ord(character) < 32 or ord(character) == 127 for character in raw)
+    ):
+        raise ValueError(f"unsafe Review Desk bundle path: {raw!r}")
+    path = PurePosixPath(raw)
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or raw != path.as_posix()
+        or any(
+            part in {"", "."}
+            or part != part.strip()
+            or part.endswith(".")
+            or part.split(".", 1)[0].casefold() in reserved
+            for part in path.parts
+        )
+    ):
+        raise ValueError(f"unsafe Review Desk bundle path: {raw!r}")
+    if path.suffix.casefold() == ".map" or "node_modules" in path.parts or "reviews" in path.parts:
+        raise ValueError(f"forbidden Review Desk bundle content: {raw}")
+    if path not in {
+        PurePosixPath("launch_review_desk.py"),
+        PurePosixPath("launch_installed_review_desk.py"),
+    } and path.parts[0] != "app":
+        raise ValueError(f"Review Desk bundle path is outside the app contract: {raw}")
+    return path
+
+
+def _validate_review_desk_bundle(root: Path, errors: list[str]) -> None:
+    bundle = root / REVIEW_DESK_BUNDLE
+    label = REVIEW_DESK_BUNDLE.as_posix()
+    if not bundle.is_file() or _is_link_or_junction(bundle):
+        errors.append(f"required plugin payload is missing or unsafe: {label}")
+        return
+    try:
+        if bundle.stat().st_size > 20 * 1024 * 1024:
+            errors.append(f"{label} exceeds the 20 MiB compressed limit")
+            return
+        archive = zipfile.ZipFile(bundle)
+    except (OSError, zipfile.BadZipFile) as exc:
+        errors.append(f"{label} is not a readable ZIP archive: {exc}")
+        return
+    try:
+        with archive:
+            infos = archive.infolist()
+            if not infos or len(infos) > 500:
+                errors.append(f"{label} has an invalid entry count")
+                return
+            if sum(info.file_size for info in infos) > 40 * 1024 * 1024:
+                errors.append(f"{label} exceeds the 40 MiB uncompressed limit")
+                return
+            names: set[str] = set()
+            folded: set[str] = set()
+            info_by_name: dict[str, zipfile.ZipInfo] = {}
+            for info in infos:
+                if info.is_dir() or info.flag_bits & 0x1 or info.file_size > 10 * 1024 * 1024:
+                    errors.append(f"{label} has an unsafe entry: {info.filename}")
+                    return
+                mode = info.external_attr >> 16
+                if stat.S_IFMT(mode) not in {0, stat.S_IFREG}:
+                    errors.append(f"{label} has a non-regular entry: {info.filename}")
+                    return
+                try:
+                    if info.filename != "bundle-manifest.json":
+                        _safe_review_desk_member(info.filename)
+                except ValueError as exc:
+                    errors.append(f"{label}: {exc}")
+                    return
+                if info.filename.casefold() in folded:
+                    errors.append(f"{label} has duplicate or case-colliding entries: {info.filename}")
+                    return
+                folded.add(info.filename.casefold())
+                names.add(info.filename)
+                info_by_name[info.filename] = info
+            if "bundle-manifest.json" not in names:
+                errors.append(f"{label} is missing bundle-manifest.json")
+                return
+            manifest_bytes = archive.read("bundle-manifest.json")
+            try:
+                manifest = strict_json_loads(manifest_bytes)
+            except (UnicodeError, json.JSONDecodeError, ValueError) as exc:
+                errors.append(f"{label} has invalid strict manifest JSON: {exc}")
+                return
+            if not isinstance(manifest, dict) or set(manifest) != {"files", "package", "schema_version"}:
+                errors.append(f"{label} manifest has unexpected fields")
+                return
+            if manifest.get("package") != "econ-review-desk" or manifest.get("schema_version") != "1":
+                errors.append(f"{label} manifest has the wrong package or schema version")
+                return
+            canonical = (
+                json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+            ).encode("utf-8")
+            if manifest_bytes != canonical:
+                errors.append(f"{label} manifest is not canonical JSON")
+                return
+            records = manifest.get("files")
+            if not isinstance(records, list) or not records:
+                errors.append(f"{label} manifest files must be a non-empty array")
+                return
+            expected = {"bundle-manifest.json"}
+            previous = ""
+            for record in records:
+                if not isinstance(record, dict) or set(record) != {"path", "sha256", "size"}:
+                    errors.append(f"{label} manifest contains an invalid file record")
+                    return
+                try:
+                    path = _safe_review_desk_member(record.get("path")).as_posix()
+                except ValueError as exc:
+                    errors.append(f"{label}: {exc}")
+                    return
+                if path <= previous:
+                    errors.append(f"{label} manifest paths must be sorted and unique")
+                    return
+                previous = path
+                digest = record.get("sha256")
+                size = record.get("size")
+                if (
+                    not isinstance(digest, str)
+                    or len(digest) != 64
+                    or any(character not in "0123456789abcdef" for character in digest)
+                    or not isinstance(size, int)
+                    or isinstance(size, bool)
+                    or size < 0
+                ):
+                    errors.append(f"{label} manifest has invalid size or hash metadata: {path}")
+                    return
+                if path not in info_by_name:
+                    errors.append(f"{label} is missing manifest-declared content: {path}")
+                    return
+                data = archive.read(path)
+                if len(data) != size or hashlib.sha256(data).hexdigest() != digest:
+                    errors.append(f"{label} content does not match its manifest: {path}")
+                    return
+                expected.add(path)
+            if names != expected:
+                errors.append(f"{label} entries differ from its manifest")
+                return
+            if not REVIEW_DESK_REQUIRED_FILES.issubset(expected):
+                errors.append(f"{label} lacks required launchers, app files, or license notices")
+                return
+            license_path = root / "LICENSE"
+            if license_path.is_file() and archive.read("app/LICENSE.txt") != license_path.read_bytes():
+                errors.append(f"{label} first-party license is not synchronized with LICENSE")
+                return
+            for required in REVIEW_DESK_REQUIRED_FILES - {
+                "app/index.html",
+                "launch_installed_review_desk.py",
+                "launch_review_desk.py",
+            }:
+                if not archive.read(required):
+                    errors.append(f"{label} contains an empty required notice or license: {required}")
+                    return
+            try:
+                strict_json_loads(archive.read("app/third-party-licenses/manifest.json"))
+            except (UnicodeError, json.JSONDecodeError, ValueError) as exc:
+                errors.append(f"{label} has an invalid third-party license manifest: {exc}")
+    except (OSError, KeyError, RuntimeError, zipfile.BadZipFile) as exc:
+        errors.append(f"{label} could not be verified safely: {exc}")
+
+
+def _validate_plugin_payload(
+    root: Path,
+    skill_name: object,
+    skill_description: object,
+    errors: list[str],
+) -> None:
+    manifests: list[dict] = []
+    for relative in (Path(".claude-plugin/plugin.json"), Path(".codex-plugin/plugin.json")):
+        path = root / relative
+        if not path.is_file() or _is_link_or_junction(path):
+            errors.append(f"required native plugin manifest is missing or unsafe: {relative.as_posix()}")
+            continue
+        try:
+            value = strict_json_load(path)
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            errors.append(f"{relative.as_posix()} is not strict JSON: {exc}")
+            continue
+        if not isinstance(value, dict):
+            errors.append(f"{relative.as_posix()} must contain a JSON object")
+            continue
+        if (
+            value.get("name") != "econ-review"
+            or value.get("skills") != "./skills/"
+            or not isinstance(value.get("version"), str)
+            or not STRICT_SEMVER.fullmatch(value["version"])
+        ):
+            errors.append(f"{relative.as_posix()} does not bind the econ-review skill directory")
+        manifests.append(value)
+    if len(manifests) == 2 and manifests[0].get("version") != manifests[1].get("version"):
+        errors.append("Claude and Codex plugin manifest versions are not synchronized")
+
+    if (
+        not isinstance(skill_name, str)
+        or not isinstance(skill_description, str)
+        or not _plugin_entry_matches(root, skill_name, skill_description)
+    ):
+        errors.append("skills/econ-review/SKILL.md does not match the canonical skill frontmatter")
+
+    setup_path = root / "skills" / "econ-review-setup" / "SKILL.md"
+    if not setup_path.is_file() or _is_link_or_junction(setup_path):
+        errors.append("required plugin payload is missing or unsafe: skills/econ-review-setup/SKILL.md")
+    else:
+        try:
+            setup_text = setup_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            errors.append(f"skills/econ-review-setup/SKILL.md is not readable UTF-8: {exc}")
+        else:
+            match = FRONTMATTER.match(setup_text)
+            if not match:
+                errors.append("skills/econ-review-setup/SKILL.md has invalid frontmatter delimiters")
+            else:
+                setup = _yaml_mapping(
+                    match.group(1),
+                    "skills/econ-review-setup/SKILL.md frontmatter",
+                    errors,
+                )
+                if (
+                    set(setup) != ALLOWED_FRONTMATTER
+                    or setup.get("name") != "econ-review-setup"
+                    or not isinstance(setup.get("description"), str)
+                    or not setup["description"].strip()
+                ):
+                    errors.append("skills/econ-review-setup/SKILL.md has the wrong setup-skill contract")
+    _validate_review_desk_bundle(root, errors)
+
+
 def _validate_runtime(root: Path, errors: list[str]) -> None:
     scripts = root / "scripts"
     if not scripts.is_dir():
@@ -408,6 +660,7 @@ def validate_skill_package(root: Path) -> list[str]:
     _validate_links(root, errors)
     _validate_reference_navigation(root, errors)
     _validate_json_schemas(root, errors)
+    _validate_plugin_payload(root, name, description, errors)
     _validate_runtime(root, errors)
     return errors
 

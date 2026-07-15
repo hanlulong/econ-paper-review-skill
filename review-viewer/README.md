@@ -24,8 +24,9 @@ npm run dev
 
 Open the printed local URL and choose **Open review folder**. Selecting the paper folder loads canonical review files, the manuscript, nested manifests, and referenced renders in one local action, including packages with duplicate image basenames in different subdirectories. **Choose individual files** remains available for small or flat bundles. The normal development command deliberately removes generated public review bundles and opens this local workflow. This keeps manuscripts and findings on the local machine and out of deployable assets. If an authorized bundled session is used, `?review=<slug>` preserves the selected bundle.
 
-Maintainers create the runtime-free user artifact with `npm run build:release`
-and verify it with `python3 scripts/build_review_desk_release.py --check`. The
+Maintainers create the runtime-free user artifact inside the self-contained
+`econ-review` plugin with `npm run build:release` and verify it with
+`python3 scripts/build_review_desk_release.py --check`. The
 release archive is deterministic and excludes source maps, development dependency
 trees, and review data. It embeds a generated inventory and the complete license or notice
 files for every third-party package in the shipped client bundle, plus the KaTeX

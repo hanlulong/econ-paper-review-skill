@@ -29,9 +29,18 @@ expected.
 
 Use one installation method to avoid duplicate discovery. Remote installation is disabled unless both `ECON_REVIEW_ARCHIVE_URL` and the expected `ECON_REVIEW_ARCHIVE_SHA256` are supplied; the installer verifies the archive before safe extraction.
 
-For the fastest complete setup from a trusted checkout, use the cross-platform
-installer. It creates or reuses one managed core runtime, installs for both
-agents, and runs the dependency and Poppler doctor:
+The native plugin is the primary user path. `econ-review/` is the canonical,
+self-contained distribution unit: it carries both plugin manifests, the review
+and setup skills, all deterministic scripts, dependency contracts, and the
+verified Review Desk archive. Marketplace installation copies that immutable
+package; the explicit `econ-review-setup` workflow then runs a dry run and uses
+`scripts/setup_econ_review.py --support-only` to prepare mutable user-owned
+support files without copying another skill.
+
+For an alternative direct installation from a trusted checkout, the repository
+wrapper delegates to the same canonical setup tool. It creates or reuses one
+managed core runtime, installs for both agents, and runs the dependency and
+Poppler doctor:
 
 ```bash
 python3 scripts/install_econ_review.py --dry-run --global --all --with-review-desk
@@ -61,17 +70,20 @@ does not change the active Python environment or install Poppler, Tesseract,
 Node.js, or the Review Desk. Global installs go to
 `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/econ-review` and
 `${CODEX_HOME:-$HOME/.codex}/skills/econ-review`; project installs go to
-`.claude/skills/econ-review` and `.agents/skills/econ-review`. Managed setup
-shares one runtime between both agent copies and writes a runtime descriptor in
-each installed skill. It never silently installs administrator-managed system
-packages.
+`.claude/skills/econ-review` and `.agents/skills/econ-review`. Both direct and
+plugin-managed setup bind the verified interpreter through a user-owned
+descriptor in the platform product-data directory, outside copied skills,
+versioned plugin caches, and manuscript trees. The copied install manifest is
+an integrity record, not an executable runtime binding. This lets Claude Code
+and Codex share one runtime without mutating plugin files. Setup never silently
+installs administrator-managed system packages.
 
 `--with-review-desk` verifies and installs the prebuilt static bundle under an
 immutable manifest-digest directory, then writes a stable Python dispatcher for
 the current version. The launcher verifies the installed files again and serves
 only manifest-listed assets at `http://127.0.0.1:48127/`. It contains no bundled
 review, needs no Node.js or npm, and reports its path and launch command
-separately from the PDF doctor. Omit the flag for skill-only setup. See
+separately from the PDF doctor. Omit the flag when Review Desk is not wanted. See
 [INSTALL.md](INSTALL.md) for platform paths and overrides.
 
 ## Optional PDF semantic backends
@@ -201,8 +213,9 @@ Inspect every proposal against the retained source. Create a narrower anchor whe
 
 ## Review Desk (development)
 
-The checked-in `review-viewer/release/review-desk.zip` is the runtime-free user
-artifact. Development mode starts with no manuscript or private review embedded.
+The checked-in `econ-review/assets/review-desk.zip` is the runtime-free user
+artifact carried by the plugin. `review-viewer/scripts/build_review_desk_release.py`
+is its sole builder. Development mode starts with no manuscript or private review embedded.
 Canonical files remain read-only; author actions are an append-only local event
 history; a later review reconciles exported actions by stable finding ID and
 independently verifies closure.
@@ -265,31 +278,34 @@ python3 scripts/build_public_release.py --output /path/to/release.zip
 
 The plugin version is declared in `econ-review/.claude-plugin/plugin.json` and
 `econ-review/.codex-plugin/plugin.json`. Bump both to the same semantic version
-for every plugin release; the test suite rejects drift. The common marketplace
-entry deliberately omits `version`: each client reads its native manifest, and
-duplicating the field in the catalog would create another drift surface. Before
-the release commit, validate the common marketplace and both installed-client
-paths:
+for every plugin release; the test suite rejects drift. This source repository
+ships the native plugin package but no marketplace. Before the release commit,
+validate the package and both client manifests:
 
 ```bash
-claude plugin validate . --strict
 claude plugin validate econ-review --strict
-python3 tests/test_plugin_marketplace.py -v
+python3 tests/test_native_plugin.py -v
 ```
 
-The repository-root Claude marketplace is intentionally the single catalog for
-both clients. Codex reads that common catalog and then uses its native plugin
-manifest; a second catalog would add a version-synchronization surface without
-changing the user-facing install flow.
+Release validation must also prove that the native package contains the
+canonical support installer and Review Desk, that support-only setup leaves a
+read-only plugin cache unchanged, and that it writes no direct skill copies.
+
+The sole public catalog is [`OpenEconAI/plugins`](https://github.com/OpenEconAI/plugins),
+with marketplace name `openeconai`. Do not add a repository-root marketplace
+here. After publishing a verified source release, update the `econ-review`
+entry in that catalog to the new tagged source and test fresh Claude Code and
+Codex installs through `econ-review@openeconai`. Keeping catalog and package
+changes in separate repositories makes ownership explicit; the catalog's tests
+must reject a missing tag or manifest-version mismatch.
 
 The release builder validates the files in the current working tree. Passing it
 does not prove that uncommitted work can be reconstructed from Git. Stage and
-commit intended files explicitly, verify a clean status, and only then verify
-the release tag that would be created:
+commit intended files explicitly and verify a clean status before creating a
+release tag:
 
 ```bash
 git status --short
-claude plugin tag --dry-run econ-review
 ```
 
 Finally, repeat the managed-runtime test suite, Review Desk bundle check, and
