@@ -1,131 +1,59 @@
 # Install econ-review
 
-## Choose an installation
+## Recommended path
 
-The complete setup is recommended for a new machine: it installs the skill for
-both agents, prepares a managed Python runtime, checks PDF support, and installs
-Review Desk. The native marketplace path installs only the skill and is useful
-when those supporting components are already available or when you want the
-client's built-in plugin update flow.
+Install the native plugin from the shared OpenEconAI catalog, then run its
+bundled setup workflow once. The plugin contains the complete first-party review
+package, setup tool, and verified Review Desk archive. The explicit first-use
+setup creates a shared user-owned Python runtime, checks manuscript-PDF support,
+and installs Review Desk without creating a duplicate skill copy.
 
-Choose one skill-installation path per client. Installing both the native
-plugin and a direct skill copy can make the same skill appear twice.
+Do not combine a native plugin and a direct skill copy for the same client. The
+alternative source installer remains available for users who cannot use a
+marketplace.
 
-## One-paste agent prompt
+## One-paste first-use setup prompt
 
-Paste this prompt into Codex or Claude Code. It installs the skill for both
-agents, prepares one managed Python runtime, checks manuscript-PDF support,
-reports professional report-renderer readiness separately, and installs the
-local Review Desk. Review Desk is a prebuilt static application; users do not
-need Node.js or npm.
+After installing the plugin, paste this into Codex or Claude Code. Review Desk
+is a prebuilt static application; users do not need Node.js or npm.
 
 ```text
-Install econ-review from https://github.com/hanlulong/econ-paper-review-skill for
-Claude Code and Codex by following this file. Clone the public repository over HTTPS;
-never ask me to paste a token, and preserve uncommitted work. Detect macOS, Linux, or
-Windows; run the dry run, then the managed global setup for both agents with
---with-review-desk. Do not install system packages, TeX, Pandoc, cloud backends, or
-anything requiring administrator access. Report both skill paths, PDF/report readiness,
-the Review Desk command and URL, anything still missing, and remind me to reload my
-sessions.
+Use econ-review-setup to finish setup on this machine. Detect macOS, Linux, or
+Windows; run the bundled support-only dry run for global setup with Review Desk,
+summarize every planned write and download, then apply the same operation. Do not
+copy econ-review into an agent skill directory: the plugin already supplies it.
+Do not install Poppler, Tesseract, TeX, Pandoc, Node.js, cloud backends, system
+packages, or anything requiring administrator access. Report the verified runtime,
+core/PDF readiness, the Review Desk command and URL, and anything still missing.
 ```
 
-The repository is public and its HTTPS checkout does not require GitHub
-credentials. Do not expose a token in chat, a URL, or a shell command.
+The setup may download the version-constrained core Python packages into an
+econ-review-owned virtual environment only after the dry run and explicit setup
+request. It never uploads a manuscript. Do not expose a token or package-index
+credential in chat, a URL, or a shell command.
 
-## Native marketplace install (skill only)
+## Native marketplace install
 
-The repository exposes one marketplace named `econ-paper-review` to both
-clients. Adding the marketplace makes the plugin browsable; installing the
-plugin is a separate second step.
+OpenEconAI publishes one shared catalog, `openeconai`, for both clients. The
+catalog lives at [`OpenEconAI/plugins`](https://github.com/OpenEconAI/plugins);
+this source repository does not publish a second marketplace. Adding the
+catalog makes its plugins browsable, while installing `econ-review` is a
+separate step.
 
-Claude Code, from the `/plugin` interface:
+### Migrate from the former marketplace
 
-```text
-/plugin marketplace add hanlulong/econ-paper-review-skill
-/plugin install econ-review@econ-paper-review
-```
-
-The equivalent Claude Code CLI commands are:
-
-```bash
-claude plugin marketplace add hanlulong/econ-paper-review-skill
-claude plugin install econ-review@econ-paper-review
-```
-
-Codex:
-
-```bash
-codex plugin marketplace add hanlulong/econ-paper-review-skill
-codex plugin add econ-review@econ-paper-review
-```
-
-These commands work on macOS, Linux, and native Windows terminals. Reload or
-restart the client after installation so it discovers the skill.
-
-A plugin install contains the portable `econ-review` skill, its scripts,
-contracts, references, and dependency manifests. It does not create the
-managed Python environment, install Poppler or optional PDF backends, or
-install Review Desk. If first use reports a missing Python package or PDF tool,
-use the complete setup below rather than treating the plugin install as a
-readiness check.
-
-### Update a plugin install
-
-Claude Code:
-
-```bash
-claude plugin marketplace update econ-paper-review
-claude plugin update econ-review@econ-paper-review
-```
-
-Codex:
-
-```bash
-codex plugin marketplace upgrade econ-paper-review
-codex plugin add econ-review@econ-paper-review
-```
-
-The update commands refresh the catalog and then apply the current plugin
-version. Restart or reload the client after an update.
-
-### Install a pinned release
-
-Published release tags use `econ-review--v<version>`. Pinning the marketplace
-to one of those versioned tags also pins the relative `./econ-review` plugin
-source to the same tagged repository snapshot. For example, after the `0.1.0`
-release tag has been published:
-
-Claude Code:
-
-```bash
-claude plugin marketplace add hanlulong/econ-paper-review-skill@econ-review--v0.1.0
-claude plugin install econ-review@econ-paper-review
-```
-
-Codex:
-
-```bash
-codex plugin marketplace add hanlulong/econ-paper-review-skill --ref econ-review--v0.1.0
-codex plugin add econ-review@econ-paper-review
-```
-
-Both clients can pin the marketplace to a branch or tag. Claude Code does not
-accept a raw commit SHA for a marketplace source, so use a versioned release
-tag when reproducibility matters. This repository deliberately keeps the
-plugin source inside the marketplace repository, avoiding a second independently
-moving source to pin.
-
-### Remove a plugin install
-
-Removal is separate from updating. Run these only when you intend to uninstall
-the skill:
+If you previously installed `econ-review@econ-paper-review`, remove that
+plugin and its old catalog **before** adding the OpenEconAI catalog. This
+one-time migration prevents duplicate skill entries. A command that reports
+the old plugin or catalog is already absent can be ignored.
 
 Claude Code:
 
 ```bash
 claude plugin uninstall econ-review@econ-paper-review
 claude plugin marketplace remove econ-paper-review
+claude plugin marketplace add OpenEconAI/plugins
+claude plugin install econ-review@openeconai
 ```
 
 Codex:
@@ -133,14 +61,127 @@ Codex:
 ```bash
 codex plugin remove econ-review@econ-paper-review
 codex plugin marketplace remove econ-paper-review
+codex plugin marketplace add OpenEconAI/plugins
+codex plugin add econ-review@openeconai
 ```
 
-Removing the marketplace is optional; do it only when you no longer want this
-repository listed.
+If you also made a direct skill copy with this repository's installer, remove
+that copy before using the native plugin, or keep the direct copy and skip the
+native installation. Do not keep both installation paths for the same client.
 
-## Recommended direct setup
+### Fresh native install
 
-Python 3.10 or newer is required. The managed setup creates or reuses one
+Claude Code, from the `/plugin` interface:
+
+```text
+/plugin marketplace add OpenEconAI/plugins
+/plugin install econ-review@openeconai
+```
+
+The equivalent Claude Code CLI commands are:
+
+```bash
+claude plugin marketplace add OpenEconAI/plugins
+claude plugin install econ-review@openeconai
+```
+
+Codex:
+
+```bash
+codex plugin marketplace add OpenEconAI/plugins
+codex plugin add econ-review@openeconai
+```
+
+These commands work on macOS, Linux, and native Windows terminals. Reload or
+restart the client after installation so it discovers both `econ-review` and
+`econ-review-setup`.
+
+The plugin package includes both skills, all review scripts and contracts, the
+support installer, dependency manifests, and the verified Review Desk archive.
+Plugin installation itself only places that package in the client's versioned
+cache; it does not execute downloads or machine setup. Run the first-use setup
+prompt above to create the private runtime and install Review Desk.
+
+The setup tool records the verified managed interpreter in mutable product data
+outside the versioned plugin cache, so both clients can reuse it and plugin
+updates remain read-only. If Poppler is absent, setup exits with a distinct
+partial-readiness result: the runtime and Review Desk remain installed, but PDF
+ingestion is not described as ready. Installing Poppler or any other external
+tool is always a separate user decision.
+
+### Update a plugin install
+
+Claude Code:
+
+```bash
+claude plugin marketplace update openeconai
+claude plugin update econ-review@openeconai
+```
+
+Codex:
+
+```bash
+codex plugin marketplace upgrade openeconai
+codex plugin add econ-review@openeconai
+```
+
+The update commands refresh the catalog and then apply the current plugin
+version. Restart or reload the client after an update, then ask
+`econ-review-setup` to check readiness. It reuses a compatible runtime and
+offers a dry-run refresh when the plugin's core dependency contract changed.
+The shared catalog pins
+each published plugin version to its verified source release, so users do not
+need to add this source repository as another marketplace.
+
+### Remove a plugin install
+
+Removal is separate from updating. Run these only when you intend to uninstall
+the skill:
+
+Removing the plugin intentionally leaves its user-owned Python runtime, runtime
+descriptor, and Review Desk in place. This avoids deleting data on an ordinary
+plugin update or reinstall. To remove that support state too, preview the exact
+scope **before** uninstalling the plugin:
+
+```text
+PYTHON PLUGIN_ROOT/scripts/setup_econ_review.py --cleanup-support --global --dry-run
+```
+
+After checking every path, remove only those default support files with:
+
+```text
+PYTHON PLUGIN_ROOT/scripts/setup_econ_review.py --cleanup-support --global --confirm-cleanup
+```
+
+Use `--local PROJECT_DIRECTORY` instead of `--global` for one project's hashed
+support state. Cleanup never removes the plugin or a direct skill copy. Custom
+`--runtime-dir`, `--review-desk-dir`, or `ECON_REVIEW_DESK_HOME` locations are
+not inferred or deleted automatically.
+
+Claude Code:
+
+```bash
+claude plugin uninstall econ-review@openeconai
+```
+
+Codex:
+
+```bash
+codex plugin remove econ-review@openeconai
+```
+
+Keep the `openeconai` catalog if you use or want to browse other OpenEconAI
+plugins. Remove it only when you no longer want any plugin from that catalog:
+
+```bash
+claude plugin marketplace remove openeconai
+codex plugin marketplace remove openeconai
+```
+
+## Alternative source installation
+
+Use this path only when a native marketplace is unavailable. Python 3.10 or
+newer with working `venv` and pip bootstrapping support is required. The managed setup creates or reuses one
 virtual environment, installs the version-constrained core requirements, copies the skill to
 both agent locations, runs the PDF-ingestion doctor, and installs Review Desk.
 It does not install administrator-managed packages, TeX, or Pandoc.
@@ -169,10 +210,11 @@ For one project instead of the whole user account:
 python3 scripts/install_econ_review.py --local PATH_TO_PROJECT --all --with-review-desk
 ```
 
-Project setup uses `.claude/skills/econ-review`,
-`.agents/skills/econ-review`, `.econ-review/runtime`, and
-`.econ-review/review-desk`. Global skill paths honor `CLAUDE_CONFIG_DIR` and
-`CODEX_HOME`. Global runtime and viewer paths use:
+Direct project setup copies the skill to `.claude/skills/econ-review` and/or
+`.agents/skills/econ-review`. Its mutable runtime, descriptor, and Review Desk
+stay outside the manuscript under the platform product-data root at
+`econ-review/projects/<project-hash>/`. Global skill paths honor
+`CLAUDE_CONFIG_DIR` and `CODEX_HOME`. Product-data roots are:
 
 - macOS: `~/Library/Application Support/econ-review/`
 - Linux: `${XDG_DATA_HOME:-$HOME/.local/share}/econ-review/`
@@ -222,9 +264,9 @@ HTTPS checkout in a new directory and run the same commands there. Rerunning
 the installer updates changed skill files atomically, reuses a compatible
 runtime, and keeps an already verified Review Desk version.
 
-## Skill-only and manual modes
+## Source-installation variants
 
-Omit `--with-review-desk` to keep the managed setup skill-only. The original
+Omit `--with-review-desk` to skip Review Desk. The original
 copy-only installer also remains available and does not modify Python, install
 Review Desk, or install system software:
 

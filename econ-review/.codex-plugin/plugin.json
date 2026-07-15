@@ -1,9 +1,9 @@
 {
   "name": "econ-review",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Produce a rigorous, source-grounded referee report and prioritized revision plan for an economics paper.",
   "author": {
-    "name": "Han Lulong",
+    "name": "Lu Han",
     "email": "hanlulong@gmail.com",
     "url": "https://openecon.ai"
   },
@@ -22,7 +22,7 @@
     "displayName": "Econ Review",
     "shortDescription": "Referee-grade review for economics papers",
     "longDescription": "Review an economics or social-science paper with source-grounded checks of its argument, methods, evidence, contribution, exhibits, and writing, then produce a constructive referee report and prioritized revision plan.",
-    "developerName": "Han Lulong",
+    "developerName": "Lu Han",
     "category": "Education & Research",
     "capabilities": [
       "Interactive",

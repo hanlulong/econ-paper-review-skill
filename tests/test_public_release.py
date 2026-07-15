@@ -30,7 +30,7 @@ class PublicReleaseTests(unittest.TestCase):
 
     def test_exact_contract_excludes_private_and_generated_material(self) -> None:
         paths = {path.as_posix() for path in MODULE.public_files(ROOT)}
-        self.assertIn(".claude-plugin/marketplace.json", paths)
+        self.assertNotIn(".claude-plugin/marketplace.json", paths)
         self.assertIn("CONTRIBUTING.md", paths)
         self.assertIn(".github/PULL_REQUEST_TEMPLATE.md", paths)
         self.assertIn("docs/CONTRIBUTOR_LICENSE_AGREEMENT.md", paths)
@@ -39,10 +39,13 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertIn("econ-review/.codex-plugin/plugin.json", paths)
         self.assertIn("econ-review/SKILL.md", paths)
         self.assertIn("econ-review/skills/econ-review/SKILL.md", paths)
+        self.assertIn("econ-review/skills/econ-review-setup/SKILL.md", paths)
+        self.assertIn("econ-review/scripts/setup_econ_review.py", paths)
+        self.assertIn("econ-review/assets/review-desk.zip", paths)
         self.assertIn("review-viewer/LICENSE", paths)
         self.assertIn("review-viewer/package.json", paths)
         self.assertIn("review-viewer/public/favicon.svg", paths)
-        self.assertIn("review-viewer/release/review-desk.zip", paths)
+        self.assertNotIn("review-viewer/release/review-desk.zip", paths)
         self.assertIn("review-viewer/scripts/launch_review_desk.py", paths)
         self.assertIn("docs/images/review-desk.gif", paths)
         self.assertIn("docs/images/review-desk-flow.png", paths)
@@ -71,14 +74,14 @@ class PublicReleaseTests(unittest.TestCase):
         install = (ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
         for content in (readme, install):
             with self.subTest(document="README" if content is readme else "INSTALL"):
-                self.assertIn("public repository", content)
-                self.assertIn("never ask me to paste a token", content)
-                self.assertNotIn("private-repository", content)
+                self.assertIn("OpenEconAI/plugins", content)
+                self.assertRegex(content, r"(?i)(never paste|do not expose) a token")
                 self.assertNotIn("gh auth login", content)
+                self.assertNotRegex(content, r"(?i)(export\s+GITHUB_TOKEN|GITHUB_TOKEN\s*=|github_pat_)")
         self.assertIn("${XDG_DATA_HOME:-$HOME/.local/share}/econ-review/", install)
         self.assertNotIn("${XDG_DATA_HOME:-~/.local/share}", install)
         self.assertIn("git pull --ff-only", install)
-        self.assertIn("Installing both the native\nplugin and a direct skill copy", install)
+        self.assertIn("Do not combine a native plugin and a direct skill copy", install)
 
     def test_local_evaluation_handoffs_are_root_ignored(self) -> None:
         patterns = set((ROOT / ".gitignore").read_text(encoding="utf-8").splitlines())
@@ -251,7 +254,7 @@ class PublicReleaseTests(unittest.TestCase):
                     self.assertEqual(hashlib.sha256(data).hexdigest(), record["sha256"])
 
     def test_nested_review_desk_license_notice_is_mandatory(self) -> None:
-        source = ROOT / "review-viewer" / "release" / "review-desk.zip"
+        source = ROOT / "econ-review" / "assets" / "review-desk.zip"
         notice = MODULE.REVIEW_DESK_THIRD_PARTY_NOTICE
         with tempfile.TemporaryDirectory() as tmp:
             rewritten = Path(tmp) / "review-desk-without-notice.zip"

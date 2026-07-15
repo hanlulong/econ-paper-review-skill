@@ -21,7 +21,6 @@ PACKAGE_NAME = "econ-paper-review-skill"
 ARCHIVE_FORMAT_VERSION = 1
 FILE_CONTRACT = Path("scripts/public-release-files.json")
 SCAN_ROOTS = (
-    Path(".claude-plugin"),
     Path(".github"),
     Path("benchmarks"),
     Path("docs"),
@@ -535,7 +534,7 @@ def public_files(root: Path) -> list[Path]:
         if not path.is_file() or path.is_symlink():
             raise ValueError(f"required public file is missing or unsafe: {relative.as_posix()}")
     _scan_content(root, files)
-    viewer_bundle = Path("review-viewer/release/review-desk.zip")
+    viewer_bundle = Path("econ-review/assets/review-desk.zip")
     if viewer_bundle in declared:
         if first_party_license is None:
             raise ValueError("Review Desk release requires the project first-party license")

@@ -8,6 +8,7 @@ import json
 import os
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -18,7 +19,8 @@ from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "install_econ_review.py"
+SCRIPT = ROOT / "econ-review" / "scripts" / "setup_econ_review.py"
+ROOT_WRAPPER = ROOT / "scripts" / "install_econ_review.py"
 SPEC = importlib.util.spec_from_file_location("install_econ_review", SCRIPT)
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -178,19 +180,38 @@ class CrossPlatformPathTests(unittest.TestCase):
                     MODULE._safe_bundle_path(value)
 
     def test_local_runtime_is_shared_by_both_agent_installs(self) -> None:
-        project = Path("project-root")
-        self.assertEqual(
-            MODULE.runtime_default("local", project, "Windows"),
-            project / ".econ-review" / "runtime",
-        )
-        destinations = MODULE.installation_destinations("local", project, "all")
-        self.assertEqual(
-            [path for path, _ in destinations],
-            [
-                project / ".claude" / "skills" / "econ-review",
-                project / ".agents" / "skills" / "econ-review",
-            ],
-        )
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            MODULE.Path, "home", return_value=Path(tmp) / "home"
+        ):
+            project = Path(tmp) / "project-root"
+            runtime = MODULE.runtime_default("local", project, "Windows")
+            self.assertEqual(runtime.parent.parent.parent, Path(tmp) / "home" / ".econ-review")
+            self.assertEqual(runtime.name, "runtime")
+            self.assertNotIn(project, runtime.parents)
+            destinations = MODULE.installation_destinations("local", project, "all")
+            self.assertEqual(
+                [path for path, _ in destinations],
+                [
+                    project / ".claude" / "skills" / "econ-review",
+                    project / ".agents" / "skills" / "econ-review",
+                ],
+            )
+
+    def test_windows_project_scope_key_is_case_normalized(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            MODULE.Path, "home", return_value=Path(tmp) / "home"
+        ):
+            upper = MODULE.support_scope_root(
+                "local",
+                Path(tmp) / "ReviewProject",
+                "Windows",
+            )
+            lower = MODULE.support_scope_root(
+                "local",
+                Path(tmp) / "reviewproject",
+                "Windows",
+            )
+            self.assertEqual(upper, lower)
 
     def test_relative_configuration_environment_paths_fail_closed(self) -> None:
         with mock.patch.dict(os.environ, {"CODEX_HOME": "relative-config"}, clear=True):
@@ -199,13 +220,21 @@ class CrossPlatformPathTests(unittest.TestCase):
 
 
 class ManagedInstallerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._support_home_context = tempfile.TemporaryDirectory()
+        self.addCleanup(self._support_home_context.cleanup)
+        self.support_home = Path(self._support_home_context.name) / "home"
+
     def run_installer(
         self,
         *arguments: str,
         env: dict[str, str] | None = None,
+        cwd: Path | None = None,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         merged = os.environ.copy()
+        merged["HOME"] = str(self.support_home)
+        merged["XDG_DATA_HOME"] = str(self.support_home / ".local" / "share")
         if env:
             merged.update(env)
         return subprocess.run(
@@ -213,8 +242,24 @@ class ManagedInstallerTests(unittest.TestCase):
             text=True,
             capture_output=True,
             env=merged,
+            cwd=cwd,
             check=check,
         )
+
+    @staticmethod
+    def source_snapshot(root: Path) -> dict[str, tuple[str, int, str]]:
+        snapshot: dict[str, tuple[str, int, str]] = {}
+        for path in sorted((root, *root.rglob("*"))):
+            relative = "." if path == root else path.relative_to(root).as_posix()
+            if path.is_dir():
+                snapshot[relative] = ("directory", stat.S_IMODE(path.stat().st_mode), "")
+            else:
+                snapshot[relative] = (
+                    "file",
+                    stat.S_IMODE(path.stat().st_mode),
+                    hashlib.sha256(path.read_bytes()).hexdigest(),
+                )
+        return snapshot
 
     def test_managed_runtime_persists_windows_store_actual_interpreter(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -236,6 +281,7 @@ class ManagedInstallerTests(unittest.TestCase):
                     mock.patch.object(MODULE.os.path, "realpath", side_effect=redirected), \
                     mock.patch.object(MODULE.subprocess, "run", return_value=completed), \
                     mock.patch.object(MODULE, "_run_quiet", return_value=completed), \
+                    mock.patch.object(MODULE, "python_major_minor", return_value=(3, 11)), \
                     mock.patch.object(MODULE, "runtime_is_reusable", return_value=True):
                 python = MODULE.ensure_runtime(
                     requested,
@@ -267,6 +313,373 @@ class ManagedInstallerTests(unittest.TestCase):
             self.assertFalse((project / ".claude").exists())
             self.assertFalse((project / ".agents").exists())
 
+    def test_dry_run_never_executes_a_preexisting_target_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            runtime = root / "runtime"
+            python = MODULE.runtime_python_path(runtime)
+            python.parent.mkdir(parents=True)
+            python.write_text("untrusted synthetic interpreter", encoding="utf-8")
+            with mock.patch.object(
+                MODULE,
+                "_run_quiet",
+                side_effect=AssertionError("dry run executed the target runtime"),
+            ), mock.patch.object(
+                MODULE.subprocess,
+                "run",
+                side_effect=AssertionError("dry run spawned a child process"),
+            ):
+                planned = MODULE.ensure_runtime(
+                    runtime,
+                    fixture.skill,
+                    refresh=False,
+                    dry_run=True,
+                )
+            self.assertEqual(planned, python)
+
+    def test_runtime_builder_preflight_runs_only_when_creation_is_needed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            runtime = root / "runtime"
+            python = MODULE.runtime_python_path(runtime)
+            python.parent.mkdir(parents=True)
+            python.write_text("synthetic", encoding="utf-8")
+            with mock.patch.object(MODULE, "runtime_is_reusable", return_value=True), \
+                    mock.patch.object(MODULE, "require_runtime_builder") as preflight:
+                reused = MODULE.ensure_runtime(
+                    runtime,
+                    fixture.skill,
+                    refresh=False,
+                    dry_run=False,
+                    reuse_if_bound=True,
+                )
+            self.assertEqual(reused, python)
+            preflight.assert_not_called()
+
+            marker = runtime / "preserve-before-preflight"
+            marker.write_text("keep", encoding="utf-8")
+            with mock.patch.object(
+                MODULE,
+                "require_runtime_builder",
+                side_effect=MODULE.InstallError("missing venv support"),
+            ):
+                with self.assertRaisesRegex(MODULE.InstallError, "missing venv"):
+                    MODULE.ensure_runtime(
+                        runtime,
+                        fixture.skill,
+                        refresh=True,
+                        dry_run=False,
+                    )
+            self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+
+    def test_managed_setup_does_not_write_the_shared_pip_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            runtime = root / "runtime"
+
+            def create_fixture_runtime(
+                *_args: object,
+                **_kwargs: object,
+            ) -> subprocess.CompletedProcess[str]:
+                python = MODULE.runtime_python_path(runtime)
+                python.parent.mkdir(parents=True)
+                python.write_text("fixture", encoding="utf-8")
+                return subprocess.CompletedProcess([], 0, "", "")
+
+            with mock.patch.object(MODULE, "require_runtime_builder"), mock.patch.object(
+                MODULE.subprocess,
+                "run",
+                side_effect=create_fixture_runtime,
+            ), mock.patch.object(
+                MODULE,
+                "_run_quiet",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ) as quiet, mock.patch.object(
+                MODULE,
+                "python_major_minor",
+                return_value=(3, 12),
+            ), mock.patch.object(MODULE, "runtime_is_reusable", return_value=True):
+                MODULE.ensure_runtime(
+                    runtime,
+                    fixture.skill,
+                    refresh=False,
+                    dry_run=False,
+                )
+
+            pip_command = quiet.call_args_list[0].args[0]
+            self.assertIn("--no-cache-dir", pip_command)
+
+    def test_runtime_reuse_compares_the_managed_interpreter_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            runtime = root / "runtime"
+            python = MODULE.runtime_python_path(runtime)
+            python.parent.mkdir(parents=True)
+            python.write_text("synthetic", encoding="utf-8")
+            (runtime / ".econ-review-runtime.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1",
+                        "requirements_sha256": MODULE.requirements_digest(
+                            fixture.skill / "requirements-core.txt"
+                        ),
+                        "python_major_minor": [3, 11],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(MODULE, "python_major_minor", return_value=(3, 11)), \
+                    mock.patch.object(MODULE, "python_satisfies_core", return_value=True):
+                self.assertTrue(MODULE.runtime_is_reusable(runtime, fixture.skill))
+
+    def test_dependency_probe_rejects_managed_python_older_than_310(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            python = root / "python"
+            python.write_text("synthetic", encoding="utf-8")
+            with mock.patch.object(MODULE, "python_major_minor", return_value=(3, 9)), \
+                    mock.patch.object(
+                        MODULE,
+                        "_run_quiet",
+                        side_effect=AssertionError("old interpreter should not run dependency probes"),
+                    ):
+                self.assertFalse(MODULE.python_satisfies_core(python, fixture.skill))
+
+    def test_support_only_setup_keeps_read_only_plugin_cache_unchanged(self) -> None:
+        if os.name == "nt":
+            self.skipTest("POSIX mode enforcement is covered by native Windows path tests")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "Plugin Cache With Spaces" / "0.2.0")
+            assets = fixture.skill / "assets"
+            assets.mkdir()
+            shutil.copy2(ROOT / "econ-review" / "assets" / "review-desk.zip", assets)
+            for path in fixture.skill.rglob("*"):
+                path.chmod(0o555 if path.is_dir() else 0o444)
+            fixture.skill.chmod(0o555)
+            before = self.source_snapshot(fixture.skill)
+            try:
+                result = self.run_installer(
+                    "--source",
+                    str(fixture.skill),
+                    "--support-only",
+                    "--global",
+                    "--with-review-desk",
+                )
+                self.assertIn("supporting setup is complete", result.stdout)
+                self.assertEqual(self.source_snapshot(fixture.skill), before)
+                self.assertFalse(any(path.name == "__pycache__" for path in fixture.skill.rglob("*")))
+                self.assertFalse((self.support_home / ".claude" / "skills").exists())
+                self.assertFalse((self.support_home / ".agents" / "skills").exists())
+                with mock.patch.object(MODULE.Path, "home", return_value=self.support_home), \
+                        mock.patch.dict(
+                            os.environ,
+                            {"XDG_DATA_HOME": str(self.support_home / ".local" / "share")},
+                        ):
+                    descriptor = MODULE.support_descriptor_default("global", None)
+                    desk = MODULE.review_desk_default("global", None)
+                value = json.loads(descriptor.read_text(encoding="utf-8"))
+                self.assertTrue(Path(value["python"]).is_file())
+                self.assertNotIn(fixture.skill, Path(value["runtime"]).parents)
+                self.assertTrue((desk / "launch_review_desk.py").is_file())
+                self.assertEqual(stat.S_IMODE(descriptor.stat().st_mode), 0o600)
+                resolved = self.run_installer(
+                    "--source",
+                    str(fixture.skill),
+                    "--runtime-path",
+                )
+                self.assertEqual(Path(resolved.stdout.strip()), Path(value["python"]))
+            finally:
+                fixture.skill.chmod(0o755)
+                for path in fixture.skill.rglob("*"):
+                    path.chmod(0o755 if path.is_dir() else 0o644)
+
+    def test_project_support_state_is_external_and_scope_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            project = root / "project"
+            project.mkdir()
+            self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--support-only",
+                "--local",
+                str(project),
+            )
+            self.assertFalse((project / ".econ-review").exists())
+            global_lookup = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--runtime-path",
+                check=False,
+            )
+            self.assertEqual(global_lookup.returncode, 2)
+            local_lookup = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--runtime-path",
+                "--local",
+                str(project),
+            )
+            self.assertTrue(Path(local_lookup.stdout.strip()).is_file())
+
+    def test_support_cleanup_requires_preview_or_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--support-only",
+                "--global",
+            )
+            with mock.patch.object(MODULE.Path, "home", return_value=self.support_home), \
+                    mock.patch.dict(
+                        os.environ,
+                        {"XDG_DATA_HOME": str(self.support_home / ".local" / "share")},
+                    ):
+                descriptor = MODULE.support_descriptor_default("global", None)
+                runtime = MODULE.runtime_default("global", None)
+                desk = MODULE.review_desk_default("global", None)
+                product_root = MODULE.support_data_root()
+            desk.mkdir(parents=True)
+            (desk / "desk-state").write_text("remove", encoding="utf-8")
+            sibling = product_root / "keep-unrelated-user-data"
+            sibling.write_text("keep", encoding="utf-8")
+            direct_skill = root / "direct-skill-copy"
+            direct_skill.mkdir()
+            (direct_skill / "SKILL.md").write_text("keep", encoding="utf-8")
+            refused = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--cleanup-support",
+                check=False,
+            )
+            self.assertEqual(refused.returncode, 1)
+            self.assertTrue(descriptor.exists())
+            preview = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--cleanup-support",
+                "--global",
+                "--dry-run",
+            )
+            self.assertIn("Cleanup dry run complete; no files changed", preview.stdout)
+            self.assertTrue(descriptor.exists())
+            removed = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--cleanup-support",
+                "--global",
+                "--confirm-cleanup",
+            )
+            self.assertIn("support cleanup complete", removed.stdout)
+            self.assertFalse(descriptor.exists())
+            self.assertFalse(runtime.exists())
+            self.assertFalse(desk.exists())
+            self.assertEqual(sibling.read_text(encoding="utf-8"), "keep")
+            self.assertTrue((direct_skill / "SKILL.md").is_file())
+
+    @unittest.skipIf(os.name == "nt", "symlink creation is privilege-dependent on Windows")
+    def test_support_cleanup_rejects_linked_default_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            outside = root / "outside-runtime"
+            outside.mkdir()
+            marker = outside / "keep"
+            marker.write_text("safe", encoding="utf-8")
+            with mock.patch.object(MODULE.Path, "home", return_value=self.support_home), \
+                    mock.patch.dict(
+                        os.environ,
+                        {"XDG_DATA_HOME": str(self.support_home / ".local" / "share")},
+                    ):
+                runtime = MODULE.runtime_default("global", None)
+            runtime.parent.mkdir(parents=True, exist_ok=True)
+            runtime.symlink_to(outside, target_is_directory=True)
+            result = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--cleanup-support",
+                "--global",
+                "--dry-run",
+                check=False,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("refusing linked or junction managed runtime", result.stderr)
+            self.assertEqual(marker.read_text(encoding="utf-8"), "safe")
+
+    def test_local_support_cleanup_works_after_project_directory_is_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            project = root / "project"
+            project.mkdir()
+            self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--support-only",
+                "--local",
+                str(project),
+            )
+            project.rmdir()
+            result = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--cleanup-support",
+                "--local",
+                str(project),
+                "--confirm-cleanup",
+            )
+            self.assertIn("support cleanup complete", result.stdout)
+
+    def test_subprocess_isolation_blocks_cwd_pip_and_venv_shadowing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            manuscript = root / "manuscript"
+            manuscript.mkdir()
+            markers = (root / "venv-shadow-ran", root / "pip-shadow-ran")
+            for name, marker in zip(("venv.py", "pip.py"), markers):
+                (manuscript / name).write_text(
+                    f"open({str(marker)!r}, 'w', encoding='utf-8').write('executed')\n",
+                    encoding="utf-8",
+                )
+            self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--support-only",
+                "--global",
+                cwd=manuscript,
+            )
+            self.assertFalse(any(marker.exists() for marker in markers))
+
+    def test_support_destinations_cannot_overlap_the_plugin(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = InstallerFixture(Path(tmp) / "source")
+            result = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--support-only",
+                "--runtime-dir",
+                str(fixture.skill / "runtime"),
+                "--dry-run",
+                check=False,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("must not overlap", result.stderr)
+
+    def test_support_only_rejects_ignored_agent_selectors(self) -> None:
+        result = self.run_installer("--support-only", "--codex", "--dry-run", check=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("does not accept --claude or --codex", result.stderr)
+
     def test_managed_global_setup_is_idempotent_and_shared(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -296,10 +709,11 @@ class ManagedInstallerTests(unittest.TestCase):
                 codex / "skills" / "econ-review",
             )
             for destination in destinations:
+                self.assertFalse((destination / ".econ-review-runtime.json").exists())
                 metadata = json.loads(
-                    (destination / ".econ-review-runtime.json").read_text(encoding="utf-8")
+                    (destination / ".econ-review-install.json").read_text(encoding="utf-8")
                 )
-                self.assertEqual(metadata["python"], str(runtime_python))
+                self.assertEqual(metadata["runtime_python"], str(runtime_python))
                 self.assertTrue((destination / "SKILL.md").is_file())
                 self.assertEqual(
                     (destination / "LICENSE").read_bytes(),
@@ -343,7 +757,7 @@ class ManagedInstallerTests(unittest.TestCase):
             project = root / "project"
             project.mkdir()
             desk_root = root / "desk"
-            bundle = ROOT / "review-viewer" / "release" / "review-desk.zip"
+            bundle = ROOT / "econ-review" / "assets" / "review-desk.zip"
             arguments = (
                 "--source",
                 str(fixture.skill),
@@ -403,7 +817,7 @@ class ManagedInstallerTests(unittest.TestCase):
             root = Path(tmp)
             desk_root = root / "desk"
             runtime_python = root / "runtime" / "Scripts" / "python.exe"
-            bundle = ROOT / "review-viewer" / "release" / "review-desk.zip"
+            bundle = ROOT / "econ-review" / "assets" / "review-desk.zip"
             MODULE.install_review_desk(
                 bundle,
                 desk_root,
@@ -441,7 +855,7 @@ class ManagedInstallerTests(unittest.TestCase):
                 "--review-desk-dir",
                 str(desk_root),
                 "--review-desk-bundle",
-                str(ROOT / "review-viewer" / "release" / "review-desk.zip"),
+                str(ROOT / "econ-review" / "assets" / "review-desk.zip"),
                 "--dry-run",
             )
             self.assertIn("Would install verified Review Desk", result.stdout)
@@ -452,7 +866,7 @@ class ManagedInstallerTests(unittest.TestCase):
     def test_review_desk_bundle_tampering_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            source = ROOT / "review-viewer" / "release" / "review-desk.zip"
+            source = ROOT / "econ-review" / "assets" / "review-desk.zip"
             tampered = root / "tampered.zip"
             shutil.copy2(source, tampered)
             rewritten = root / "rewritten.zip"
@@ -493,7 +907,7 @@ class ManagedInstallerTests(unittest.TestCase):
     def test_review_desk_rejects_unlisted_version_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "desk"
-            bundle = ROOT / "review-viewer" / "release" / "review-desk.zip"
+            bundle = ROOT / "econ-review" / "assets" / "review-desk.zip"
             installed = MODULE.install_review_desk(bundle, root, dry_run=False)
             manifest_bytes, records, _digest = MODULE.verify_review_desk_bundle(bundle)
             (installed / "hashlib.py").write_text("raise RuntimeError('shadowed')\n", encoding="utf-8")
@@ -505,7 +919,7 @@ class ManagedInstallerTests(unittest.TestCase):
     def test_review_desk_authenticates_version_launcher_before_exec(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "desk"
-            bundle = ROOT / "review-viewer" / "release" / "review-desk.zip"
+            bundle = ROOT / "econ-review" / "assets" / "review-desk.zip"
             installed = MODULE.install_review_desk(bundle, root, dry_run=False)
             marker = Path(tmp) / "unverified-launcher-ran"
             (installed / "launch_review_desk.py").write_text(
@@ -528,7 +942,7 @@ class ManagedInstallerTests(unittest.TestCase):
     def test_review_desk_stable_launcher_blocks_local_module_shadowing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "desk"
-            bundle = ROOT / "review-viewer" / "release" / "review-desk.zip"
+            bundle = ROOT / "econ-review" / "assets" / "review-desk.zip"
             MODULE.install_review_desk(bundle, root, dry_run=False)
             marker = Path(tmp) / "shadow-module-ran"
             (root / "json.py").write_text(
@@ -553,7 +967,7 @@ class ManagedInstallerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("require --with-review-desk", result.stderr)
 
-    def test_missing_installed_runtime_descriptor_is_repaired(self) -> None:
+    def test_missing_external_runtime_descriptor_is_repaired(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             fixture = InstallerFixture(root / "source")
@@ -570,16 +984,18 @@ class ManagedInstallerTests(unittest.TestCase):
                 "--codex",
             )
             self.run_installer(*arguments)
-            descriptor = (
-                project
-                / ".agents"
-                / "skills"
-                / "econ-review"
-                / ".econ-review-runtime.json"
-            )
+            with mock.patch.object(MODULE.Path, "home", return_value=self.support_home), \
+                    mock.patch.dict(
+                        os.environ,
+                        {"XDG_DATA_HOME": str(self.support_home / ".local" / "share")},
+                    ):
+                descriptor = MODULE.support_descriptor_default("local", project.resolve())
             descriptor.unlink()
+            marker = runtime / "unbound-runtime-must-not-run"
+            marker.write_text("replace", encoding="utf-8")
             repaired = self.run_installer(*arguments)
-            self.assertIn("Installed Codex (project)", repaired.stdout)
+            self.assertIn("Prepared managed Python runtime", repaired.stdout)
+            self.assertFalse(marker.exists())
             self.assertEqual(
                 json.loads(descriptor.read_text(encoding="utf-8"))["python"],
                 str(MODULE.runtime_python_path(runtime.absolute())),
@@ -756,6 +1172,40 @@ class ManagedInstallerTests(unittest.TestCase):
             )
             self.assertIn("Would create managed Python runtime", result.stdout)
             self.assertFalse((project / ".agents").exists())
+
+    def test_root_python_wrapper_delegates_to_canonical_setup_tool(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            project = root / "project"
+            project.mkdir()
+            arguments = (
+                "--source",
+                str(fixture.skill),
+                "--copy-only",
+                "--local",
+                str(project),
+                "--codex",
+                "--dry-run",
+            )
+            environment = os.environ.copy()
+            environment["PYTHONDONTWRITEBYTECODE"] = "1"
+            canonical = subprocess.run(
+                [sys.executable, str(SCRIPT), *arguments],
+                text=True,
+                capture_output=True,
+                env=environment,
+                check=True,
+            )
+            wrapper = subprocess.run(
+                [sys.executable, str(ROOT_WRAPPER), *arguments],
+                text=True,
+                capture_output=True,
+                env=environment,
+                check=True,
+            )
+            self.assertEqual(wrapper.stdout, canonical.stdout)
+            self.assertEqual(wrapper.stderr, canonical.stderr)
 
 
 if __name__ == "__main__":
