@@ -1,2 +1,0 @@
-# Optional local Markdown comparison backend. Keep out of the lightweight core.
--r econ-review/requirements-markitdown.txt

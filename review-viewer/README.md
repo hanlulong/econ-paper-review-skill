@@ -11,7 +11,7 @@ do not need Node.js or npm. Only release-manifest files are served, only `GET`
 and `HEAD` are accepted, and no review is bundled. If the browser does not open,
 copy the printed URL. Review files remain in the browser and are not uploaded.
 
-See [the installation guide](../docs/INSTALL.md) for macOS, Linux, native
+See [the installation guide](../INSTALL.md) for macOS, Linux, native
 Windows, and project-local commands.
 
 ## Develop locally

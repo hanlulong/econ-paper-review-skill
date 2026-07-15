@@ -113,7 +113,36 @@ class NativePluginTests(unittest.TestCase):
 
     def test_external_catalog_commands_and_migration_are_documented(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        install = (ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
+        install = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
+
+        readme_install = readme.split("## Install", 1)[1].split("## Use it", 1)[0]
+        self.assertIn(
+            "Install or update Econ Review. Read and follow the complete instructions",
+            readme_install,
+        )
+        self.assertIn(
+            "github.com/hanlulong/econ-paper-review-skill/blob/main/INSTALL.md",
+            readme_install,
+        )
+        self.assertIn("Handle the entire installation and verification yourself", readme_install)
+        self.assertIn("## Agent installation contract", install)
+        self.assertRegex(install, r"Do not ask the user to copy or run\s+commands")
+        self.assertIn("codex plugin add econ-review@openeconai --json", install)
+        self.assertIn("claude plugin list --json", install)
+        self.assertIn("PLUGIN_ROOT/scripts/validate_skill_package.py PLUGIN_ROOT", install)
+        self.assertIn("standard-library package validation", install)
+        self.assertRegex(install, r"without another\s+confirmation")
+        self.assertIn("Use the same prompt later to update Econ Review", readme_install)
+        self.assertIn(
+            "Run econ-review-setup now and finish its user-level setup with Review Desk.",
+            readme_install,
+        )
+        self.assertLess(
+            readme_install.index("Install or update Econ Review"),
+            readme_install.index("/plugin marketplace add OpenEconAI/plugins"),
+        )
+        self.assertNotIn("After installing, ask once", readme_install)
+        self.assertNotIn("Use econ-review-setup to finish setup on this machine", readme_install)
 
         for command in (
             "/plugin marketplace add OpenEconAI/plugins",
@@ -136,7 +165,7 @@ class NativePluginTests(unittest.TestCase):
                 self.assertIn(command, install)
 
         migration = install.split("### Migrate from the former marketplace", 1)[1].split(
-            "### Fresh native install", 1
+            "### Update a plugin install", 1
         )[0]
         for commands in (
             (
@@ -173,10 +202,11 @@ class NativePluginTests(unittest.TestCase):
         self.assertNotIn("plugin uninstall", update_section)
         self.assertNotIn("plugin remove", update_section)
         self.assertIn("complete review workflow", readme)
-        self.assertIn("The dry run never downloads or changes anything", readme)
-        self.assertIn("Applying the reviewed setup", readme)
-        self.assertIn("econ-review-owned virtual environment", install)
-        self.assertIn("without creating a duplicate skill copy", install)
+        self.assertIn("may download only the declared core Python packages", readme)
+        self.assertIn("private environment", install)
+        self.assertRegex(install, r"They must not copy\s+the skill into an agent skill directory")
+        self.assertNotIn("### Fresh native install", install)
+        self.assertNotIn("## One-paste first-use setup prompt", install)
 
     @unittest.skipUnless(shutil.which("claude"), "Claude Code CLI is not installed")
     def test_claude_strict_validation(self) -> None:

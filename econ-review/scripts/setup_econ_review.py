@@ -10,6 +10,8 @@ skill copies. ``--copy-only`` preserves the original lightweight behavior.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import errno
 import hashlib
 import json
 import ntpath
@@ -21,11 +23,12 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unicodedata
 import uuid
 import zipfile
 from pathlib import Path, PurePosixPath
-from typing import Iterable, Sequence
+from typing import BinaryIO, Iterable, Iterator, Sequence
 
 
 sys.dont_write_bytecode = True
@@ -51,6 +54,8 @@ REVIEW_DESK_FIRST_PARTY_LICENSE = "app/LICENSE.txt"
 REVIEW_DESK_THIRD_PARTY_NOTICE = "app/THIRD_PARTY_NOTICES.txt"
 REVIEW_DESK_THIRD_PARTY_MANIFEST = "app/third-party-licenses/manifest.json"
 REVIEW_DESK_KATEX_FONT_LICENSE = "app/third-party-licenses/katex-fonts/KATEX-FONTS-OFL-1.1.txt"
+SETUP_LOCK_TIMEOUT_SECONDS = 30.0
+SETUP_LOCK_POLL_SECONDS = 0.1
 REVIEW_DESK_REQUIRED_RUNTIME_PACKAGES = frozenset(
     {"katex", "react", "react-dom", "react-markdown", "rehype-katex", "remark-gfm", "remark-math"}
 )
@@ -334,6 +339,22 @@ def support_descriptor_default(
     return support_scope_root(scope, project, system) / SUPPORT_DESCRIPTOR_NAME
 
 
+def support_lock_path(
+    scope: str,
+    project: Path | None,
+    system: str | None = None,
+) -> Path:
+    """Return one stable lock file for a shared mutable support scope."""
+
+    root = support_data_root(system)
+    scope_name = (
+        "global"
+        if scope == "global"
+        else f"project-{support_scope_root(scope, project, system).name}"
+    )
+    return root / ".locks" / f"{scope_name}.lock"
+
+
 def _paths_overlap(first: Path, second: Path) -> bool:
     """Compare both lexical and resolved forms so links cannot hide overlap."""
 
@@ -371,6 +392,149 @@ def require_safe_support_path(path: Path, scope_root: Path, label: str) -> None:
             raise InstallError(f"refusing link-controlled {label} ancestor: {ancestor}")
         if ancestor.exists() and not ancestor.is_dir():
             raise InstallError(f"refusing non-directory {label} ancestor: {ancestor}")
+
+
+def _open_support_lock(path: Path) -> BinaryIO:
+    """Open a private regular lock file without following a final symlink."""
+
+    if path.exists() and (_is_link_or_junction(path) or not path.is_file()):
+        raise InstallError(f"refusing unsafe setup lock: {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if _is_link_or_junction(path.parent) or not path.parent.is_dir():
+        raise InstallError(f"refusing unsafe setup lock directory: {path.parent}")
+    flags = os.O_RDWR
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags | os.O_CREAT | os.O_EXCL, 0o600)
+        created = True
+    except FileExistsError:
+        try:
+            descriptor = os.open(path, flags)
+        except OSError as exc:
+            raise InstallError(f"could not open the setup lock safely: {path}") from exc
+        created = False
+    except OSError as exc:
+        raise InstallError(f"could not open the setup lock safely: {path}") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise InstallError(f"setup lock is not a regular file: {path}")
+        if opened.st_nlink != 1:
+            raise InstallError(f"refusing hard-linked setup lock: {path}")
+        current = path.lstat()
+        if _is_link_or_junction(path) or (
+            (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino)
+        ):
+            raise InstallError(f"setup lock changed while it was opened: {path}")
+        if created:
+            try:
+                os.fchmod(descriptor, 0o600)
+            except (AttributeError, OSError):
+                # Windows applies access control through the containing
+                # user-owned directory; fchmod can be unavailable there.
+                pass
+        if opened.st_size == 0:
+            if os.fstat(descriptor).st_nlink != 1:
+                raise InstallError(f"refusing hard-linked setup lock: {path}")
+            os.write(descriptor, b"\0")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        return os.fdopen(descriptor, "r+b", buffering=0)
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _lock_is_busy(exc: OSError) -> bool:
+    return (
+        isinstance(exc, BlockingIOError)
+        or exc.errno
+        in {
+            errno.EACCES,
+            errno.EAGAIN,
+            getattr(errno, "EDEADLK", -1),
+        }
+        or getattr(exc, "winerror", None) in {33, 36}
+    )
+
+
+def _try_lock_support_file(handle: BinaryIO, system: str) -> bool:
+    handle.seek(0)
+    if system == "Windows":
+        import msvcrt
+
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as exc:
+            if _lock_is_busy(exc):
+                return False
+            raise
+        return True
+
+    import fcntl
+
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        if _lock_is_busy(exc):
+            return False
+        raise
+    return True
+
+
+def _unlock_support_file(handle: BinaryIO, system: str) -> None:
+    handle.seek(0)
+    if system == "Windows":
+        import msvcrt
+
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        return
+
+    import fcntl
+
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def support_setup_lock(
+    scope: str,
+    project: Path | None,
+    *,
+    timeout: float = SETUP_LOCK_TIMEOUT_SECONDS,
+    poll_interval: float = SETUP_LOCK_POLL_SECONDS,
+    system: str | None = None,
+) -> Iterator[Path]:
+    """Serialize mutation of one runtime/descriptor/Review Desk scope."""
+
+    if timeout < 0 or poll_interval <= 0:
+        raise ValueError("setup lock timeout must be non-negative and poll interval positive")
+    system = system or platform.system()
+    root = support_data_root(system)
+    path = support_lock_path(scope, project, system)
+    require_safe_support_path(path, root, "setup lock")
+    handle = _open_support_lock(path)
+    acquired = False
+    deadline = time.monotonic() + timeout
+    try:
+        while not acquired:
+            acquired = _try_lock_support_file(handle, system)
+            if acquired:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise InstallError(
+                    "another econ-review setup, refresh, or cleanup is using this "
+                    f"support scope; retry after it finishes: {path}"
+                )
+            time.sleep(min(poll_interval, remaining))
+        yield path
+    finally:
+        try:
+            if acquired:
+                _unlock_support_file(handle, system)
+        finally:
+            handle.close()
 
 
 def cleanup_support_state(
@@ -1398,79 +1562,17 @@ def parser() -> argparse.ArgumentParser:
     return root
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    args = parser().parse_args(argv)
-    if sys.version_info < MINIMUM_PYTHON:
-        raise InstallError("Python 3.10 or newer is required")
-    source = (args.source or SKILL_ROOT).expanduser().absolute()
-    if not args.with_review_desk and (args.review_desk_dir or args.review_desk_bundle):
-        raise InstallError("--review-desk-dir and --review-desk-bundle require --with-review-desk")
-    if args.support_only and args.copy_only:
-        raise InstallError("--support-only cannot be combined with --copy-only")
-    if args.support_only and args.agent != "all":
-        raise InstallError("--support-only does not accept --claude or --codex")
-    if args.confirm_cleanup and not args.cleanup_support:
-        raise InstallError("--confirm-cleanup requires --cleanup-support")
-    if args.cleanup_support and args.dry_run and args.confirm_cleanup:
-        raise InstallError("choose either --dry-run or --confirm-cleanup for support cleanup")
-    if args.cleanup_support and any(
-        (
-            args.support_only,
-            args.copy_only,
-            args.refresh_runtime,
-            args.check,
-            args.with_review_desk,
-            args.runtime_path,
-            args.runtime_dir is not None,
-            args.review_desk_dir is not None,
-            args.review_desk_bundle is not None,
-            args.agent != "all",
-        )
-    ):
-        raise InstallError("--cleanup-support cannot be combined with setup or installation options")
-    if args.cleanup_support and not (args.dry_run or args.confirm_cleanup):
-        raise InstallError("support cleanup requires --dry-run or --confirm-cleanup")
-    if args.runtime_path and any(
-        (
-            args.support_only,
-            args.copy_only,
-            args.refresh_runtime,
-            args.check,
-            args.with_review_desk,
-            args.runtime_dir is not None,
-            args.review_desk_dir is not None,
-            args.review_desk_bundle is not None,
-            args.dry_run,
-            args.cleanup_support,
-            args.confirm_cleanup,
-        )
-    ):
-        raise InstallError("--runtime-path cannot be combined with setup or installation options")
-    files = validate_source(source)
-    scope = "local" if args.local is not None else "global"
-    project = None
-    if scope == "local":
-        project = Path(args.local).expanduser().resolve()
-        if not project.is_dir() and not args.cleanup_support:
-            raise InstallError(f"local project directory does not exist: {project}")
-    mutable_root = support_data_root()
-    support_descriptor = support_descriptor_default(scope, project)
-    require_safe_support_path(support_descriptor, mutable_root, "runtime descriptor")
-    reject_source_overlap(support_descriptor, source, "runtime descriptor")
-    if args.cleanup_support:
-        cleanup_support_state(
-            scope,
-            project,
-            source,
-            dry_run=not args.confirm_cleanup,
-        )
-        return 0
-    if args.runtime_path:
-        python = recorded_runtime_python(support_descriptor, source)
-        if python is None:
-            return 2
-        print(python)
-        return 0
+def _perform_setup(
+    args: argparse.Namespace,
+    source: Path,
+    files: list[Path],
+    scope: str,
+    project: Path | None,
+    mutable_root: Path,
+    support_descriptor: Path,
+) -> int:
+    """Apply or preview setup after validation and lock selection."""
+
     source_manifest = file_manifest(source, files)
     destinations = (
         []
@@ -1569,6 +1671,110 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.support_only:
         print("Restart or reload Codex and Claude Code sessions so they discover the installed skill.")
     return 0 if healthy else 2
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parser().parse_args(argv)
+    if sys.version_info < MINIMUM_PYTHON:
+        raise InstallError("Python 3.10 or newer is required")
+    source = (args.source or SKILL_ROOT).expanduser().absolute()
+    if not args.with_review_desk and (args.review_desk_dir or args.review_desk_bundle):
+        raise InstallError("--review-desk-dir and --review-desk-bundle require --with-review-desk")
+    if args.support_only and args.copy_only:
+        raise InstallError("--support-only cannot be combined with --copy-only")
+    if args.support_only and args.agent != "all":
+        raise InstallError("--support-only does not accept --claude or --codex")
+    if args.confirm_cleanup and not args.cleanup_support:
+        raise InstallError("--confirm-cleanup requires --cleanup-support")
+    if args.cleanup_support and args.dry_run and args.confirm_cleanup:
+        raise InstallError("choose either --dry-run or --confirm-cleanup for support cleanup")
+    if args.cleanup_support and any(
+        (
+            args.support_only,
+            args.copy_only,
+            args.refresh_runtime,
+            args.check,
+            args.with_review_desk,
+            args.runtime_path,
+            args.runtime_dir is not None,
+            args.review_desk_dir is not None,
+            args.review_desk_bundle is not None,
+            args.agent != "all",
+        )
+    ):
+        raise InstallError("--cleanup-support cannot be combined with setup or installation options")
+    if args.cleanup_support and not (args.dry_run or args.confirm_cleanup):
+        raise InstallError("support cleanup requires --dry-run or --confirm-cleanup")
+    if args.runtime_path and any(
+        (
+            args.support_only,
+            args.copy_only,
+            args.refresh_runtime,
+            args.check,
+            args.with_review_desk,
+            args.runtime_dir is not None,
+            args.review_desk_dir is not None,
+            args.review_desk_bundle is not None,
+            args.dry_run,
+            args.cleanup_support,
+            args.confirm_cleanup,
+        )
+    ):
+        raise InstallError("--runtime-path cannot be combined with setup or installation options")
+    files = validate_source(source)
+    scope = "local" if args.local is not None else "global"
+    project = None
+    if scope == "local":
+        project = Path(args.local).expanduser().resolve()
+        if not project.is_dir() and not args.cleanup_support:
+            raise InstallError(f"local project directory does not exist: {project}")
+    mutable_root = support_data_root()
+    support_descriptor = support_descriptor_default(scope, project)
+    require_safe_support_path(support_descriptor, mutable_root, "runtime descriptor")
+    reject_source_overlap(support_descriptor, source, "runtime descriptor")
+    if args.cleanup_support:
+        if args.confirm_cleanup:
+            with support_setup_lock(scope, project):
+                cleanup_support_state(
+                    scope,
+                    project,
+                    source,
+                    dry_run=False,
+                )
+        else:
+            cleanup_support_state(
+                scope,
+                project,
+                source,
+                dry_run=True,
+            )
+        return 0
+    if args.runtime_path:
+        python = recorded_runtime_python(support_descriptor, source)
+        if python is None:
+            return 2
+        print(python)
+        return 0
+    if args.dry_run or (args.copy_only and not args.with_review_desk):
+        return _perform_setup(
+            args,
+            source,
+            files,
+            scope,
+            project,
+            mutable_root,
+            support_descriptor,
+        )
+    with support_setup_lock(scope, project):
+        return _perform_setup(
+            args,
+            source,
+            files,
+            scope,
+            project,
+            mutable_root,
+            support_descriptor,
+        )
 
 
 if __name__ == "__main__":
