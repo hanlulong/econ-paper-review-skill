@@ -116,22 +116,21 @@ class NativePluginTests(unittest.TestCase):
         install = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
 
         readme_install = readme.split("## Install", 1)[1].split("## Use it", 1)[0]
-        self.assertIn(
-            "Install or update Econ Review. Read and follow the complete instructions",
-            readme_install,
-        )
+        normalized_readme_install = " ".join(readme_install.split())
+        normalized_install = " ".join(install.split())
+        self.assertIn("Install or update Econ Review as a standalone skill", readme_install)
         self.assertIn(
             "github.com/hanlulong/econ-paper-review-skill/blob/main/INSTALL.md",
             readme_install,
         )
-        self.assertIn("Handle the entire installation and verification yourself", readme_install)
+        self.assertIn("keep exactly one active copy for this client", normalized_readme_install)
+        self.assertIn("do not change the other client", normalized_readme_install)
         self.assertIn("## Agent installation contract", install)
         self.assertRegex(install, r"Do not ask the user to copy or run\s+commands")
-        self.assertIn("codex plugin add econ-review@openeconai --json", install)
-        self.assertIn("claude plugin list --json", install)
-        self.assertIn("PLUGIN_ROOT/scripts/validate_skill_package.py PLUGIN_ROOT", install)
-        self.assertIn("standard-library package validation", install)
-        self.assertRegex(install, r"without another\s+confirmation")
+        self.assertIn("$HOME/.agents/skills/econ-review", install)
+        self.assertIn("PYTHON scripts/install_econ_review.py --dry-run", install)
+        self.assertIn("INSTALLED_SKILL/scripts/validate_skill_package.py", install)
+        self.assertIn("exactly one active Econ Review copy", install)
         self.assertIn("Use the same prompt later to update Econ Review", readme_install)
         self.assertIn(
             "Run econ-review-setup now and finish its user-level setup with Review Desk.",
@@ -143,6 +142,10 @@ class NativePluginTests(unittest.TestCase):
         )
         self.assertNotIn("After installing, ask once", readme_install)
         self.assertNotIn("Use econ-review-setup to finish setup on this machine", readme_install)
+        self.assertLess(
+            install.index("## Direct standalone installation"),
+            install.index("## Optional native plugin installation"),
+        )
 
         for command in (
             "/plugin marketplace add OpenEconAI/plugins",
@@ -165,24 +168,10 @@ class NativePluginTests(unittest.TestCase):
                 self.assertIn(command, install)
 
         migration = install.split("### Migrate from the former marketplace", 1)[1].split(
-            "### Update a plugin install", 1
+            "## Runtime, PDF, and Review Desk notes", 1
         )[0]
-        for commands in (
-            (
-                "claude plugin uninstall econ-review@econ-paper-review",
-                "claude plugin marketplace remove econ-paper-review",
-                "claude plugin marketplace add OpenEconAI/plugins",
-                "claude plugin install econ-review@openeconai",
-            ),
-            (
-                "codex plugin remove econ-review@econ-paper-review",
-                "codex plugin marketplace remove econ-paper-review",
-                "codex plugin marketplace add OpenEconAI/plugins",
-                "codex plugin add econ-review@openeconai",
-            ),
-        ):
-            positions = [migration.index(command) for command in commands]
-            self.assertEqual(positions, sorted(positions))
+        self.assertIn("only the selected client's old", migration)
+        self.assertIn("Do not remove the other client's installation", migration)
 
         for obsolete in (
             "/plugin marketplace add hanlulong/econ-paper-review-skill",
@@ -196,17 +185,17 @@ class NativePluginTests(unittest.TestCase):
                 self.assertNotIn(obsolete, readme)
                 self.assertNotIn(obsolete, install)
 
-        update_section = install.split("### Update a plugin install", 1)[1].split(
-            "### Remove a plugin install", 1
+        update_section = install.split("### Update a native plugin", 1)[1].split(
+            "### Remove a native plugin", 1
         )[0]
         self.assertNotIn("plugin uninstall", update_section)
         self.assertNotIn("plugin remove", update_section)
         self.assertIn("complete review workflow", readme)
         self.assertIn("may download only the declared core Python packages", readme)
-        self.assertIn("private environment", install)
-        self.assertRegex(install, r"They must not copy\s+the skill into an agent skill directory")
-        self.assertNotIn("### Fresh native install", install)
-        self.assertNotIn("## One-paste first-use setup prompt", install)
+        self.assertIn("private user-owned environment", install)
+        self.assertIn("Native plugins are optional", normalized_install)
+        self.assertIn("/econ-review:econ-review", install)
+        self.assertIn("$econ-review:econ-review", install)
 
     @unittest.skipUnless(shutil.which("claude"), "Claude Code CLI is not installed")
     def test_claude_strict_validation(self) -> None:

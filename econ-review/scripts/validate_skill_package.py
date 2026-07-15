@@ -656,6 +656,13 @@ def validate_skill_package(root: Path) -> list[str]:
                 errors.append("agents/openai.yaml interface.short_description must be 25-64 characters")
             if not isinstance(default_prompt, str) or f"${name}" not in default_prompt:
                 errors.append(f"agents/openai.yaml interface.default_prompt must mention ${name}")
+        policy = metadata.get("policy")
+        if not isinstance(policy, dict):
+            errors.append("agents/openai.yaml requires a policy mapping")
+        elif policy != {"allow_implicit_invocation": True}:
+            errors.append(
+                "agents/openai.yaml policy must set allow_implicit_invocation: true"
+            )
 
     _validate_links(root, errors)
     _validate_reference_navigation(root, errors)

@@ -15,7 +15,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest import mock
 
 
@@ -123,6 +123,28 @@ class CrossPlatformPathTests(unittest.TestCase):
             r"'D:\Review Roots\Reviewer Name\Review Desk\launch_review_desk.py'",
         )
 
+    def test_default_windows_review_desk_paths_stay_below_classic_max_path(self) -> None:
+        _manifest, records, digest = MODULE.verify_review_desk_bundle(
+            ROOT / "econ-review" / "assets" / "review-desk.zip"
+        )
+        global_root = PureWindowsPath(
+            "C:\\" + r"Users\ReviewerAccount12345\.econ-review\review-desk"
+        )
+        roots = (
+            global_root,
+            global_root.parent / "projects" / ("a" * 16) / "review-desk",
+        )
+        for root in roots:
+            with self.subTest(root=str(root)):
+                longest = max(
+                    (
+                        root / "versions" / digest / PureWindowsPath(str(record["path"]))
+                        for record in records
+                    ),
+                    key=lambda path: len(str(path)),
+                )
+                self.assertLess(len(str(longest)), 260, str(longest))
+
     def test_review_desk_command_rejects_multiline_paths(self) -> None:
         with self.assertRaisesRegex(MODULE.InstallError, "line breaks"):
             MODULE.format_launch_command(["/tmp/review\ncommand"], system="Linux")
@@ -214,10 +236,16 @@ class CrossPlatformPathTests(unittest.TestCase):
             )
             self.assertEqual(upper, lower)
 
-    def test_relative_configuration_environment_paths_fail_closed(self) -> None:
-        with mock.patch.dict(os.environ, {"CODEX_HOME": "relative-config"}, clear=True):
+    def test_codex_destination_uses_agents_home_and_legacy_override_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            MODULE.Path, "home", return_value=Path(tmp) / "home"
+        ), mock.patch.dict(os.environ, {"CODEX_HOME": "relative-config"}, clear=True):
+            self.assertEqual(
+                MODULE.installation_destinations("global", None, "codex")[0][0],
+                Path(tmp) / "home" / ".agents" / "skills" / "econ-review",
+            )
             with self.assertRaisesRegex(MODULE.InstallError, "absolute path"):
-                MODULE.installation_destinations("global", None, "codex")
+                MODULE.legacy_codex_destinations()
 
 
 class SupportSetupLockTests(unittest.TestCase):
@@ -246,7 +274,7 @@ class SupportSetupLockTests(unittest.TestCase):
                 "Windows",
             )
             self.assertEqual(upper, lower)
-            self.assertRegex(upper.name, r"^project-[0-9a-f]{24}\.lock$")
+            self.assertRegex(upper.name, r"^project-[0-9a-f]{16}\.lock$")
 
     def test_lock_serializes_and_releases_the_same_scope(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
@@ -635,7 +663,14 @@ class ManagedInstallerTests(unittest.TestCase):
                             os.environ,
                             {"XDG_DATA_HOME": str(self.support_home / ".local" / "share")},
                         ):
-                    descriptor = MODULE.support_descriptor_default("global", None)
+                    core_version = MODULE.requirements_digest(
+                        fixture.skill / "requirements-core.txt"
+                    )
+                    descriptor = MODULE.support_descriptor_default(
+                        "global",
+                        None,
+                        version_key=core_version,
+                    )
                     desk = MODULE.review_desk_default("global", None)
                 value = json.loads(descriptor.read_text(encoding="utf-8"))
                 self.assertTrue(Path(value["python"]).is_file())
@@ -683,6 +718,69 @@ class ManagedInstallerTests(unittest.TestCase):
             )
             self.assertTrue(Path(local_lookup.stdout.strip()).is_file())
 
+    def test_incompatible_support_revisions_coexist_without_replacing_prior_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = InstallerFixture(Path(tmp) / "source")
+            self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--support-only",
+                "--global",
+            )
+            first_key = MODULE.requirements_digest(
+                fixture.skill / "requirements-core.txt"
+            )
+            with mock.patch.object(MODULE.Path, "home", return_value=self.support_home), \
+                    mock.patch.dict(
+                        os.environ,
+                        {"XDG_DATA_HOME": str(self.support_home / ".local" / "share")},
+                    ):
+                first_runtime = MODULE.runtime_default(
+                    "global",
+                    None,
+                    version_key=first_key,
+                )
+                first_descriptor = MODULE.support_descriptor_default(
+                    "global",
+                    None,
+                    version_key=first_key,
+                )
+            marker = first_runtime / "keep-for-older-installed-copy.txt"
+            marker.write_text("keep", encoding="utf-8")
+
+            (fixture.skill / "requirements-core.txt").write_text(
+                "# compatible but content-distinct support revision\n",
+                encoding="utf-8",
+            )
+            self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--support-only",
+                "--global",
+            )
+            second_key = MODULE.requirements_digest(
+                fixture.skill / "requirements-core.txt"
+            )
+            with mock.patch.object(MODULE.Path, "home", return_value=self.support_home), \
+                    mock.patch.dict(
+                        os.environ,
+                        {"XDG_DATA_HOME": str(self.support_home / ".local" / "share")},
+                    ):
+                second_runtime = MODULE.runtime_default(
+                    "global",
+                    None,
+                    version_key=second_key,
+                )
+                second_descriptor = MODULE.support_descriptor_default(
+                    "global",
+                    None,
+                    version_key=second_key,
+                )
+            self.assertNotEqual(first_runtime, second_runtime)
+            self.assertTrue(first_descriptor.is_file())
+            self.assertTrue(second_descriptor.is_file())
+            self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
+
     def test_support_cleanup_requires_preview_or_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -698,8 +796,19 @@ class ManagedInstallerTests(unittest.TestCase):
                         os.environ,
                         {"XDG_DATA_HOME": str(self.support_home / ".local" / "share")},
                     ):
-                descriptor = MODULE.support_descriptor_default("global", None)
-                runtime = MODULE.runtime_default("global", None)
+                core_version = MODULE.requirements_digest(
+                    fixture.skill / "requirements-core.txt"
+                )
+                descriptor = MODULE.support_descriptor_default(
+                    "global",
+                    None,
+                    version_key=core_version,
+                )
+                runtime = MODULE.runtime_default(
+                    "global",
+                    None,
+                    version_key=core_version,
+                )
                 desk = MODULE.review_desk_default("global", None)
                 product_root = MODULE.support_data_root()
             desk.mkdir(parents=True)
@@ -860,7 +969,7 @@ class ManagedInstallerTests(unittest.TestCase):
             self.assertTrue(runtime_python.is_file())
             destinations = (
                 claude / "skills" / "econ-review",
-                codex / "skills" / "econ-review",
+                root / "home" / ".agents" / "skills" / "econ-review",
             )
             for destination in destinations:
                 self.assertFalse((destination / ".econ-review-runtime.json").exists())
@@ -1143,7 +1252,14 @@ class ManagedInstallerTests(unittest.TestCase):
                         os.environ,
                         {"XDG_DATA_HOME": str(self.support_home / ".local" / "share")},
                     ):
-                descriptor = MODULE.support_descriptor_default("local", project.resolve())
+                core_version = MODULE.requirements_digest(
+                    fixture.skill / "requirements-core.txt"
+                )
+                descriptor = MODULE.support_descriptor_default(
+                    "local",
+                    project.resolve(),
+                    version_key=core_version,
+                )
             descriptor.unlink()
             marker = runtime / "unbound-runtime-must-not-run"
             marker.write_text("replace", encoding="utf-8")
@@ -1178,6 +1294,253 @@ class ManagedInstallerTests(unittest.TestCase):
                 installed.read_text(encoding="utf-8"),
                 (fixture.skill / "SKILL.md").read_text(encoding="utf-8"),
             )
+            backups = list(
+                (self.support_home / ".openeconai" / "backups" / "econ-review").rglob(
+                    "SKILL.md"
+                )
+            )
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_text(encoding="utf-8"), "tampered")
+
+    def test_codex_global_install_migrates_only_codex_legacy_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            legacy = self.support_home / ".codex" / "skills" / "econ-review"
+            shutil.copytree(fixture.skill, legacy)
+            claude = self.support_home / ".claude" / "skills" / "econ-review"
+            claude.mkdir(parents=True)
+            sentinel = claude / "keep.txt"
+            sentinel.write_text("other client", encoding="utf-8")
+
+            result = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--global",
+                "--codex",
+                "--copy-only",
+            )
+
+            current = self.support_home / ".agents" / "skills" / "econ-review"
+            self.assertTrue((current / "SKILL.md").is_file())
+            self.assertFalse(legacy.exists())
+            self.assertIn("Removed generated legacy Codex copy", result.stdout)
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "other client")
+
+    def test_codex_global_install_ignores_invalid_claude_configuration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = InstallerFixture(Path(tmp) / "source")
+            result = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--global",
+                "--codex",
+                "--copy-only",
+                env={"CLAUDE_CONFIG_DIR": "relative-other-client-path"},
+            )
+            self.assertIn("Installed Codex (global)", result.stdout)
+            self.assertTrue(
+                (self.support_home / ".agents" / "skills" / "econ-review" / "SKILL.md").is_file()
+            )
+            self.assertFalse((self.support_home / ".claude").exists())
+
+    def test_aliased_codex_home_never_removes_current_install(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = InstallerFixture(Path(tmp) / "source")
+            alias = self.support_home / "alias"
+            alias.mkdir(parents=True)
+            result = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--global",
+                "--codex",
+                "--copy-only",
+                env={"CODEX_HOME": str(alias / ".." / ".agents")},
+            )
+            current = self.support_home / ".agents" / "skills" / "econ-review"
+            self.assertTrue((current / "SKILL.md").is_file())
+            self.assertIn("Skipped aliased legacy Codex path", result.stdout)
+
+    def test_cross_volume_preservation_moves_copy_outside_skill_discovery(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "external-volume" / "skills" / "econ-review"
+            source.mkdir(parents=True)
+            (source / "local-notes.md").write_text("preserve me", encoding="utf-8")
+            destination = root / "backup-run" / "saved-copy"
+            original_rename = MODULE.Path.rename
+
+            def simulated_cross_volume(path: Path, target: Path) -> Path:
+                if Path(target) == destination:
+                    raise OSError(errno.EXDEV, "cross-device link")
+                return original_rename(path, target)
+
+            with mock.patch.object(
+                MODULE,
+                "_backup_destination",
+                return_value=destination,
+            ), mock.patch.object(
+                MODULE.Path,
+                "rename",
+                autospec=True,
+                side_effect=simulated_cross_volume,
+            ):
+                preserved = MODULE.preserve_inactive_copy(source)
+            self.assertFalse(source.exists())
+            self.assertEqual(
+                (preserved / "local-notes.md").read_text(encoding="utf-8"),
+                "preserve me",
+            )
+            self.assertNotIn("skills", preserved.relative_to(root / "external-volume").parts)
+            self.assertFalse(destination.exists())
+
+    @unittest.skipIf(os.name == "nt", "symlink creation is privilege-dependent on Windows")
+    def test_install_never_follows_linked_central_backup_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = InstallerFixture(Path(tmp) / "source")
+            installed = self.support_home / ".claude/skills/econ-review"
+            installed.mkdir(parents=True)
+            (installed / "local-notes.md").write_text("preserve me", encoding="utf-8")
+            outside = Path(tmp) / "outside-backups"
+            outside.mkdir()
+            self.support_home.mkdir(parents=True, exist_ok=True)
+            (self.support_home / ".openeconai").symlink_to(
+                outside, target_is_directory=True
+            )
+            result = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--global",
+                "--claude",
+                "--copy-only",
+            )
+            self.assertTrue((installed / "SKILL.md").is_file())
+            self.assertEqual(list(outside.rglob("local-notes.md")), [])
+            preserved = list(
+                (self.support_home / ".claude/.openeconai-inactive/econ-review").rglob(
+                    "local-notes.md"
+                )
+            )
+            self.assertEqual(len(preserved), 1)
+            self.assertEqual(preserved[0].read_text(encoding="utf-8"), "preserve me")
+            self.assertIn("Preserved modified prior copy", result.stdout)
+
+    @unittest.skipIf(os.name == "nt", "symlink creation is privilege-dependent on Windows")
+    def test_install_refuses_symlinked_canonical_destination_ancestor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = InstallerFixture(Path(tmp) / "source")
+            outside = Path(tmp) / "outside-agents"
+            outside.mkdir()
+            self.support_home.mkdir(parents=True)
+            (self.support_home / ".agents").symlink_to(outside, target_is_directory=True)
+            result = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--global",
+                "--codex",
+                "--copy-only",
+                check=False,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("refusing unsafe Codex", result.stderr)
+            self.assertFalse((outside / "skills").exists())
+
+    def test_case_only_codex_home_alias_never_removes_current_install(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = InstallerFixture(Path(tmp) / "source")
+            self.support_home.mkdir(parents=True)
+            uppercase_home = Path(str(self.support_home).upper())
+            try:
+                same_home = os.path.samefile(self.support_home, uppercase_home)
+            except OSError:
+                same_home = False
+            if not same_home:
+                self.skipTest("test requires a case-insensitive filesystem")
+            result = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--global",
+                "--codex",
+                "--copy-only",
+                env={"CODEX_HOME": str(uppercase_home / ".AGENTS")},
+            )
+            current = self.support_home / ".agents" / "skills" / "econ-review"
+            self.assertTrue((current / "SKILL.md").is_file())
+            self.assertIn("Skipped aliased legacy Codex path", result.stdout)
+
+    def test_installation_requires_an_explicit_client_selector(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = InstallerFixture(Path(tmp) / "source")
+            result = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--global",
+                "--copy-only",
+                check=False,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("choose exactly one", result.stderr)
+            self.assertFalse((self.support_home / ".claude").exists())
+            self.assertFalse((self.support_home / ".agents").exists())
+
+    def test_claude_global_install_leaves_all_codex_paths_untouched(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            current_codex = self.support_home / ".agents" / "skills" / "econ-review"
+            legacy_codex = self.support_home / ".codex" / "skills" / "econ-review"
+            for destination, value in (
+                (current_codex, "current Codex"),
+                (legacy_codex, "legacy Codex"),
+            ):
+                destination.mkdir(parents=True)
+                (destination / "keep.txt").write_text(value, encoding="utf-8")
+
+            self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--global",
+                "--claude",
+                "--copy-only",
+            )
+
+            self.assertTrue(
+                (self.support_home / ".claude" / "skills" / "econ-review" / "SKILL.md").is_file()
+            )
+            self.assertEqual(
+                (current_codex / "keep.txt").read_text(encoding="utf-8"),
+                "current Codex",
+            )
+            self.assertEqual(
+                (legacy_codex / "keep.txt").read_text(encoding="utf-8"),
+                "legacy Codex",
+            )
+
+    def test_modified_codex_legacy_copy_is_preserved_outside_discovery(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            legacy = self.support_home / ".codex" / "skills" / "econ-review"
+            shutil.copytree(fixture.skill, legacy)
+            (legacy / "local-notes.md").write_text("preserve me", encoding="utf-8")
+
+            result = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--global",
+                "--codex",
+                "--copy-only",
+            )
+
+            self.assertFalse(legacy.exists())
+            backups = list(
+                (self.support_home / ".openeconai" / "backups" / "econ-review").rglob(
+                    "local-notes.md"
+                )
+            )
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_text(encoding="utf-8"), "preserve me")
+            self.assertIn("Preserved modified legacy Codex copy", result.stdout)
 
     def test_unlisted_installed_module_is_removed_before_doctor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

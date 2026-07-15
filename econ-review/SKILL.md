@@ -11,7 +11,15 @@ Resolve `SKILL_ROOT` to the absolute directory containing this file. Resolve eve
 
 Resolve `REVIEW_PYTHON` once at startup with the bundled read-only resolver, never from a descriptor stored inside the manuscript or plugin tree. Use a Python 3.10+ interpreter from `PATH` to run `SKILL_ROOT/scripts/setup_econ_review.py --runtime-path`. If no global runtime is recorded and this run has an explicit project root, retry with `--runtime-path --local PROJECT_ROOT` so project-only support state remains discoverable from its user-owned external binding. When either command returns a verified absolute path, use that interpreter for every bundled Python script. Fall back to the working interpreter from `PATH` only when no managed runtime is recorded, and report any dependency failure plainly.
 
-Marketplace installation supplies the complete first-party plugin package but does not silently download Python packages or alter system software. If managed runtime discovery or the PDF doctor fails, say exactly what is missing and offer the bundled `econ-review-setup` workflow. That workflow must show a dry run before user-scoped support setup and must not create another skill copy. Poppler and all other system or optional backends remain explicit user choices; never install them without separate authorization.
+Every supported installation supplies the complete first-party skill package but
+does not silently download Python packages or alter system software. The default
+standalone installer prepares the managed runtime during setup. If runtime
+discovery or the PDF doctor later fails, say exactly what is missing and offer
+the matching repair path: rerun the standalone installer for a standalone copy,
+or use the bundled `econ-review-setup` workflow for an optional native plugin.
+Either repair must show a dry run before changing user-scoped support state.
+Poppler and all other system or optional backends remain explicit user choices;
+never install them without separate authorization.
 
 ## Use context economically
 
