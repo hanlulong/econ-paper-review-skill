@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import importlib.util
 import hashlib
 import json
@@ -219,6 +220,156 @@ class CrossPlatformPathTests(unittest.TestCase):
                 MODULE.installation_destinations("global", None, "codex")
 
 
+class SupportSetupLockTests(unittest.TestCase):
+    def test_lock_paths_are_scope_bound_and_cross_platform(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            MODULE.Path, "home", return_value=Path(tmp) / "home"
+        ), mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(
+                MODULE.support_lock_path("global", None, "Darwin"),
+                Path(tmp)
+                / "home"
+                / "Library"
+                / "Application Support"
+                / "econ-review"
+                / ".locks"
+                / "global.lock",
+            )
+            upper = MODULE.support_lock_path(
+                "local",
+                Path(tmp) / "ReviewProject",
+                "Windows",
+            )
+            lower = MODULE.support_lock_path(
+                "local",
+                Path(tmp) / "reviewproject",
+                "Windows",
+            )
+            self.assertEqual(upper, lower)
+            self.assertRegex(upper.name, r"^project-[0-9a-f]{24}\.lock$")
+
+    def test_lock_serializes_and_releases_the_same_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            MODULE.Path, "home", return_value=Path(tmp) / "home"
+        ), mock.patch.dict(os.environ, {}, clear=True):
+            with MODULE.support_setup_lock("global", None, timeout=0.1):
+                with self.assertRaisesRegex(MODULE.InstallError, "another econ-review setup"):
+                    with MODULE.support_setup_lock(
+                        "global",
+                        None,
+                        timeout=0.02,
+                        poll_interval=0.005,
+                    ):
+                        self.fail("a second writer acquired the same support scope")
+            with MODULE.support_setup_lock("global", None, timeout=0.1) as lock_path:
+                self.assertTrue(lock_path.is_file())
+
+    def test_lock_serializes_across_processes(self) -> None:
+        child_code = "\n".join(
+            (
+                "import importlib.util, sys, time",
+                "from pathlib import Path",
+                "spec = importlib.util.spec_from_file_location('setup_child', Path(sys.argv[1]))",
+                "module = importlib.util.module_from_spec(spec)",
+                "spec.loader.exec_module(module)",
+                "with module.support_setup_lock('global', None, timeout=1):",
+                "    print('locked', flush=True)",
+                "    time.sleep(0.5)",
+            )
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "HOME": str(home),
+                    "USERPROFILE": str(home),
+                    "XDG_DATA_HOME": str(home / ".local" / "share"),
+                    "PYTHONDONTWRITEBYTECODE": "1",
+                }
+            )
+            child = subprocess.Popen(
+                [sys.executable, "-c", child_code, str(SCRIPT)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment,
+            )
+            try:
+                assert child.stdout is not None
+                self.assertEqual(child.stdout.readline().strip(), "locked")
+                with mock.patch.object(MODULE.Path, "home", return_value=home), mock.patch.dict(
+                    os.environ,
+                    environment,
+                    clear=True,
+                ):
+                    with self.assertRaisesRegex(MODULE.InstallError, "another econ-review setup"):
+                        with MODULE.support_setup_lock(
+                            "global",
+                            None,
+                            timeout=0.02,
+                            poll_interval=0.005,
+                        ):
+                            self.fail("a second process acquired the same support scope")
+                stdout, stderr = child.communicate(timeout=3)
+                self.assertEqual(child.returncode, 0, stdout + stderr)
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                    child.communicate()
+
+    def test_lock_releases_when_the_mutation_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            MODULE.Path, "home", return_value=Path(tmp) / "home"
+        ), mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "synthetic failure"):
+                with MODULE.support_setup_lock("global", None, timeout=0.1):
+                    raise RuntimeError("synthetic failure")
+            with MODULE.support_setup_lock("global", None, timeout=0.1):
+                pass
+
+    def test_windows_backend_locks_and_unlocks_one_byte(self) -> None:
+        handle = mock.Mock()
+        handle.fileno.return_value = 17
+        windows = mock.Mock()
+        windows.LK_NBLCK = 1
+        windows.LK_UNLCK = 2
+        with mock.patch.dict(sys.modules, {"msvcrt": windows}):
+            self.assertTrue(MODULE._try_lock_support_file(handle, "Windows"))
+            MODULE._unlock_support_file(handle, "Windows")
+        self.assertEqual(
+            windows.locking.call_args_list,
+            [mock.call(17, windows.LK_NBLCK, 1), mock.call(17, windows.LK_UNLCK, 1)],
+        )
+        self.assertEqual(handle.seek.call_args_list, [mock.call(0), mock.call(0)])
+
+    def test_windows_contention_is_reported_without_masking_other_errors(self) -> None:
+        handle = mock.Mock()
+        handle.fileno.return_value = 17
+        windows = mock.Mock()
+        windows.LK_NBLCK = 1
+        windows.locking.side_effect = PermissionError(errno.EACCES, "busy")
+        with mock.patch.dict(sys.modules, {"msvcrt": windows}):
+            self.assertFalse(MODULE._try_lock_support_file(handle, "Windows"))
+
+    @unittest.skipIf(os.name == "nt", "hard-link semantics vary across Windows filesystems")
+    def test_lock_refuses_a_hard_link_without_modifying_its_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            MODULE.Path, "home", return_value=Path(tmp) / "home"
+        ), mock.patch.dict(os.environ, {}, clear=True):
+            lock_path = MODULE.support_lock_path("global", None)
+            lock_path.parent.mkdir(parents=True)
+            target = Path(tmp) / "keep.txt"
+            target.write_text("do not modify", encoding="utf-8")
+            lock_path.hardlink_to(target)
+            before_mode = stat.S_IMODE(target.stat().st_mode)
+            with self.assertRaisesRegex(MODULE.InstallError, "hard-linked setup lock"):
+                with MODULE.support_setup_lock("global", None, timeout=0.1):
+                    pass
+            self.assertEqual(target.read_text(encoding="utf-8"), "do not modify")
+            self.assertEqual(stat.S_IMODE(target.stat().st_mode), before_mode)
+
+
 class ManagedInstallerTests(unittest.TestCase):
     def setUp(self) -> None:
         self._support_home_context = tempfile.TemporaryDirectory()
@@ -312,6 +463,9 @@ class ManagedInstallerTests(unittest.TestCase):
             self.assertFalse((project / ".econ-review").exists())
             self.assertFalse((project / ".claude").exists())
             self.assertFalse((project / ".agents").exists())
+            self.assertFalse(
+                (self.support_home / ".local" / "share" / "econ-review" / ".locks").exists()
+            )
 
     def test_dry_run_never_executes_a_preexisting_target_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1157,7 +1311,7 @@ class ManagedInstallerTests(unittest.TestCase):
             result = subprocess.run(
                 [
                     "bash",
-                    str(ROOT / "install.sh"),
+                    str(ROOT / "scripts" / "install.sh"),
                     "--setup",
                     "--source",
                     str(fixture.skill),

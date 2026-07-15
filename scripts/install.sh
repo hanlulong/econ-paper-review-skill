@@ -9,6 +9,7 @@ DRY_RUN=0
 MODE_SEEN=""
 PLATFORM_SEEN=""
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+REPO_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." 2>/dev/null && pwd || true)"
 TEMP_DIR=""
 ACTIVE_STAGE=""
 ACTIVE_BACKUP=""
@@ -19,15 +20,15 @@ usage() {
 Install econ-review for Claude Code and/or Codex.
 
 Usage:
-  ./install.sh [--global | --local [directory]] [--all | --claude | --codex] [--dry-run]
-  ./install.sh --setup [managed-setup options]
+  ./scripts/install.sh [--global | --local [directory]] [--all | --claude | --codex] [--dry-run]
+  ./scripts/install.sh --setup [managed-setup options]
 
 Examples:
-  ./install.sh
-  ./install.sh --global --codex
-  ./install.sh --local /path/to/project --all
-  ./install.sh --local . --dry-run
-  ./install.sh --setup --global --all --with-review-desk
+  ./scripts/install.sh
+  ./scripts/install.sh --global --codex
+  ./scripts/install.sh --local /path/to/project --all
+  ./scripts/install.sh --local . --dry-run
+  ./scripts/install.sh --setup --global --all --with-review-desk
 
 The default command preserves the lightweight copy-only installer. --setup
 delegates to the cross-platform Python installer, which creates or reuses a
@@ -65,9 +66,9 @@ for argument in "$@"; do
 done
 if [ "$SETUP_REQUESTED" -eq 1 ]; then
   require_command python3
-  [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/scripts/install_econ_review.py" ] \
+  [ -n "$REPO_ROOT" ] && [ -f "$REPO_ROOT/scripts/install_econ_review.py" ] \
     || fail "--setup requires a complete local checkout; run scripts/install_econ_review.py from the repository"
-  exec python3 "$SCRIPT_DIR/scripts/install_econ_review.py" "${SETUP_ARGS[@]}"
+  exec python3 "$REPO_ROOT/scripts/install_econ_review.py" "${SETUP_ARGS[@]}"
 fi
 
 set_mode() {
@@ -436,9 +437,9 @@ PY
 }
 
 find_source() {
-  if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/econ-review/SKILL.md" ]; then
-    validate_skill_tree "$SCRIPT_DIR/econ-review" || fail "local source validation failed"
-    SOURCE_DIR="$SCRIPT_DIR/econ-review"
+  if [ -n "$REPO_ROOT" ] && [ -f "$REPO_ROOT/econ-review/SKILL.md" ]; then
+    validate_skill_tree "$REPO_ROOT/econ-review" || fail "local source validation failed"
+    SOURCE_DIR="$REPO_ROOT/econ-review"
     return
   fi
 

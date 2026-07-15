@@ -1,7 +1,7 @@
 {
   "name": "econ-review",
-  "version": "0.2.0",
-  "description": "Produce a rigorous, source-grounded referee report and prioritized revision plan for an economics paper.",
+  "version": "0.2.1",
+  "description": "Produce a rigorous, source-grounded referee report and prioritized revision plan for an economics paper. After a direct plugin install, ask the agent to run econ-review-setup once.",
   "author": {
     "name": "Lu Han",
     "email": "hanlulong@gmail.com",

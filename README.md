@@ -38,16 +38,25 @@ Every comment quotes the relevant manuscript text — or, when the issue comes f
 
 ## Install
 
-Works on macOS, Windows, and Linux. One-time setup needs Python 3.10+ with
-working `venv` and pip bootstrapping support. The plugin, its private runtime,
-and Review Desk need no administrator access. Manuscript-PDF ingestion also
-requires [Poppler](https://poppler.freedesktop.org/) to be installed separately
-and visible on `PATH`; econ-review never installs it silently. TeX, Pandoc, and
-Node.js are not required.
+Works on macOS, Windows, and Linux. Paste this into Codex or Claude Code; your
+agent will install or update the plugin, migrate the former marketplace if
+needed, prepare its private runtime and Review Desk, and verify the result.
 
-### Install the plugin (recommended)
+```text
+Install or update Econ Review. Read and follow the complete instructions at
+https://github.com/hanlulong/econ-paper-review-skill/blob/main/INSTALL.md.
+Handle the entire installation and verification yourself; do not ask me to run
+commands. Report completion or the one genuine blocker.
+```
 
-Install econ-review from the shared OpenEconAI catalog.
+Use the same prompt later to update Econ Review; the workflow is idempotent and
+reuses a compatible runtime. It needs an existing Python 3.10+ with working
+`venv` and pip bootstrapping support. Full manuscript-PDF ingestion also needs
+[Poppler](https://poppler.freedesktop.org/) on `PATH`; TeX, Pandoc, Node.js, and
+administrator access are not required.
+
+<details>
+<summary>Installing directly from the plugin interface</summary>
 
 Claude Code:
 
@@ -63,34 +72,22 @@ codex plugin marketplace add OpenEconAI/plugins
 codex plugin add econ-review@openeconai
 ```
 
-The catalog is public; these commands do not require private-repository
-credentials. Never paste a token into chat or a shell command.
-
-The plugin carries the complete review workflow, its cross-platform setup tool,
-and the verified Review Desk bundle. After installing, ask once:
+Plugin clients do not provide a portable trusted post-install action. After a
+direct plugin install, send the agent this one message:
 
 ```text
-Use econ-review-setup to finish setup on this machine. Show me the dry run, then
-prepare its private user-level Python runtime and Review Desk. Verify PDF support,
-do not create another skill copy, and do not install any system package. If
-Poppler is missing, stop after explaining the options and wait for a separate
-instruction.
+Run econ-review-setup now and finish its user-level setup with Review Desk.
 ```
 
-The dry run never downloads or changes anything. Applying the reviewed setup
-may download the version-constrained Python packages into econ-review's private
-environment. It does not upload a manuscript or silently install Poppler, TeX,
-Pandoc, Node.js, or administrator-managed software. If
-Poppler is absent, setup keeps the installed runtime and Review Desk, reports
-PDF ingestion as incomplete, and gives user-level options for you to approve
-separately.
+The plugin already contains the complete review workflow and setup tool. The setup
+message may download only the declared core Python packages into econ-review's
+private environment; it never uploads a manuscript or silently installs system
+software. See [the installation guide](INSTALL.md) for migration, removal,
+and troubleshooting.
 
-The OpenEconAI catalog is the sole native marketplace for this plugin and gives
-both clients their normal versioned update flow. Update and removal commands are in
-[docs/INSTALL.md](docs/INSTALL.md#update-a-plugin-install). If you installed
-the former `econ-paper-review` marketplace, follow the one-time
-[migration steps](docs/INSTALL.md#migrate-from-the-former-marketplace) first
-so the skill appears only once.
+Never paste a token or package-index credential into chat or a shell command.
+
+</details>
 
 <details>
 <summary>Alternative source installation</summary>
@@ -102,7 +99,7 @@ python3 scripts/install_econ_review.py --dry-run --global --all --with-review-de
 python3 scripts/install_econ_review.py --global --all --with-review-desk
 ```
 
-On native Windows, run `python scripts\install_econ_review.py --global --all --with-review-desk` in PowerShell. Use the machine's working Python 3.10+ command; the optional `py` launcher is not required. If a compatible, working LuaLaTeX or Tectonic renderer is available, the report uses it; otherwise it uses the maintained built-in PDF renderer. Review Desk is prebuilt and needs no Node.js or npm. See [docs/INSTALL.md](docs/INSTALL.md) for migration, updates, source installation, and project-local setup.
+On native Windows, run `python scripts\install_econ_review.py --global --all --with-review-desk` in PowerShell. Use the machine's working Python 3.10+ command; the optional `py` launcher is not required. If a compatible, working LuaLaTeX or Tectonic renderer is available, the report uses it; otherwise it uses the maintained built-in PDF renderer. Review Desk is prebuilt and needs no Node.js or npm. See [INSTALL.md](INSTALL.md) for migration, updates, source installation, and project-local setup.
 
 </details>
 

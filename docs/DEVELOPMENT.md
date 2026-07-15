@@ -50,22 +50,22 @@ python3 scripts/install_econ_review.py --global --all --with-review-desk
 On native Windows, use the machine's working Python 3.10+ command (normally
 `python`) and backslash paths; the optional `py` launcher is not required. Project-local setup uses
 `--local /path/to/project`; `--claude` and `--codex` select one agent. See
-[INSTALL.md](INSTALL.md) for the one-paste Codex/Claude prompt and non-admin
+[INSTALL.md](../INSTALL.md) for the one-paste Codex/Claude prompt and non-admin
 Poppler guidance.
 
 The shell installer remains the lightweight copy-only path and has no Python
 package prerequisites beyond Python 3.10 itself. On macOS or Linux,
-`./install.sh --setup` delegates to the cross-platform managed installer.
+`./scripts/install.sh --setup` delegates to the cross-platform managed installer.
 
 ```bash
-./install.sh                        # Claude Code and Codex, globally
-./install.sh --global --claude      # Claude Code only
-./install.sh --global --codex       # Codex only
-./install.sh --local /path/to/repo  # project-local install
-./install.sh --dry-run              # inspect destinations without changing files
+./scripts/install.sh                        # Claude Code and Codex, globally
+./scripts/install.sh --global --claude      # Claude Code only
+./scripts/install.sh --global --codex       # Codex only
+./scripts/install.sh --local /path/to/repo  # project-local install
+./scripts/install.sh --dry-run              # inspect destinations without changing files
 ```
 
-Without `--setup`, `install.sh` copies the `econ-review/` skill tree only; it
+Without `--setup`, `scripts/install.sh` copies the `econ-review/` skill tree only; it
 does not change the active Python environment or install Poppler, Tesseract,
 Node.js, or the Review Desk. Global installs go to
 `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/econ-review` and
@@ -84,16 +84,16 @@ the current version. The launcher verifies the installed files again and serves
 only manifest-listed assets at `http://127.0.0.1:48127/`. It contains no bundled
 review, needs no Node.js or npm, and reports its path and launch command
 separately from the PDF doctor. Omit the flag when Review Desk is not wanted. See
-[INSTALL.md](INSTALL.md) for platform paths and overrides.
+[INSTALL.md](../INSTALL.md) for platform paths and overrides.
 
 ## Optional PDF semantic backends
 
 The default `--semantic-backend auto` uses Docling only when its command and required model artifacts are already available; it does not download models unless `--allow-model-downloads` is supplied. Review the code and model licenses before enabling downloads in a distributed product. See `THIRD_PARTY_NOTICES.md` and `econ-review/references/pdf-backends.md` before adding, invoking, or distributing another conversion backend.
 
 ```bash
-python3 -m pip install -r requirements-docling.txt     # optional local semantic structure
-python3 -m pip install -r requirements-markitdown.txt  # optional local comparison only
-python3 -m pip install -r requirements-mathpix.txt     # hosted premium adapter (server-side only)
+python3 -m pip install -r econ-review/requirements-docling.txt     # optional local semantic structure
+python3 -m pip install -r econ-review/requirements-markitdown.txt  # optional local comparison only
+python3 -m pip install -r econ-review/requirements-mathpix.txt     # hosted premium adapter (server-side only)
 ```
 
 Hosted deployments may request a Mathpix proposal, but only after the user authorizes that specific manuscript upload and acknowledges the provider's retention policy. Credentials must come from server-side environment variables, never browser code or review artifacts:
@@ -261,7 +261,7 @@ python3 -m unittest discover -s tests -p 'test_stat_recompute.py' -v
 python3 scripts/build_public_release.py --check
 cd review-viewer && npm run lint && npx tsc --noEmit && npm test
 cd review-viewer && npm run build:release && python3 scripts/build_review_desk_release.py --check
-bash -n install.sh
+bash -n scripts/install.sh
 ```
 
 ## Benchmark harness

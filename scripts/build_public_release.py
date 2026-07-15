@@ -35,14 +35,10 @@ ROOT_FILES = {
     Path(".gitattributes"),
     Path(".gitignore"),
     Path("CONTRIBUTING.md"),
+    Path("INSTALL.md"),
     Path("LICENSE"),
     Path("README.md"),
     Path("THIRD_PARTY_NOTICES.md"),
-    Path("install.sh"),
-    Path("requirements-docling.txt"),
-    Path("requirements-markitdown.txt"),
-    Path("requirements-mathpix.txt"),
-    Path("requirements.txt"),
 }
 FIRST_PARTY_LICENSES = (
     Path("LICENSE"),

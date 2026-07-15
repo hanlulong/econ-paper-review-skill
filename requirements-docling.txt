@@ -1,2 +1,0 @@
-# Optional local semantic-structure backend. Keep out of the lightweight core.
--r econ-review/requirements-docling.txt

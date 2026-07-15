@@ -32,6 +32,17 @@ class PublicReleaseTests(unittest.TestCase):
         paths = {path.as_posix() for path in MODULE.public_files(ROOT)}
         self.assertNotIn(".claude-plugin/marketplace.json", paths)
         self.assertIn("CONTRIBUTING.md", paths)
+        self.assertIn("INSTALL.md", paths)
+        self.assertIn("scripts/install.sh", paths)
+        for obsolete_root_file in (
+            "install.sh",
+            "requirements.txt",
+            "requirements-docling.txt",
+            "requirements-markitdown.txt",
+            "requirements-mathpix.txt",
+            "docs/INSTALL.md",
+        ):
+            self.assertNotIn(obsolete_root_file, paths)
         self.assertIn(".github/PULL_REQUEST_TEMPLATE.md", paths)
         self.assertIn("docs/CONTRIBUTOR_LICENSE_AGREEMENT.md", paths)
         self.assertIn("econ-review/LICENSE", paths)
@@ -63,7 +74,7 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertFalse(any(path.startswith("benchmarks/reviews/") for path in paths))
 
     def test_native_windows_install_command_is_consistent(self) -> None:
-        for relative in ("README.md", "docs/INSTALL.md", "install.sh"):
+        for relative in ("README.md", "INSTALL.md", "scripts/install.sh"):
             with self.subTest(path=relative):
                 content = (ROOT / relative).read_text(encoding="utf-8")
                 self.assertIn(self.WINDOWS_MANAGED_INSTALL, content)
@@ -71,7 +82,7 @@ class PublicReleaseTests(unittest.TestCase):
 
     def test_public_install_guidance_does_not_require_private_credentials(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        install = (ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
+        install = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
         for content in (readme, install):
             with self.subTest(document="README" if content is readme else "INSTALL"):
                 self.assertIn("OpenEconAI/plugins", content)
@@ -334,7 +345,7 @@ class InstallerTests(unittest.TestCase):
             destination = home / ".codex" / "skills" / "econ-review"
             destination.mkdir(parents=True)
             (destination / "old.txt").write_text("old", encoding="utf-8")
-            result = self.run_installer(ROOT / "install.sh", "--global", "--codex", env={"HOME": str(home)})
+            result = self.run_installer(ROOT / "scripts" / "install.sh", "--global", "--codex", env={"HOME": str(home)})
             self.assertIn("installation complete", result.stdout)
             self.assertTrue((destination / "SKILL.md").is_file())
             self.assertEqual((destination / "LICENSE").read_bytes(), (ROOT / "econ-review" / "LICENSE").read_bytes())
@@ -350,11 +361,11 @@ class InstallerTests(unittest.TestCase):
             arguments = ("--global", "--codex")
             environment = {"HOME": str(home)}
 
-            self.run_installer(ROOT / "install.sh", *arguments, env=environment)
+            self.run_installer(ROOT / "scripts" / "install.sh", *arguments, env=environment)
             installed_skill = destination / "SKILL.md"
             original_inode = installed_skill.stat().st_ino
             repeated = self.run_installer(
-                ROOT / "install.sh", *arguments, env=environment,
+                ROOT / "scripts" / "install.sh", *arguments, env=environment,
             )
             self.assertIn("Already current Codex (global)", repeated.stdout)
             self.assertEqual(installed_skill.stat().st_ino, original_inode)
@@ -368,7 +379,7 @@ class InstallerTests(unittest.TestCase):
             installed_script.chmod(stat.S_IMODE(installed_script.stat().st_mode) & ~0o111)
 
             repaired = self.run_installer(
-                ROOT / "install.sh", *arguments, env=environment,
+                ROOT / "scripts" / "install.sh", *arguments, env=environment,
             )
             self.assertIn("Installed Codex (global)", repaired.stdout)
             self.assertEqual(installed_skill.read_bytes(), (ROOT / "econ-review" / "SKILL.md").read_bytes())
@@ -383,7 +394,7 @@ class InstallerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "home"
             result = self.run_installer(
-                ROOT / "install.sh", "--global", "--all", "--dry-run", env={"HOME": str(home)},
+                ROOT / "scripts" / "install.sh", "--global", "--all", "--dry-run", env={"HOME": str(home)},
             )
             self.assertIn("dry run complete; no files changed", result.stdout)
             self.assertFalse((home / ".claude").exists())
@@ -396,7 +407,7 @@ class InstallerTests(unittest.TestCase):
             project = root / "project"
             project.mkdir()
             global_result = self.run_installer(
-                ROOT / "install.sh", "--global", "--all", env={"HOME": str(home)},
+                ROOT / "scripts" / "install.sh", "--global", "--all", env={"HOME": str(home)},
             )
             self.assertIn("Claude Code (global)", global_result.stdout)
             self.assertIn("Codex (global)", global_result.stdout)
@@ -419,7 +430,7 @@ class InstallerTests(unittest.TestCase):
                 self.assertTrue(os.access(destination / "scripts" / "validate_review.py", os.X_OK))
 
             project_result = self.run_installer(
-                ROOT / "install.sh", "--local", str(project), "--all", env={"HOME": str(home)},
+                ROOT / "scripts" / "install.sh", "--local", str(project), "--all", env={"HOME": str(home)},
             )
             self.assertIn("Claude Code (project)", project_result.stdout)
             self.assertIn("Codex (project)", project_result.stdout)
@@ -441,7 +452,7 @@ class InstallerTests(unittest.TestCase):
             claude_root = root / "claude-config"
             codex_root = root / "codex-home"
             self.run_installer(
-                ROOT / "install.sh", "--global", "--all",
+                ROOT / "scripts" / "install.sh", "--global", "--all",
                 env={
                     "HOME": str(root / "home"),
                     "CLAUDE_CONFIG_DIR": str(claude_root),
@@ -454,7 +465,7 @@ class InstallerTests(unittest.TestCase):
     def test_remote_install_requires_url_and_checksum(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             installer = Path(tmp) / "install.sh"
-            shutil.copy2(ROOT / "install.sh", installer)
+            shutil.copy2(ROOT / "scripts" / "install.sh", installer)
             result = self.run_installer(installer, "--global", "--codex", env={"HOME": tmp}, check=False)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("remote installation is disabled", result.stderr)
@@ -464,7 +475,7 @@ class InstallerTests(unittest.TestCase):
             root = Path(tmp)
             installer = root / "standalone" / "install.sh"
             installer.parent.mkdir()
-            shutil.copy2(ROOT / "install.sh", installer)
+            shutil.copy2(ROOT / "scripts" / "install.sh", installer)
             archive = root / "release.zip"
             MODULE.build_zip(ROOT, archive, MODULE.public_files(ROOT))
             digest = hashlib.sha256(archive.read_bytes()).hexdigest()
@@ -489,7 +500,7 @@ class InstallerTests(unittest.TestCase):
             root = Path(tmp)
             installer = root / "standalone" / "install.sh"
             installer.parent.mkdir()
-            shutil.copy2(ROOT / "install.sh", installer)
+            shutil.copy2(ROOT / "scripts" / "install.sh", installer)
             archive = root / "release.zip"
             MODULE.build_zip(ROOT, archive, MODULE.public_files(ROOT))
             base_env = {
@@ -534,7 +545,7 @@ class InstallerTests(unittest.TestCase):
             root = Path(tmp)
             installer = root / "standalone" / "install.sh"
             installer.parent.mkdir()
-            shutil.copy2(ROOT / "install.sh", installer)
+            shutil.copy2(ROOT / "scripts" / "install.sh", installer)
             for index, (entry_name, expected_message) in enumerate(cases):
                 archive = root / f"release-{index}.zip"
                 MODULE.build_zip(ROOT, archive, MODULE.public_files(ROOT))
@@ -556,7 +567,7 @@ class InstallerTests(unittest.TestCase):
             root = Path(tmp)
             installer = root / "standalone" / "install.sh"
             installer.parent.mkdir()
-            shutil.copy2(ROOT / "install.sh", installer)
+            shutil.copy2(ROOT / "scripts" / "install.sh", installer)
             original = root / "release.zip"
             tampered = root / "tampered.zip"
             MODULE.build_zip(ROOT, original, MODULE.public_files(ROOT))
@@ -600,7 +611,7 @@ class InstallerTests(unittest.TestCase):
             )
             wrapper.chmod(0o755)
             result = self.run_installer(
-                ROOT / "install.sh",
+                ROOT / "scripts" / "install.sh",
                 "--global",
                 "--codex",
                 env={"HOME": str(home), "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
