@@ -21,8 +21,6 @@
 
 *为经济学而生，也同样适用于金融、会计、政治经济学，以及其他依赖数据、因果推断或形式化模型的社会科学论文。*
 
-> **初次接触 Claude Code 或 Codex？** 它们是在你自己电脑上运行的 AI 智能体，可配合你现有的 Claude 或 ChatGPT 订阅使用，几分钟即可完成安装（[Claude Code](https://docs.anthropic.com/en/docs/claude-code) · [Codex](https://openai.com/index/codex/)）。装好任意一个之后，econ-review 只需粘贴一段话即可安装。
-
 ## 你会得到什么
 
 评审完成后，成果会整齐地存放在论文旁边的 `review/` 文件夹中：
