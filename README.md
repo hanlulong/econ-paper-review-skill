@@ -18,7 +18,7 @@
 
 *Built for economics. Also works well for finance, accounting, political economy, and other social science papers that rest on data, causal inference, or formal models.*
 
-> **New to Claude Code or Codex?** They are AI agents that run on your own machine — free tiers exist and setup takes a few minutes ([Claude Code](https://docs.anthropic.com/en/docs/claude-code) · [Codex](https://openai.com/index/codex/)). With either installed, econ-review is one paste away.
+> **New to Claude Code or Codex?** They are AI agents that run on your own machine and work with your existing Claude or ChatGPT subscription — setup takes a few minutes ([Claude Code](https://docs.anthropic.com/en/docs/claude-code) · [Codex](https://openai.com/index/codex/)). With either installed, econ-review is one paste away.
 
 ## What you get
 
