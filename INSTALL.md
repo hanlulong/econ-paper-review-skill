@@ -43,8 +43,9 @@ and the bundled Review Desk. Do not ask the user to copy or run commands.
    `https://github.com/hanlulong/econ-paper-review-skill`; otherwise use a
    temporary shallow clone. Do not request or expose a GitHub token. Verify that
    the snapshot contains `econ-review/SKILL.md`, both matching client manifests,
-   `scripts/setup_econ_review.py`, `requirements-core.txt`, and
-   `assets/review-desk.zip` before executing bundled code.
+   `econ-review/scripts/setup_econ_review.py`,
+   `econ-review/requirements-core.txt`, and
+   `econ-review/assets/review-desk.zip` before executing bundled code.
 5. Find an existing Python 3.10+ interpreter with working `venv` and pip
    bootstrapping support. Select `--claude` or `--codex` for the current client,
    show the managed setup's dry run, inspect every planned destination and

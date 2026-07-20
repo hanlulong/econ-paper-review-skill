@@ -5,6 +5,8 @@
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-ready-8A2BE2.svg)](#install)
 [![Codex](https://img.shields.io/badge/Codex-ready-brightgreen.svg)](#install)
+[![en](https://img.shields.io/badge/lang-English-red.svg)](./README.md)
+[![中文](https://img.shields.io/badge/语言-中文-yellow.svg)](./README.zh-CN.md)
 
 *Source-available and free for academic, personal, and other noncommercial research use — see [License](#license).*
 
@@ -44,7 +46,7 @@ Every comment quotes the relevant manuscript text — or, when the issue comes f
 
 *(From the bundled example. Full reviews keep every issue that survives verification — up to 100 substantive comments and 30 editing comments.)*
 
-**[Read a full sample review (PDF)](docs/sample-review/paper-review.pdf)** — a complete 25-comment referee report on a [demonstration manuscript](docs/sample-review/demo-paper.pdf) written with intentional errors and reviewed cold with default settings.
+**[Read the full sample review (PDF)](docs/sample-review/paper-review.pdf)** — all 25 comments, not just the excerpt above.
 
 ## Install
 
@@ -184,14 +186,16 @@ It won't write your paper, estimate your acceptance odds, or invent citations. W
 
 | | econ-review (this skill) | Refine.ink |
 |---|---|---|
-| **Cost** | Free, open code — you bring your own Claude Code or Codex subscription | $49.99 per review ($30–40 each in packs) |
+| **Cost** | Free, open code — you bring your own Claude Code or Codex subscription | $49.99 per review ($30–40 each in packs, as of July 2026) |
 | **Iteration** | Built for rounds: review → decide each comment in Review Desk → your agents revise → the next round rechecks every decision | Each review is a separate purchase |
 | **Deliverable** | Referee report + verified detailed comments + editing comments + a revision plan written for your agents | Referee-style substantive comments |
 | **Where your paper goes** | Runs inside your own agent; nothing is uploaded to us, and your existing AI-provider terms apply | Uploaded to their service (SOC 2 / ISO 27001 certified, no training on papers) |
 | **Openness** | Every prompt, check, and rubric is in this repo — read it, fork it, tune it to your field | Closed pipeline |
 | **Setup** | Requires Claude Code or Codex | None — upload a PDF |
 
-If a command line is not an option, a hosted service is the practical choice today — or wait for the [hosted version](#roadmap) of this skill. A measured benchmark with published precision and recall comes before any comparative quality claims here; that promise is part of the [roadmap](#roadmap).
+Other hosted reviewers — referee3.app, Stanford's PaperReview.ai — sit on Refine's side of the same trade-offs.
+
+If a command line is not an option, a hosted service is the practical choice today — or wait for the [hosted version](#roadmap) of this skill. A measured benchmark with published precision and recall comes before any comparative quality claims here — that promise is on the roadmap.
 
 ## The Review Desk (optional)
 
