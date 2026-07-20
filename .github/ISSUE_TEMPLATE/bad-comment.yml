@@ -1,0 +1,29 @@
+name: Report a bad comment
+description: A review comment was wrong, unfair, or invented — bad comments are bugs here.
+title: "[Bad comment]: "
+labels: ["bad-comment"]
+body:
+  - type: textarea
+    id: comment
+    attributes:
+      label: The comment
+      description: Paste the comment from the report. Redact anything confidential — enough context to judge is plenty.
+    validations:
+      required: true
+  - type: textarea
+    id: reality
+    attributes:
+      label: What the paper actually says
+      description: Quote or describe the manuscript text the comment got wrong, or explain why the comment is unfair or unverifiable.
+    validations:
+      required: true
+  - type: input
+    id: setup
+    attributes:
+      label: Review mode and client
+      placeholder: "full mode, Claude Code (macOS)"
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Paper type, field, or anything that helps reproduce the failure (redacted as needed).
