@@ -6,9 +6,19 @@
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-ready-8A2BE2.svg)](#install)
 [![Codex](https://img.shields.io/badge/Codex-ready-brightgreen.svg)](#install)
 
+*Source-available and free for academic, personal, and other noncommercial research use — see [License](#license).*
+
+| The referee report | The detailed comments |
+|---|---|
+| ![First page of a sample AI referee report on an economics paper: overall assessment, recommendation, and main grounds](docs/images/sample-referee-report.png) | ![A detailed-comments page: each issue quotes the manuscript, explains the concern, and ends in concrete suggestions](docs/images/sample-detailed-comments.png) |
+
+*Two pages from the bundled [25-comment sample review (PDF)](docs/sample-review/paper-review.pdf), produced cold with default settings on a [demonstration manuscript](docs/sample-review/demo-paper.pdf) written with intentional errors.*
+
 `econ-review` is an Agent Skill for Claude Code and Codex. It reads your paper the way a careful journal referee would: first it works out what you are claiming and how your evidence supports it, then it checks everything it can verify — identification, tables, proofs, numbers, references, writing — and gives you a referee report plus a step-by-step plan for fixing what it found. It never rewrites your paper. That part stays yours.
 
 *Built for economics. Also works well for finance, accounting, political economy, and other social science papers that rest on data, causal inference, or formal models.*
+
+> **New to Claude Code or Codex?** They are AI agents that run on your own machine — free tiers exist and setup takes a few minutes ([Claude Code](https://docs.anthropic.com/en/docs/claude-code) · [Codex](https://openai.com/index/codex/)). With either installed, econ-review is one paste away.
 
 ## What you get
 
@@ -168,6 +178,21 @@ Any kind of economics paper: empirical, experimental, descriptive, prediction an
 
 It won't write your paper, estimate your acceptance odds, or invent citations. When it couldn't check something — a dataset it didn't have, a figure it couldn't read — it says so instead of pretending. And it doesn't claim to beat human referees: treat it as a tough extra reader before submission, not a replacement for peer review.
 
+## How it compares to Refine.ink and other AI review services
+
+[Refine](https://www.refine.ink/) deserves credit for showing economists that AI pre-submission review is worth taking seriously. The two tools do the same job with different trade-offs, and some authors will want both:
+
+| | econ-review (this skill) | Refine.ink |
+|---|---|---|
+| **Cost** | Free, open code — you bring your own Claude Code or Codex subscription | $49.99 per review ($30–40 each in packs) |
+| **Iteration** | Built for rounds: review → decide each comment in Review Desk → your agents revise → the next round rechecks every decision | Each review is a separate purchase |
+| **Deliverable** | Referee report + verified detailed comments + editing comments + a revision plan written for your agents | Referee-style substantive comments |
+| **Where your paper goes** | Runs inside your own agent; nothing is uploaded to us, and your existing AI-provider terms apply | Uploaded to their service (SOC 2 / ISO 27001 certified, no training on papers) |
+| **Openness** | Every prompt, check, and rubric is in this repo — read it, fork it, tune it to your field | Closed pipeline |
+| **Setup** | Requires Claude Code or Codex | None — upload a PDF |
+
+If a command line is not an option, a hosted service is the practical choice today — or wait for the [hosted version](#roadmap) of this skill. A measured benchmark with published precision and recall comes before any comparative quality claims here; that promise is part of the [roadmap](#roadmap).
+
 ## The Review Desk (optional)
 
 A local web viewer that turns a long review into a decided, trackable revision plan:
@@ -195,6 +220,7 @@ The recommended installer includes a verified, prebuilt copy with `--with-review
 ## Related projects
 
 - [econ-writing-skill](https://github.com/hanlulong/econ-writing-skill) — the writing-side sibling: this skill judges the paper, that one helps you write it
+- [econ-slides-skill](https://github.com/hanlulong/econ-slides-skill) — after the revision: turn the paper into a professional Beamer talk with a speaker script
 - [stata-mcp](https://github.com/hanlulong/stata-mcp) — run Stata from AI agents
 - [awesome-ai-for-economists](https://github.com/hanlulong/awesome-ai-for-economists) — the broader toolbox
 
