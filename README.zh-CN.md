@@ -100,7 +100,7 @@ codex plugin add econ-review@openeconai
 Run econ-review-setup now and finish its user-level setup with Review Desk.
 ```
 
-插件本身已包含完整的评审工作流和安装工具。上述设置消息至多只会向 Econ Review 的私有环境下载声明过的核心 Python 包；绝不会上传稿件，也不会静默安装系统软件。迁移、卸载与故障排查见[安装指南](INSTALL.md)。
+插件本身已包含完整的评审工作流和安装工具。上述设置消息至多只会向 Econ Review 的私有环境下载声明过的核心 Python 包；绝不会上传稿件，也不会静默安装系统软件。每次更新插件后，请再发送一次同样的消息，以便同步更新 Review Desk。迁移、卸载与故障排查见[安装指南](INSTALL.md)。
 
 切勿将令牌（token）或包索引凭据粘贴到对话或命令行中。
 

@@ -817,7 +817,10 @@ def cleanup_support_state(
     ):
         if directory is not None and directory.is_dir() and not any(directory.iterdir()):
             directory.rmdir()
-    print("econ-review support cleanup complete; plugin and direct skill copies were unchanged.")
+    print(
+        "econ-review support cleanup complete; plugin and direct skill copies were not deleted, "
+        "but any that remain need their setup rerun before they can review again."
+    )
 
 
 def runtime_python_path(runtime: Path, system: str | None = None) -> Path:
@@ -2027,7 +2030,7 @@ def _perform_setup(
         print("Lightweight copy-only installation complete; Python and system dependencies were unchanged.")
     elif healthy:
         if args.support_only:
-            print("econ-review supporting setup is complete and ready for the installed plugin.")
+            print("econ-review supporting setup is complete and ready for the installed skill.")
         else:
             print("econ-review setup complete and ready.")
     else:

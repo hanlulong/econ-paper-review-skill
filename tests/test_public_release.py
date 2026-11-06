@@ -109,6 +109,11 @@ class PublicReleaseTests(unittest.TestCase):
                 self.assertNotRegex(content, r"(?i)(export\s+GITHUB_TOKEN|GITHUB_TOKEN\s*=|github_pat_)")
         self.assertIn("${XDG_DATA_HOME:-$HOME/.local/share}/econ-review/", install)
         self.assertNotIn("${XDG_DATA_HOME:-~/.local/share}", install)
+        # A tilde inside a parameter expansion is not expanded when quoted.
+        self.assertNotIn(":-~", install)
+        self.assertIn("${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/econ-review", install)
+        # Support cleanup is shared by every copy, so it is conditional.
+        self.assertIn("Decide whether this is the last Econ Review copy", install)
         self.assertIn("git pull --ff-only", install)
         self.assertIn("do not combine one with a standalone copy", install)
 

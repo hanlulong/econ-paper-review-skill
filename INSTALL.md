@@ -255,11 +255,27 @@ codex plugin marketplace upgrade openeconai
 codex plugin add econ-review@openeconai
 ```
 
+Then, in a new session, send the agent this message so the shared support data
+(including Review Desk) moves to the version the updated plugin ships:
+
+```text
+Run econ-review-setup now and finish its user-level setup with Review Desk.
+```
+
+The setup reuses the managed runtime when its requirements are unchanged and
+reports "Already current" for anything that is.
+
 ### Remove a native plugin
 
-Plugin removal intentionally keeps the user-owned runtime and Review Desk. To
-remove that default support data too, do it first, while the plugin's scripts
-are still installed. `PLUGIN_ROOT` is the installed plugin folder that contains
+Plugin removal intentionally keeps the user-owned runtime and Review Desk. The
+same support data serves the plugin in both clients and every standalone copy,
+so remove it only when you are removing the last Econ Review copy: first check,
+read-only, that the other client has neither the plugin (`claude plugin list
+--json`, `codex plugin list`) nor a standalone copy (see the paths in
+"Uninstall the standalone skill"), and that no project-local copy you still use
+remains. If any copy remains, skip the cleanup below and only remove the plugin.
+To remove the support data too, do it first, while the plugin's scripts are
+still installed. `PLUGIN_ROOT` is the installed plugin folder that contains
 `scripts/setup_econ_review.py`; the `econ-review-setup` skill knows it, or ask
 the agent to "remove Econ Review's support data with econ-review-setup".
 Preview, then explicitly confirm the matching scope:
@@ -288,13 +304,21 @@ Paste this into the client:
 Uninstall Econ Review's standalone skill for this client, following
 https://github.com/hanlulong/econ-paper-review-skill/blob/main/INSTALL.md
 ("Uninstall the standalone skill"). Show me what will be removed before
-removing anything, and do not touch the other client's copy.
+removing anything, and do not touch the other client's copy or the shared
+support data it still needs.
 ```
 
 The steps, from a checkout or the installed skill:
 
-1. Remove support data first, while the setup tool is still present. Preview,
-   then confirm:
+1. Decide whether this is the last Econ Review copy. The managed runtime, the
+   support descriptor and Review Desk are shared by both clients and by
+   standalone and plugin installs, so removing them breaks every other copy
+   until its setup is rerun. Check, read-only, whether any other copy remains:
+   the other client's standalone folder (paths in step 2), a project-local copy
+   you still use, or the native plugin (`claude plugin list --json`,
+   `codex plugin list`). If one remains, skip this step and say that the shared
+   support data is kept. Otherwise remove the support data first, while the
+   setup tool is still present. Preview, then confirm:
 
    ```text
    PYTHON INSTALLED_SKILL/scripts/setup_econ_review.py --cleanup-support --global --dry-run
@@ -306,9 +330,9 @@ The steps, from a checkout or the installed skill:
    `~/Library/Application Support/econ-review` on macOS,
    `${XDG_DATA_HOME:-$HOME/.local/share}/econ-review` on Linux, and
    `%USERPROFILE%\.econ-review` on Windows. It reports that skill copies were
-   unchanged; that is expected.
-2. Delete the client's skill folder: `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/econ-review`
-   for Claude Code, `~/.agents/skills/econ-review` for Codex, or
+   not deleted; that is expected.
+2. Delete the client's skill folder: `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/econ-review`
+   for Claude Code, `$HOME/.agents/skills/econ-review` for Codex, or
    `PROJECT/.claude/skills/econ-review` and `PROJECT/.agents/skills/econ-review`
    for a project-local install. Confirm the folder contains
    `.econ-review-install.json` or an Econ Review `SKILL.md` before deleting it.

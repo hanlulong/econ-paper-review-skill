@@ -125,8 +125,9 @@ Run econ-review-setup now and finish its user-level setup with Review Desk.
 The plugin already contains the complete review workflow and setup tool. The
 setup message may download only the declared core Python packages into Econ
 Review's private environment; it never uploads a manuscript or silently
-installs system software. See [the installation guide](INSTALL.md) for
-migration, removal, and troubleshooting.
+installs system software. After each plugin update, send the same message
+again so Review Desk is updated too. See [the installation guide](INSTALL.md)
+for migration, removal, and troubleshooting.
 
 Never paste a token or package-index credential into chat or a shell command.
 

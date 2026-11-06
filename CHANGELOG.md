@@ -8,8 +8,10 @@ All notable changes to Econ Review are recorded here. Versions follow
 ## 0.3.0 — 2026-11-06
 
 A security, install-layout, PDF-ingestion and report-generator release. Rerun
-the standalone install prompt (or the native plugin update) to pick it up. It
-is a minor release because the standalone layout, PDF ingestion and generated
+the standalone install prompt to pick it up. After a native plugin update, also
+send "Run econ-review-setup now and finish its user-level setup with Review
+Desk." so the shared Review Desk moves to this release's bundle. It is a minor
+release because the standalone layout, PDF ingestion and generated
 reports all change; v0.2.3 was planned but never tagged, and its changes are
 included here.
 
