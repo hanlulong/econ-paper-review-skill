@@ -430,39 +430,53 @@ class LatexToolchainAndProfileTests(unittest.TestCase):
 class RealLuaLatexSmokeTests(unittest.TestCase):
     def test_local_file_contents_never_reach_the_pdf_through_math(self) -> None:
         canary_text = "CANARYSECRETCONTENTS"
-        with tempfile.TemporaryDirectory(prefix="econ-review-canary-") as temporary:
-            canary = Path(temporary) / "canary.tex"
-            canary.write_text(canary_text + "\n", encoding="utf-8")
-            payloads = (
-                rf"$\InputIfFileExists{{{canary.as_posix()}}}{{}}{{}}$",
-                rf"$\makeatletter\@input{{{canary.as_posix()}}}\makeatother$",
-                rf"$\IfFileExists{{{canary.as_posix()}}}{{\input{{{canary.as_posix()}}}}}{{}}$",
-                rf"$\text{{\InputIfFileExists{{{canary.as_posix()}}}{{}}{{}}}}$",
-                rf"$\\begin{{aligned}}\input{{{canary.as_posix()}}}$",
+
+        def render(payload: str) -> str:
+            report = document(
+                "# Referee report\n\n## Overall assessment\n\n"
+                f"The manuscript states {payload} in the appendix.\n"
             )
+            result = MODULE.render_review_pdf(
+                paper_title=PAPER_TITLE,
+                assessment_date=ASSESSMENT_DATE,
+                documents=[report],
+                renderer="lualatex",
+                page_size="letter",
+                timeout=90,
+            )
+            reader = PdfReader(io.BytesIO(result.pdf_bytes))
+            full_text = "".join(page.extract_text() or "" for page in reader.pages)
+            # Math mode typesets the leaked letters as spaced mathematical
+            # italics; fold them back to ASCII first.
+            return re.sub(r"\s+", "", unicodedata.normalize("NFKC", full_text))
+
+        with tempfile.TemporaryDirectory(prefix="econ-review-canary-") as temporary:
+            canary = (Path(temporary) / "canary.tex").as_posix()
+            Path(canary).write_text(canary_text + "\n", encoding="utf-8")
+            known_bypasses = (
+                rf"$\InputIfFileExists{{{canary}}}{{}}{{}}$",
+                rf"$\makeatletter\@input{{{canary}}}\makeatother$",
+            )
+            payloads = (
+                *known_bypasses,
+                rf"$\IfFileExists{{{canary}}}{{\input{{{canary}}}}}{{}}$",
+                rf"$\text{{\InputIfFileExists{{{canary}}}{{}}{{}}}}$",
+                rf"$\\begin{{aligned}}\input{{{canary}}}$",
+            )
+            # Positive control: without the span check, the known bypasses do
+            # put the file into the PDF, so the canary assertion is meaningful.
+            with mock.patch.object(MODULE, "_safe_math", side_effect=lambda content: content):
+                for payload in known_bypasses:
+                    with self.subTest(control=payload):
+                        self.assertIn(canary_text, render(payload))
+            # Every payload must be refused before TeX runs; a compile failure
+            # for some other reason would not prove the span check works.
             for payload in payloads:
                 with self.subTest(payload=payload):
-                    report = document(
-                        "# Referee report\n\n## Overall assessment\n\n"
-                        f"The manuscript states {payload} in the appendix.\n"
-                    )
-                    try:
-                        result = MODULE.render_review_pdf(
-                            paper_title=PAPER_TITLE,
-                            assessment_date=ASSESSMENT_DATE,
-                            documents=[report],
-                            renderer="lualatex",
-                            page_size="letter",
-                            timeout=90,
-                        )
-                    except MODULE.LatexRenderError:
-                        continue
-                    reader = PdfReader(io.BytesIO(result.pdf_bytes))
-                    full_text = "".join(page.extract_text() or "" for page in reader.pages)
-                    # Math mode typesets the leaked letters as spaced
-                    # mathematical italics; fold them back to ASCII first.
-                    normalized = re.sub(r"\s+", "", unicodedata.normalize("NFKC", full_text))
-                    self.assertNotIn(canary_text, normalized)
+                    with mock.patch.object(MODULE.subprocess, "run", wraps=MODULE.subprocess.run) as run:
+                        with self.assertRaisesRegex(MODULE.LatexRenderError, "unsafe"):
+                            render(payload)
+                    run.assert_not_called()
 
     def test_allowlisted_economics_math_compiles_cleanly(self) -> None:
         sentinel = "Allowlisted math sentinel"
