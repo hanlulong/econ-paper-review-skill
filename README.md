@@ -14,7 +14,7 @@
 |---|---|
 | ![First page of a sample AI referee report on an economics paper: overall assessment, recommendation, and main grounds](docs/images/sample-referee-report.png) | ![A detailed-comments page: each issue quotes the manuscript, explains the concern, and ends in concrete suggestions](docs/images/sample-detailed-comments.png) |
 
-*Two pages from the bundled [25-comment sample review (PDF)](docs/sample-review/paper-review.pdf), produced cold in full mode for a leading field journal on a [demonstration manuscript](docs/sample-review/demo-paper.pdf) written with intentional errors. The sample was generated before v0.3.0, which states each repair once and gives revision-plan items the same numbers as the report.*
+*Two pages from the bundled [25-comment sample review (PDF)](docs/sample-review/paper-review.pdf), produced cold in full mode for a leading field journal on a [demonstration manuscript](docs/sample-review/demo-paper.pdf) written with intentional errors. The sample was generated before v0.3.0, which drops most restated repairs from Suggestions and gives revision-plan items the same numbers as the report.*
 
 `econ-review` is an Agent Skill for Claude Code and Codex. It reads your paper the way a careful journal referee would: first it works out what you are claiming and how your evidence supports it, then it checks everything it can verify — identification, tables, proofs, numbers, references, writing — and gives you a referee report plus a step-by-step plan for fixing what it found. It never rewrites your paper. That part stays yours.
 

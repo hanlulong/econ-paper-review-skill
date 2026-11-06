@@ -171,6 +171,18 @@ class GenerateFixPlanTests(unittest.TestCase):
             "how": "Revise Proposition 1 and its proof.",
         }, "LOGIC-01"), "Revise Proposition 1 and its proof.")
 
+    def test_action_keeps_the_full_implementation_steps(self) -> None:
+        # The plan is acted on, so paraphrase-aware trimming is left to the report.
+        fix = {
+            "what": "Change 34 percent to 3.4 percent and audit every headline magnitude for decimal consistency.",
+            "how": "Replace 34 percent with 3.4 percent and synchronize the abstract.",
+        }
+        self.assertEqual(MODULE.combined_action(fix, "NUM-01"), f"{fix['what']} {fix['how']}")
+        self.assertEqual(
+            MODULE.combined_action({"what": "Report the clustering level.", "how": "Cluster by state."}, "SE-01"),
+            "Report the clustering level. Cluster by state.",
+        )
+
     def test_migration_boilerplate_is_rejected(self) -> None:
         row = copy.deepcopy(MODULE.load(FIXTURE / "findings.json")["findings"][0])
         row["fix"]["resolved_when"] = f"{row['id']} closes when a change is visible."

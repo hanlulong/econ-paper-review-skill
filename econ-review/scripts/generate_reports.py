@@ -301,12 +301,29 @@ _DEDUP_SYNONYMS = {
     **dict.fromkeys(("audit", "compare", "verify", "check", "inspect", "confirm", "synchronize", "reconcile"), "check"),
     **dict.fromkeys(("assertion", "claim", "sentence", "statement", "language"), "claim"),
 }
-_SENTENCE_BREAK = re.compile(
-    r"(?<!\b[A-Z]\.)(?<!\bal\.)(?<!\be\.g\.)(?<!\bi\.e\.)(?<!\bFig\.)(?<!\bEq\.)(?<!\bNo\.)(?<!\bpp\.)(?<!\bvs\.)"
-    r"(?<=[.!?])\s+(?=[A-Z0-9\u201c\"(])"
-)
+# A sentence ends at ., ! or ? (optionally followed by a closing quote or
+# bracket) and whitespace, when the next sentence starts with a capital letter,
+# an opening quote or a bracket. Sentences rarely start with a digit, so a
+# locator such as "Sec. 3" or "p. 7" is never split.
+_SENTENCE_BREAK_CANDIDATE = re.compile(r"[.!?][”’\"')\]]*\s+(?=[A-Z“‘\"(\[])")
+# Abbreviations that end with a period but do not end a sentence (compared
+# case-insensitively, without the final period).
+_NON_TERMINAL_ABBREVIATIONS = frozenset("""
+al e.g i.e cf vs viz approx resp ca fig figs eq eqs eqn sec secs sect ch chap app apps tab tabs col cols
+p pp no nos vol vols prop props thm thms lem lemma cor def defs ass assn rem ex obs para fn n nn ref refs
+dr mr mrs ms prof st jr sr
+""".split())
 # A conditional or optional sentence adds a contingency even when it reuses words.
 _CONTINGENT_SENTENCE = re.compile(r"^(?:If|Otherwise|Optionally|Alternatively|Where|Unless|When|Should)\b")
+# Generic repair verbs (after synonym folding). A sentence whose only new
+# content words are these restates the repair ("Change the the to the.").
+_GENERIC_REPAIR_WORDS = frozenset({"change", "remove", "show", "rebuild", "check", "claim"})
+_CJK = "぀-ヿ㐀-䶿一-鿿가-힯豈-﫿"
+_CJK_RUN = re.compile(f"[{_CJK}]+")
+_QUOTED = re.compile(
+    "“([^”]+)”|‘([^’]+)’|\"([^\"]+)\"|(?<![A-Za-z0-9])'([^']+)'(?![A-Za-z0-9])"
+)
+_NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
 
 
 def _dedup_stem(word: str) -> str:
@@ -317,8 +334,17 @@ def _dedup_stem(word: str) -> str:
 
 
 def content_words(text: str) -> set[str]:
+    """Content words of *text*: stemmed, synonym-folded words and numbers.
+
+    Letters from any script count. Runs of Chinese, Japanese or Korean
+    characters, which are not separated by spaces, contribute character
+    bigrams (or the single character).
+    """
     words: set[str] = set()
-    for raw in re.findall(r"[A-Za-z][A-Za-z'-]*|\d+(?:\.\d+)?", text.lower()):
+    lowered = text.lower()
+    for run in _CJK_RUN.findall(lowered):
+        words.update(run[index:index + 2] for index in range(max(1, len(run) - 1)))
+    for raw in re.findall(r"[^\W\d_](?:[^\W_]|['-])*|\d+(?:\.\d+)?", _CJK_RUN.sub(" ", lowered)):
         word = raw.strip("'-")
         if not word or word in _DEDUP_STOPWORDS:
             continue
@@ -326,8 +352,52 @@ def content_words(text: str) -> set[str]:
     return words
 
 
+def anchors(text: str) -> set[str]:
+    """Specific tokens a restatement would not add: numbers, quoted strings, identifiers.
+
+    Identifiers are all-capital tokens (``DOI``, ``TWFE``, ``F``), tokens that
+    mix letters and digits (``2SLS``, ``H1``), and tokens with an underscore or
+    backslash. The first word of a sentence and the words ``I`` and ``A`` are
+    not identifiers.
+    """
+    found: set[str] = set()
+    for match in _QUOTED.finditer(text):
+        quoted = next(group for group in match.groups() if group is not None)
+        found.add("q:" + " ".join(quoted.lower().split()))
+    found.update("n:" + number.replace(",", "") for number in _NUMBER.findall(text))
+    for sentence in split_sentences(text) or [text]:
+        tokens = re.findall(r"[\w\\][\w\\.'-]*", sentence)
+        for position, token in enumerate(tokens):
+            token = token.rstrip(".'-")
+            if not token or token in {"I", "A"}:
+                continue
+            has_letter = any(character.isalpha() for character in token)
+            identifier = (
+                "_" in token or "\\" in token
+                or (has_letter and any(character.isdigit() for character in token))
+                or (has_letter and token.upper() == token and token.lower() != token
+                    and (position > 0 or len(token) > 1))
+            )
+            if identifier:
+                found.add("i:" + token)
+    return found
+
+
 def split_sentences(text: str) -> list[str]:
-    return [part.strip() for part in _SENTENCE_BREAK.split(" ".join(text.split())) if part.strip()]
+    text = " ".join(text.split())
+    sentences: list[str] = []
+    start = 0
+    for match in _SENTENCE_BREAK_CANDIDATE.finditer(text):
+        before = text[start:match.start()]
+        last = re.search(r"([A-Za-z][A-Za-z.]*)$", before)
+        if last:
+            word = last.group(1)
+            if (len(word) == 1 and word.isupper()) or word.lower() in _NON_TERMINAL_ABBREVIATIONS:
+                continue
+        sentences.append(text[start:match.end()].strip())
+        start = match.end()
+    sentences.append(text[start:].strip())
+    return [sentence for sentence in sentences if sentence]
 
 
 def novel_sentences(
@@ -335,20 +405,34 @@ def novel_sentences(
 ) -> list[str]:
     """Return *candidates* sentences that add something to *leading* (and *context*).
 
-    A candidate is dropped when at least *threshold* of its content words are
-    already present, or when it has at most two content words (for example
-    "Change the the to the."), unless it states a contingency.
+    A candidate is dropped only when it adds nothing specific: it is never
+    dropped when it states a contingency, introduces a number, quoted string
+    or identifier not seen before, or yields no content words to compare. It
+    is dropped when its only new content words are generic repair verbs
+    ("Change the the to the."), or when it has more than two content words
+    and at least *threshold* of them were already seen.
     """
-    seen = content_words(" ".join([context, *leading]))
+    seen_text = " ".join([context, *leading])
+    seen = content_words(seen_text)
+    seen_anchors = anchors(seen_text)
     kept: list[str] = []
     for sentence in candidates:
         words = content_words(sentence)
-        if not _CONTINGENT_SENTENCE.match(sentence) and (
-            len(words) <= 2 or len(words & seen) >= threshold * len(words)
-        ):
+        novel = words - seen
+        restated = (
+            bool(words)
+            and not _CONTINGENT_SENTENCE.match(sentence)
+            and not (anchors(sentence) - seen_anchors)
+            and (
+                not (novel - _GENERIC_REPAIR_WORDS)
+                or (len(words) > 2 and len(words & seen) >= threshold * len(words))
+            )
+        )
+        if restated:
             continue
         kept.append(sentence)
         seen |= words
+        seen_anchors |= anchors(sentence)
     return kept
 
 
@@ -450,7 +534,11 @@ def relevant_evidence(row: dict[str, Any]) -> str:
         # A verbatim excerpt copied from a PDF text layer keeps the line breaks
         # of the typeset page. Rejoin those lines into running prose so a
         # quotation reads as the sentence it is; blank-line paragraph breaks
-        # survive.
+        # survive. A line that ends in a hyphen before a lowercase letter is
+        # joined without a space and keeps the hyphen ("labor-market"), since
+        # the text layer cannot tell a compound from a soft hyphen.
+        content = content.replace("\r\n", "\n").replace("\r", "\n")
+        content = re.sub(r"(?<=\w-)[ \t]*(?<!\n)\n(?!\n)[ \t]*(?=[a-z])", "", content)
         content = re.sub(r"[ \t]*(?<!\n)\n(?!\n)[ \t]*", " ", content)
     return quote(content)
 

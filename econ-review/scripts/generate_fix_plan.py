@@ -13,7 +13,6 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from safe_io import atomic_write_text, strict_json_load  # noqa: E402
-from generate_reports import merge_repair  # noqa: E402
 
 
 NAVIGATION_START = "<!-- review-navigation:start -->"
@@ -169,13 +168,28 @@ def without_self_reference(value: Any, finding_id: str) -> str:
 
 
 def combined_action(fix: dict[str, Any], finding_id: str) -> str:
-    """Keep strategic direction and implementation without repeating either."""
+    """Keep strategic direction and the full implementation steps.
+
+    The plan is what an author or agent acts on, so ``fix.how`` is kept in
+    full; only an exact repeat (one field contained in the other) is merged.
+    The paraphrase-aware merge applies to the referee report's Suggestions.
+    """
     what = re.sub(r"\s+", " ", str(fix.get("what") or "")).strip()
     how = re.sub(r"\s+", " ", str(fix.get("how") or "")).strip()
     if not what and not how:
         raise ValueError(f"{finding_id} fix.what or fix.how must state an author action")
 
-    return merge_repair(what, how)
+    def normalized(value: str) -> str:
+        return "".join(character.lower() for character in value if character.isalnum())
+
+    if not what or not how:
+        return what or how
+    what_key, how_key = normalized(what), normalized(how)
+    if what_key == how_key or how_key in what_key:
+        return what
+    if what_key in how_key:
+        return how
+    return f"{what} {how}"
 
 
 def reject_generic_plan_text(row: dict[str, Any]) -> None:

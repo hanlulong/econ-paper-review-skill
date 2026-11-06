@@ -15,7 +15,7 @@
 |---|---|
 | ![示例 AI 审稿报告首页：总体评价、处理建议与主要依据](docs/images/sample-referee-report.png) | ![详细意见页：每条意见引用稿件原文、说明问题所在，并给出具体修改建议](docs/images/sample-detailed-comments.png) |
 
-*以上两页选自随仓库附带的[完整示例评审（PDF，25 条意见）](docs/sample-review/paper-review.pdf)——在一篇故意植入错误的[演示稿件](docs/sample-review/demo-paper.pdf)上，以 full 模式、目标设为领域顶级期刊（leading field journal）冷启动生成。该示例生成于 v0.3.0 之前；v0.3.0 起每条修改建议只陈述一次，修改计划中的条目也沿用报告中的编号。*
+*以上两页选自随仓库附带的[完整示例评审（PDF，25 条意见）](docs/sample-review/paper-review.pdf)——在一篇故意植入错误的[演示稿件](docs/sample-review/demo-paper.pdf)上，以 full 模式、目标设为领域顶级期刊（leading field journal）冷启动生成。该示例生成于 v0.3.0 之前；v0.3.0 起“修改建议”会删去大部分换个说法重复的修改要求，修改计划中的条目也沿用报告中的编号。*
 
 `econ-review` 是一个面向 Claude Code 和 Codex 的 Agent Skill（智能体技能）。它像一位严谨的期刊审稿人那样阅读你的论文：先厘清你的核心主张以及证据如何支撑这些主张，再逐项核查一切可以验证的内容——识别策略、表格、证明、数值、参考文献、行文——然后给出一份审稿报告，外加一份逐步修改计划，告诉你如何解决发现的问题。它从不代你改写论文；那一部分始终由你完成。
 

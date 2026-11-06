@@ -63,14 +63,20 @@ included here.
   a priority level the plan lists prerequisites first and otherwise keeps the
   report's order of importance. The validator accepts the new labels and plans
   from earlier releases.
-- Generated comments state each repair once. Suggestions (and the plan's
-  Action line) drop sentences of `fix.how` that restate `minimum_repair` or
-  `fix.what` in other words, and Concern drops sentences that restate the
-  Issue. Exact-substring checks missed these paraphrases, which appeared in
-  about ten comments of the bundled sample.
-- Verbatim quotes rejoin the line breaks of the PDF text layer, and the comment
-  guidance asks for quotations that run to a sentence boundary and keep the
-  words the concern depends on.
+- Suggestions drop most restated repairs. Sentences of `fix.how` that restate
+  `minimum_repair` or `fix.what` in other words are dropped, and Concern drops
+  sentences that restate the Issue. Exact-substring checks missed these
+  paraphrases, which appeared in about ten comments of the bundled sample; the
+  heuristic still misses some. A sentence is never dropped when it states a
+  contingency, adds a number, quoted text or identifier (such as `DOI` or
+  `F`), adds a content word other than a generic repair verb, or is written in
+  a script the heuristic cannot compare word by word, and locators such as
+  "Sec. 3" or "p. 7" are not split. The revision plan's Action line keeps the
+  full `fix.how`, merging only exact repeats as before.
+- Verbatim quotes rejoin the line breaks of the PDF text layer (a line ending
+  in a hyphen keeps the hyphen and joins without a space, and Windows line
+  endings are normalized), and the comment guidance asks for quotations that
+  run to a sentence boundary and keep the words the concern depends on.
 - The revision plan names a target tier in prose ("a leading field journal")
   instead of the schema value `leading-field`.
 - Comparator citations in "Closest literature" print the venue and DOI.

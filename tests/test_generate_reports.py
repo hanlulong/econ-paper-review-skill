@@ -69,6 +69,57 @@ class GenerateReportsTests(unittest.TestCase):
             ["Encode Pedro H. C. Sant'Anna and A. Colin Cameron.", "Rebuild it."],
         )
 
+    def test_dedupe_keeps_short_specific_and_non_latin_sentences(self) -> None:
+        merge = MODULE.merge_repair
+        # Locators with abbreviations followed by a number stay whole.
+        self.assertEqual(
+            merge("Narrow the abstract's productivity claim.", "Align it with the estimate on p. 7. Cite Table 4, col. 2."),
+            "Narrow the abstract's productivity claim. Align it with the estimate on p. 7. Cite Table 4, col. 2.",
+        )
+        self.assertEqual(
+            MODULE.split_sentences("Align Proposition 1 and its proof in Sec. 3. State the tie on p. 2. See App. B."),
+            ["Align Proposition 1 and its proof in Sec. 3.", "State the tie on p. 2.", "See App. B."],
+        )
+        # Short sentences that add a new instruction, number, quote or identifier are kept.
+        kept = (
+            ("Report standard errors that allow for correlation within markets.", "Cluster by state."),
+            ("Report standard errors that allow for correlation within markets.", "Winsorize at 1%."),
+            ("Narrow the claim.", "Drop 'sharply'."),
+            ("Correct the citation year to 2011.", "Add the DOI."),
+            ("Report the instrument strength.", "Report the first-stage F statistic for each instrument."),
+            ("Report the clustering level.", "Cluster at the municipality level (N = 284 clusters)."),
+            ("Report standard errors that allow for correlation within markets.", "使用工具变量法并报告第一阶段F统计量。"),
+        )
+        for what, how in kept:
+            self.assertEqual(merge(what, how), f"{what} {how}")
+        concern = MODULE.restated_concern_removed(
+            "Event-study coefficients come from a fully dynamic TWFE regression.",
+            "Negative weights can arise when effects grow over time.",
+            "The bias is upward.",
+            "Inference is unaffected.",
+        )
+        self.assertEqual(
+            concern,
+            "Negative weights can arise when effects grow over time. The bias is upward. Inference is unaffected.",
+        )
+        self.assertEqual(
+            MODULE.restated_concern_removed("命题的边界情形", "均衡在边界处不唯一。", "读者无法判断结论是否稳健。", "仅在2010年以前的样本中成立。"),
+            "均衡在边界处不唯一。 读者无法判断结论是否稳健。 仅在2010年以前的样本中成立。",
+        )
+
+    def test_report_keeps_short_evidence_boundary_and_locators(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "review"
+            shutil.copytree(FIXTURE, target)
+            ledger = json.loads((target / "findings.json").read_text(encoding="utf-8"))
+            row = ledger["findings"][0]
+            row["fix"]["how"] = "Align Proposition 1 and its proof in Sec. 3. Cluster by state."
+            row["evidence_boundary"] = "Pre-2010 only."
+            report = MODULE.render_report(ledger, MODULE.load(target / "synthesis.json"))
+        self.assertIn("Align Proposition 1 and its proof in Sec. 3.", report)
+        self.assertIn("Cluster by state.", report)
+        self.assertIn("Pre-2010 only.", report)
+
     def test_concern_drops_sentences_that_restate_the_issue(self) -> None:
         concern = MODULE.restated_concern_removed(
             "Table 1 reports an employee mean above the employee maximum.",
@@ -97,6 +148,11 @@ class GenerateReportsTests(unittest.TestCase):
             rendered,
             "> Proposition 1 predicts that gains rise with communication intensity. Table 4 confirms this sharply.",
         )
+        row["evidence"][0]["excerpt"] = "Effects on labor-\r\nmarket entry and employ-\nment are small.\r\nWages rise -\n Table 2."
+        with mock.patch.object(MODULE, "evidence_text", return_value=row["evidence"][0]["excerpt"]), \
+                mock.patch.object(MODULE, "display_evidence", return_value=row["evidence"][0]):
+            rendered = MODULE.relevant_evidence(row)
+        self.assertEqual(rendered, "> Effects on labor-market entry and employ-ment are small. Wages rise - Table 2.")
 
     def test_comparator_citation_names_venue_and_doi(self) -> None:
         citation = MODULE._source_citation({
