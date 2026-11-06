@@ -217,7 +217,10 @@ class PdfXmlSanitizationTests(unittest.TestCase):
         ).encode("utf-8")
 
         def fake_pdftotext(command: list[str], **_: object) -> subprocess.CompletedProcess[bytes]:
-            Path(command[-1]).write_bytes(fixture)
+            # parse_bbox_layout also asks pdfinfo for page rotations; only the
+            # pdftotext call writes its output file (never the input PDF path).
+            if Path(str(command[0])).name == "pdftotext":
+                Path(command[-1]).write_bytes(fixture)
             return subprocess.CompletedProcess(command, 0, b"", b"")
 
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(MODULE, "run", side_effect=fake_pdftotext):
