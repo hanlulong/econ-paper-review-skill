@@ -347,6 +347,9 @@ class InstallerTests(unittest.TestCase):
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         merged = os.environ.copy()
+        # Never let a developer's own client configuration leak into a test.
+        merged.pop("CLAUDE_CONFIG_DIR", None)
+        merged.pop("CODEX_HOME", None)
         if env:
             merged.update(env)
         return subprocess.run(

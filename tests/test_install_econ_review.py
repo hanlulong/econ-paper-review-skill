@@ -432,6 +432,9 @@ class ManagedInstallerTests(unittest.TestCase):
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         merged = os.environ.copy()
+        # Never let a developer's own client configuration leak into a test.
+        merged.pop("CLAUDE_CONFIG_DIR", None)
+        merged.pop("CODEX_HOME", None)
         merged["HOME"] = str(self.support_home)
         merged["XDG_DATA_HOME"] = str(self.support_home / ".local" / "share")
         if env:

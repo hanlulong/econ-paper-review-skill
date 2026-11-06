@@ -71,6 +71,10 @@ class ReviewDeskReleaseTests(unittest.TestCase):
                 dry_run=False,
             )
 
+    @unittest.skipUnless(
+        BUILDER.STATIC_ROOT.is_dir(),
+        "the viewer is not built; run `npm ci && npm run build:static` in review-viewer",
+    )
     def test_builder_embeds_synchronized_first_party_license(self) -> None:
         data = BUILDER.build_bytes()
         BUILDER.verify_bundle_bytes(data)
