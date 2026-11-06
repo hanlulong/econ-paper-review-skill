@@ -112,10 +112,11 @@ included here.
   manuscript, and summarizes the AEA, Econometric Society, Elsevier and
   Springer Nature reviewer AI policies (checked 2026-11-06) in
   `references/red-lines.md`. The Reject/R&R recommendation stays in the report.
-- `scripts/review_location.py` reports when `review/` would be written into an
-  Overleaf project in Dropbox, another Dropbox, iCloud Drive, OneDrive or
-  Google Drive folder, or a git work tree, so the agent asks first. The default
-  location is unchanged.
+- `econ-review/scripts/review_location.py` reports when `review/` would be
+  written into an Overleaf project in Dropbox, another Dropbox, iCloud Drive,
+  OneDrive or Google Drive folder, or a git work tree, including through a
+  symlinked folder, so the agent asks first. The default location is
+  unchanged.
 - The DiD gate covers universal rollouts (no never-treated controls, where
   not-yet-treated comparisons run out, normalization of fully dynamic event
   studies, citing Borusyak, Jaravel and Spiess 2024) and bad controls read as
@@ -125,8 +126,11 @@ included here.
   is named.
 - `docs/sample-review/review/` is a small synthetic review package that Review
   Desk can open before a first review finishes.
-- INSTALL documents a standalone uninstall and a macOS route to Python 3.10+,
-  and accepts equivalent forms of the repository origin.
+- INSTALL documents a standalone uninstall and a macOS route to Python 3.10+
+  (Python 3.13 or 3.14 from python.org, Homebrew, or uv), and accepts
+  equivalent forms of the repository origin. The uninstall removes the shared
+  support data only when no other Econ Review copy remains, and the
+  `econ-review-setup` skill gives the same Python guidance.
 
 ### Changed
 

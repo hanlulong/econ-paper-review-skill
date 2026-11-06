@@ -2057,7 +2057,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if sys.version_info < MINIMUM_PYTHON:
         raise InstallError(
             "Python 3.10 or newer is required; "
-            "on macOS, install Python 3.12 from https://www.python.org/downloads/macos/ or run 'brew install python@3.12' or 'uv python install 3.12'"
+            "on macOS, install Python 3.13 or 3.14 from https://www.python.org/downloads/macos/ or run 'brew install python@3.12' or 'uv python install 3.12'"
         )
     source = (args.source or SKILL_ROOT).expanduser().absolute()
     if not args.with_review_desk and (args.review_desk_dir or args.review_desk_bundle):

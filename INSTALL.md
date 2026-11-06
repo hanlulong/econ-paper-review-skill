@@ -54,11 +54,12 @@ and the bundled Review Desk. Do not ask the user to copy or run commands.
    `econ-review/requirements-core.txt`, and
    `econ-review/assets/review-desk.zip` before executing bundled code.
 5. Find an existing Python 3.10+ interpreter with working `venv` and pip
-   bootstrapping support. Check `python3.13`, `python3.12`, `python3.11`,
-   `python3.10`, and `~/.local/bin` (where `uv python install` puts them) as
-   well as `python3`. If none exists, stop and report that as the blocker. On
-   macOS, where the built-in `python3` is 3.9, tell the user to install Python
-   3.12 from https://www.python.org/downloads/macos/ or with
+   bootstrapping support. Check `python3.14`, `python3.13`, `python3.12`,
+   `python3.11`, `python3.10`, and `~/.local/bin` (where `uv python install`
+   puts them) as well as `python3`, and if `uv` is present, `uv python find
+   3.12`. If none exists, stop and report that as the blocker. On macOS, where
+   the built-in `python3` is 3.9, tell the user to install Python 3.13 or 3.14
+   from https://www.python.org/downloads/macos/ (3.15 is not tested yet) or run
    `brew install python@3.12` or `uv python install 3.12`, then paste the
    install prompt again. Select `--claude` or `--codex` for the current client,
    show the managed setup's dry run, inspect every planned destination and

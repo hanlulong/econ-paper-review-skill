@@ -791,7 +791,7 @@ migrate_legacy_codex_copy() {
 require_command python3
 require_command mktemp
 require_command mv
-python3 - <<'PY' || fail "Python 3.10 or newer is required; on macOS, install Python 3.12 from https://www.python.org/downloads/macos/ or run 'brew install python@3.12' or 'uv python install 3.12'"
+python3 - <<'PY' || fail "Python 3.10 or newer is required; on macOS, install Python 3.13 or 3.14 from https://www.python.org/downloads/macos/ or run 'brew install python@3.12' or 'uv python install 3.12'"
 import sys
 
 if sys.version_info < (3, 10):

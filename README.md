@@ -66,8 +66,9 @@ before v0.3.0, which carried plugin manifests and therefore appeared as
 `econ-review@skills-dir` in Claude Code and `econ-review:econ-review` in Codex.
 Installing needs an existing Python 3.10+ with working `venv` and pip
 bootstrapping support. On macOS the built-in `python3` is 3.9; install Python
-3.12 from [python.org](https://www.python.org/downloads/macos/), or run
-`brew install python@3.12` or `uv python install 3.12`, before pasting the prompt. Full manuscript-PDF ingestion also needs
+3.13 or 3.14 from [python.org](https://www.python.org/downloads/macos/) (3.15
+is not tested yet), or run `brew install python@3.12` or
+`uv python install 3.12`, before pasting the prompt. Full manuscript-PDF ingestion also needs
 [Poppler](https://poppler.freedesktop.org/) on `PATH`; TeX, Pandoc, Node.js, and
 administrator access are not required.
 

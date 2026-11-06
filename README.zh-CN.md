@@ -59,7 +59,7 @@ exactly one active copy for this client, do not change the other client, and do
 not ask me to run commands. Report completion or the one genuine blocker.
 ```
 
-以后需要更新时，粘贴同一段话即可；安装流程是幂等的，并会复用兼容的运行环境。更新还会修复 v0.3.0 之前安装的独立副本：这些副本带有插件清单，因而在 Claude Code 中显示为 `econ-review@skills-dir`、在 Codex 中显示为 `econ-review:econ-review`。需要本机已有 Python 3.10+（`venv` 与 pip 引导可用）。macOS 自带的 `python3` 是 3.9；请先从 [python.org](https://www.python.org/downloads/macos/) 安装 Python 3.12，或运行 `brew install python@3.12` 或 `uv python install 3.12`，再粘贴上面的提示。完整解析 PDF 稿件还需要 `PATH` 中有 [Poppler](https://poppler.freedesktop.org/)；不需要 TeX、Pandoc、Node.js，也不需要管理员权限。
+以后需要更新时，粘贴同一段话即可；安装流程是幂等的，并会复用兼容的运行环境。更新还会修复 v0.3.0 之前安装的独立副本：这些副本带有插件清单，因而在 Claude Code 中显示为 `econ-review@skills-dir`、在 Codex 中显示为 `econ-review:econ-review`。需要本机已有 Python 3.10+（`venv` 与 pip 引导可用）。macOS 自带的 `python3` 是 3.9；请先从 [python.org](https://www.python.org/downloads/macos/) 安装 Python 3.13 或 3.14（3.15 尚未测试），或运行 `brew install python@3.12` 或 `uv python install 3.12`，再粘贴上面的提示。完整解析 PDF 稿件还需要 `PATH` 中有 [Poppler](https://poppler.freedesktop.org/)；不需要 TeX、Pandoc、Node.js，也不需要管理员权限。
 
 <details>
 <summary>从代码检出直接安装独立技能</summary>
