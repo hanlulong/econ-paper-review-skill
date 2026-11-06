@@ -191,7 +191,7 @@ _MATH_BASE = r"(?:[A-Z][A-Z0-9]*|[A-Za-z]|[\u0370-\u03ff])"
 _MATH_SUBSCRIPT = r"_(?:\{[A-Za-z0-9, +*/\-\u0370-\u03ff]+\}|[A-Za-z0-9\u0370-\u03ff]+)"
 BARE_MATH_TOKEN = re.compile(
     rf"(?<![\w\\$])(?P<math>"
-    rf"(?:Var|Cov|Corr)\([^()\s]{{1,80}}\)"
+    rf"(?:Var|Cov|Corr)\([A-Za-z0-9_,.+\-*/^'|\u0370-\u03ff]{{1,80}}\)"
     rf"|d{_MATH_BASE}/d{_MATH_BASE}(?:{_MATH_SUBSCRIPT})?"
     rf"|(?:\d+/)?{_MATH_BASE}{_MATH_SUBSCRIPT}"
     rf")(?![\w])"
@@ -317,6 +317,25 @@ def _safe_math(content: str) -> str:
         raise LatexRenderError(
             f"unsafe TeX control symbol {match.group(0)!r} in an explicit math span"
         )
+    # Outside control sequences, a bare ``%`` comments out the rest of the
+    # line, a bare ``#`` is a macro-parameter character, and unbalanced braces
+    # change the group structure; all three would surface only as an opaque
+    # compile failure.
+    residue = MATH_CONTROL_SEQUENCE.sub(" ", content)
+    if "%" in residue:
+        raise LatexRenderError("unescaped % in an explicit math span (write \\% for a percent sign)")
+    if "#" in residue:
+        raise LatexRenderError("unescaped # in an explicit math span (write \\# for a number sign)")
+    depth = 0
+    for character in residue:
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth < 0:
+                break
+    if depth != 0:
+        raise LatexRenderError("unbalanced braces in an explicit math span")
     return content
 
 

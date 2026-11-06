@@ -115,6 +115,23 @@ class LatexMarkdownSafetyTests(unittest.TestCase):
                 with self.assertRaisesRegex(MODULE.LatexRenderError, "unsafe character"):
                     MODULE._safe_math(content)
 
+    def test_bare_percent_hash_and_unbalanced_braces_are_rejected_by_name(self) -> None:
+        for content, message in (
+            ("a % b", "unescaped %"),
+            ("x#1", "unescaped #"),
+            ("\\frac{a", "unbalanced braces"),
+            ("a}{b", "unbalanced braces"),
+        ):
+            with self.subTest(content=content):
+                with self.assertRaisesRegex(MODULE.LatexRenderError, message):
+                    MODULE._safe_math(content)
+        for content in ("50\\%", "\\#1", "\\{a\\}", "\\{a", "\\frac{a}{b}"):
+            with self.subTest(content=content):
+                self.assertEqual(MODULE._safe_math(content), content)
+        # Prose that only resembles a variance call stays escaped prose.
+        self.assertEqual(MODULE._render_plain_text("The Var(%) term"), "The Var(\\%) term")
+        self.assertNotIn("$", MODULE._render_plain_text("Cov(x,#y) here").replace("\\$", ""))
+
     def test_math_allowlist_never_admits_file_lua_or_expansion_primitives(self) -> None:
         for word in sorted(MODULE.MATH_CONTROL_WORDS):
             with self.subTest(word=word):

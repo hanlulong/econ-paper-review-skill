@@ -23,7 +23,10 @@ included here.
   hostile manuscript into `$...$` could read a local file into the delivered
   PDF. Spans containing `@`, `^^` escapes, control characters, or any file,
   Lua, category-code, or expansion command are now rejected with a message that
-  names the offending token. Shell escape stays disabled; `openin_any=p` is
+  names the offending token, and so are spans with a bare `%` or `#` or
+  unbalanced braces, which would otherwise fail the compile without saying
+  why. Bare `Var(...)`/`Cov(...)` in prose are typeset as math only when the
+  argument is made of identifier characters. Shell escape stays disabled; `openin_any=p` is
   deliberately not used because it breaks LuaLaTeX font loading.
 - The allowlist also leaves out `\not` and `\smash`, whose unicode-math and
   amsmath definitions look up a command named after their argument, and every
