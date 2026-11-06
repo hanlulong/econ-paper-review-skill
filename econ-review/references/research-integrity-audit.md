@@ -21,7 +21,7 @@ Record only what is needed to evaluate the paper:
 
 - activity, population, intervention or data class that creates the burden;
 - approval, exemption, consent or waiver, deception and debriefing, registration, access agreement, or disclosure claimed by the paper;
-- institution, jurisdiction, venue, registry, or data-provider rule only when it is known and relevant;
+- institution, jurisdiction, venue, registry, or data-provider rule only when it is known and relevant; for an economics venue that endorses the Data and Code Availability Standard, check the data availability statement as described in [replication-audit.md](replication-audit.md#venue-replication-standard-conditional);
 - timing relative to data collection or intervention;
 - confidentiality, minimization, security, linkage, retention, sharing, and disclosure constraints that affect what can responsibly appear in the paper or package;
 - sponsor or researcher control over design, data, analysis, publication, and interpretation when the manuscript makes that relevant.
