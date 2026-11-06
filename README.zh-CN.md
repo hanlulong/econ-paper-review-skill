@@ -15,7 +15,7 @@
 |---|---|
 | ![示例 AI 审稿报告首页：总体评价、处理建议与主要依据](docs/images/sample-referee-report.png) | ![详细意见页：每条意见引用稿件原文、说明问题所在，并给出具体修改建议](docs/images/sample-detailed-comments.png) |
 
-*以上两页选自随仓库附带的[完整示例评审（PDF，25 条意见）](docs/sample-review/paper-review.pdf)——在一篇故意植入错误的[演示稿件](docs/sample-review/demo-paper.pdf)上以默认设置冷启动生成。*
+*以上两页选自随仓库附带的[完整示例评审（PDF，25 条意见）](docs/sample-review/paper-review.pdf)——在一篇故意植入错误的[演示稿件](docs/sample-review/demo-paper.pdf)上，以 full 模式、目标设为领域顶级期刊（leading field journal）冷启动生成。该示例生成于 v0.3.0 之前；v0.3.0 起每条修改建议只陈述一次，修改计划中的条目也沿用报告中的编号。*
 
 `econ-review` 是一个面向 Claude Code 和 Codex 的 Agent Skill（智能体技能）。它像一位严谨的期刊审稿人那样阅读你的论文：先厘清你的核心主张以及证据如何支撑这些主张，再逐项核查一切可以验证的内容——识别策略、表格、证明、数值、参考文献、行文——然后给出一份审稿报告，外加一份逐步修改计划，告诉你如何解决发现的问题。它从不代你改写论文；那一部分始终由你完成。
 
@@ -23,7 +23,7 @@
 
 ## 你会得到什么
 
-评审完成后，成果会整齐地存放在论文旁边的 `review/` 文件夹中：
+评审完成后，成果会整齐地存放在论文旁边的 `review/` 文件夹中。如果该文件夹处于同步目录（例如 Dropbox 中的 Overleaf 项目、iCloud 云盘、OneDrive）或受 git 管理，智能体会先征求你的意见，因为评审内容属于保密材料：
 
 - **`paper-review.pdf`** — 主报告：专业排版、带书签的 PDF，包含审稿报告、全部详细意见、编辑性意见和修改计划。
 - **`reports/`** — 上述报告的 Markdown 版本。其中的修改计划是一份按优先级排序的待办清单，可直接交给你的 AI 智能体去执行。
@@ -59,7 +59,7 @@ exactly one active copy for this client, do not change the other client, and do
 not ask me to run commands. Report completion or the one genuine blocker.
 ```
 
-以后需要更新时，粘贴同一段话即可；安装流程是幂等的，并会复用兼容的运行环境。更新还会修复 v0.2.3 之前安装的独立副本：这些副本带有插件清单，因而在 Claude Code 中显示为 `econ-review@skills-dir`、在 Codex 中显示为 `econ-review:econ-review`。需要本机已有 Python 3.10+（`venv` 与 pip 引导可用）。完整解析 PDF 稿件还需要 `PATH` 中有 [Poppler](https://poppler.freedesktop.org/)；不需要 TeX、Pandoc、Node.js，也不需要管理员权限。
+以后需要更新时，粘贴同一段话即可；安装流程是幂等的，并会复用兼容的运行环境。更新还会修复 v0.2.3 之前安装的独立副本：这些副本带有插件清单，因而在 Claude Code 中显示为 `econ-review@skills-dir`、在 Codex 中显示为 `econ-review:econ-review`。需要本机已有 Python 3.10+（`venv` 与 pip 引导可用）。macOS 自带的 `python3` 是 3.9；请先从 [python.org](https://www.python.org/downloads/macos/) 安装 Python 3.12，或运行 `brew install python@3.12` 或 `uv python install 3.12`，再粘贴上面的提示。完整解析 PDF 稿件还需要 `PATH` 中有 [Poppler](https://poppler.freedesktop.org/)；不需要 TeX、Pandoc、Node.js，也不需要管理员权限。
 
 <details>
 <summary>从代码检出直接安装独立技能</summary>
@@ -118,7 +118,7 @@ Reconstruct the theory and empirical design before giving detailed comments.
 
 要显式调用独立技能，在 Claude Code 中使用 `/econ-review`，在 Codex 中使用 `$econ-review`。
 
-`quick` 模式快速给出最大的风险点；`full` 模式逐一检查每个章节、表格、图形、公式、脚注和附录。完成后打开 `review/paper-review.pdf`；`review/README.md` 提供文件导览和下一轮评审的工作流程。
+`quick` 模式快速给出最大的风险点；`full` 模式逐一检查每个章节、表格、图形、公式、脚注和附录。完成后打开 `review/paper-review.pdf`；`review/README.md` 提供文件导览、在 Review Desk 中打开评审的方法，以及下一轮评审的步骤。
 
 > [!IMPORTANT]
 > **完整评审通常需要 30 分钟或更久**；篇幅长、技术性强、需要联网核对文献的论文可能明显更久。请让它运行到底——保证意见可信的验证环节发生在运行后期。需要快速把握最大风险时，请使用 `quick` 模式。
@@ -153,6 +153,8 @@ AI 同行评审通常败在两点之一：要么凭空捏造，要么给你一�
 
 它不会代写论文、不会估计录用概率、不会编造引文。遇到无法核实的内容——拿不到的数据集、读不了的图——它会如实说明，而不是装作已经核实。它也不声称胜过人类审稿人：请把它当作投稿前多出的一位严格读者，而不是同行评审的替代品。
 
+正在为期刊审稿？请先查阅该期刊关于审稿人使用 AI 的政策。许多期刊禁止把投稿上传到 AI 工具，或要求披露 AI 的使用；对于并非由你撰写的稿件，本技能会在评审前先向你确认。
+
 ## 与 Refine.ink 及其他 AI 审稿服务的比较
 
 [Refine](https://www.refine.ink/) 让经济学界认识到"AI 投稿前评审"值得认真对待，这一点值得肯定。两种工具做的是同一件事，但取舍不同，有些作者会两者都用：
@@ -168,7 +170,7 @@ AI 同行评审通常败在两点之一：要么凭空捏造，要么给你一�
 
 其他托管审稿服务——referee3.app、斯坦福的 PaperReview.ai——在这些取舍上与 Refine 属于同一侧。
 
-如果命令行不在你的选项之内，托管服务是当下更实际的选择——或者等待本技能的[托管版本](#路线图)。在给出任何质量对比结论之前，我们会先发布带查准率与查全率的测评基准——这一承诺已列入路线图。
+如果命令行不在你的选项之内，托管服务是当下更实际的选择——或者等待本技能的[托管版本](#路线图)。本页不作任何质量对比结论：随仓库附带的测评用例检验的是是否运行了正确的审查环节，而不是一次评审能发现多少真实错误。
 
 ## Review Desk（可选）
 
@@ -185,11 +187,11 @@ AI 同行评审通常败在两点之一：要么凭空捏造，要么给你一�
 
 一切都在你的电脑上完成——无上传、无账号。
 
-推荐安装方式（`--with-review-desk`）附带经过校验的预构建版本；它会输出一条固定的启动命令并打开 `http://127.0.0.1:48127/`。再次启动会复用已校验的本地服务；`--port PORT` 可换用其他回环端口。只有修改或重新构建查看器才需要 Node.js；见 [review-viewer/README.md](review-viewer/README.md)。
+推荐安装方式（`--with-review-desk`）附带经过校验的预构建版本；它会输出一条固定的启动命令并打开 `http://127.0.0.1:48127/`。再次启动会复用已校验的本地服务；`--port PORT` 可换用其他回环端口。你的决定保存在浏览器中、且只对应该地址，切换浏览器或端口前请先导出。想在第一次评审完成前先试用 Review Desk，可在本仓库的检出副本中选择 **Open review folder** 并选中 `docs/sample-review/review`：这是一个小型的合成评审包。只有修改或重新构建查看器才需要 Node.js；见 [review-viewer/README.md](review-viewer/README.md)。
 
 ## 路线图
 
-- 带公开查准率与查全率的测评基准——先于任何对比性结论
+- 盲测基准：错误嵌入稿件而非在文中自述，并附密封的答案；在此之前不发布查准率、查全率或任何对比性结论
 - 更多针对具体研究设计的核查（RCT、shift-share、合成控制、结构式、宏观 VAR）
 - 面向"作者—执行智能体—复审"多轮交接的易用性改进
 - **托管版本**——上传 PDF 即可获得完整评审，无需命令行。后续推出。

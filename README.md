@@ -14,7 +14,7 @@
 |---|---|
 | ![First page of a sample AI referee report on an economics paper: overall assessment, recommendation, and main grounds](docs/images/sample-referee-report.png) | ![A detailed-comments page: each issue quotes the manuscript, explains the concern, and ends in concrete suggestions](docs/images/sample-detailed-comments.png) |
 
-*Two pages from the bundled [25-comment sample review (PDF)](docs/sample-review/paper-review.pdf), produced cold with default settings on a [demonstration manuscript](docs/sample-review/demo-paper.pdf) written with intentional errors.*
+*Two pages from the bundled [25-comment sample review (PDF)](docs/sample-review/paper-review.pdf), produced cold in full mode for a leading field journal on a [demonstration manuscript](docs/sample-review/demo-paper.pdf) written with intentional errors. The sample was generated before v0.3.0, which states each repair once and gives revision-plan items the same numbers as the report.*
 
 `econ-review` is an Agent Skill for Claude Code and Codex. It reads your paper the way a careful journal referee would: first it works out what you are claiming and how your evidence supports it, then it checks everything it can verify — identification, tables, proofs, numbers, references, writing — and gives you a referee report plus a step-by-step plan for fixing what it found. It never rewrites your paper. That part stays yours.
 
@@ -22,7 +22,7 @@
 
 ## What you get
 
-A finished review lands in a clean `review/` folder next to your paper:
+A finished review lands in a clean `review/` folder next to your paper. If that folder is synced (an Overleaf project in Dropbox, iCloud Drive, OneDrive) or tracked by git, the agent asks first, because the review is confidential:
 
 - **`paper-review.pdf`** — the primary report: a professionally typeset, bookmarked PDF with the referee report, every detailed comment, editing comments, and the revision plan.
 - **`reports/`** — the same reports as Markdown. The revision plan is a prioritized to-do list written to be handed straight to your agents.
@@ -65,7 +65,9 @@ reuses a compatible runtime. Updating also repairs a standalone copy installed
 before v0.2.3, which carried plugin manifests and therefore appeared as
 `econ-review@skills-dir` in Claude Code and `econ-review:econ-review` in Codex.
 Installing needs an existing Python 3.10+ with working `venv` and pip
-bootstrapping support. Full manuscript-PDF ingestion also needs
+bootstrapping support. On macOS the built-in `python3` is 3.9; install Python
+3.12 from [python.org](https://www.python.org/downloads/macos/), or run
+`brew install python@3.12` or `uv python install 3.12`, before pasting the prompt. Full manuscript-PDF ingestion also needs
 [Poppler](https://poppler.freedesktop.org/) on `PATH`; TeX, Pandoc, Node.js, and
 administrator access are not required.
 
@@ -145,7 +147,7 @@ Reconstruct the theory and empirical design before giving detailed comments.
 To invoke the standalone skill explicitly, use `/econ-review` in Claude Code
 or `$econ-review` in Codex.
 
-`quick` gives you the biggest risks fast. `full` goes through every section, table, figure, equation, footnote, and appendix. When it finishes, open `review/paper-review.pdf`; use `review/README.md` for the file map and next-round workflow.
+`quick` gives you the biggest risks fast. `full` goes through every section, table, figure, equation, footnote, and appendix. When it finishes, open `review/paper-review.pdf`; `review/README.md` gives the file map, how to open the review in Review Desk, and the next-round steps.
 
 > [!IMPORTANT]
 > **A full review often takes 30 minutes or longer**, and a long or technical paper with live literature verification may take substantially longer. Let it run to the end — the verification passes that keep the comments trustworthy happen late in the run. Use `quick` mode when you need a faster first pass over the largest risks.
@@ -180,6 +182,8 @@ Any kind of economics paper: empirical, experimental, descriptive, prediction an
 
 It won't write your paper, estimate your acceptance odds, or invent citations. When it couldn't check something — a dataset it didn't have, a figure it couldn't read — it says so instead of pretending. And it doesn't claim to beat human referees: treat it as a tough extra reader before submission, not a replacement for peer review.
 
+Refereeing a submission for a journal? Check the journal's reviewer AI policy first. Many journals bar uploading a submission to AI tools or require you to disclose AI use, and the skill asks before it reviews a manuscript you did not write.
+
 ## How it compares to Refine.ink and other AI review services
 
 [Refine](https://www.refine.ink/) deserves credit for showing economists that AI pre-submission review is worth taking seriously. The two tools do the same job with different trade-offs, and some authors will want both:
@@ -195,7 +199,7 @@ It won't write your paper, estimate your acceptance odds, or invent citations. W
 
 Other hosted reviewers — referee3.app, Stanford's PaperReview.ai — sit on Refine's side of the same trade-offs.
 
-If a command line is not an option, a hosted service is the practical choice today — or wait for the [hosted version](#roadmap) of this skill. A measured benchmark with published precision and recall comes before any comparative quality claims here — that promise is on the roadmap.
+If a command line is not an option, a hosted service is the practical choice today — or wait for the [hosted version](#roadmap) of this skill. This page makes no comparative quality claims: the bundled benchmark cases check that the right audits run, not how many real errors a review finds.
 
 ## The Review Desk (optional)
 
@@ -212,11 +216,11 @@ A local web viewer that turns a long review into a decided, trackable revision p
 
 Everything stays on your machine — no uploads or accounts.
 
-The recommended installer includes a verified, prebuilt copy with `--with-review-desk`; it prints one stable launch command and opens `http://127.0.0.1:48127/`. Launching it again reuses the verified local server; `--port PORT` selects another loopback port. Node.js is required only to modify or rebuild the viewer; see [review-viewer/README.md](review-viewer/README.md).
+The recommended installer includes a verified, prebuilt copy with `--with-review-desk`; it prints one stable launch command and opens `http://127.0.0.1:48127/`. Launching it again reuses the verified local server; `--port PORT` selects another loopback port. Your decisions are saved in the browser for that address, so export them before switching browsers or ports. To try the Desk before your first review finishes, choose **Open review folder** and select `docs/sample-review/review` from a checkout of this repository: a small synthetic review package. Node.js is required only to modify or rebuild the viewer; see [review-viewer/README.md](review-viewer/README.md).
 
 ## Roadmap
 
-- A measured benchmark with published precision and recall — before any comparative claims
+- A blind benchmark, with errors embedded rather than described and a sealed answer key, before any precision, recall, or comparative claims
 - More design-specific checks (RCT, shift-share, synthetic control, structural, macro-VAR)
 - Round-by-round usability improvements for author, implementation-agent, and re-review handoffs
 - **A hosted version** — upload a PDF and receive the full review without a command line. Coming later.
