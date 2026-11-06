@@ -83,7 +83,9 @@ and the bundled Review Desk. Do not ask the user to copy or run commands.
    - `SKILL.md` has `name: econ-review`, the expected trigger description, and
      no automatic-invocation opt-out.
    - `agents/openai.yaml` does not disable implicit invocation.
-   - The installed tree matches the verified source manifest.
+   - The installed tree matches the standalone manifest recorded in its
+     `.econ-review-install.json` (the verified source minus the native-plugin
+     payload).
    - The standalone tree contains no `.claude-plugin/`, `.codex-plugin/`, or
      `skills/` directory.
    - `INSTALLED_SKILL/scripts/setup_econ_review.py --runtime-path` returns the
