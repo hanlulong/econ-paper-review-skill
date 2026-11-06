@@ -4,7 +4,7 @@ Load only components activated by the claim-to-burden map in `design-audit.md`. 
 
 ## Empirical causal and experimental
 
-Reconstruct treatment/exposure, outcome, unit, timing, population, estimand, assignment/variation, counterfactual, interference, anticipation, compliance, attrition, measurement, selection, and the uncertainty level implied by assignment and sampling. Audit whether variation identifies the stated object, conditioning changes the comparison, uncertainty matches the design, and interpretation stays within the estimand. Recommend a test only when it distinguishes a live alternative. This component covers unfamiliar designs even without a named gate.
+Reconstruct treatment/exposure, outcome, unit, timing, population, estimand, assignment/variation, counterfactual, interference, anticipation, compliance, attrition, measurement, selection, and the uncertainty level implied by assignment and sampling. Audit whether variation identifies the stated object, conditioning changes the comparison, uncertainty matches the design, and interpretation stays within the estimand. List every control in the main specification and ask whether treatment could move it; a post-treatment or mediator control is a bad control, and reading its coefficient (or the shift in the treatment coefficient when it is added) as mechanism evidence is a separate claim that needs its own design. Check which comparison units exist at each date: when every unit is eventually treated, never-treated controls do not exist. Recommend a test only when it distinguishes a live alternative. This component covers unfamiliar designs even without a named gate.
 
 ## Descriptive, measurement, and forecasting
 
