@@ -20,6 +20,13 @@ the native plugin update) to pick it up.
   Lua, category-code, or expansion command are now rejected with a message that
   names the offending token. Shell escape stays disabled; `openin_any=p` is
   deliberately not used because it breaks LuaLaTeX font loading.
+- The allowlist also leaves out `\not` and `\smash`, whose unicode-math and
+  amsmath definitions look up a command named after their argument, and every
+  command that errors or lacks a glyph in either bundled math font (such as
+  `\Box`, `\intercal`, and `\Cap`). Such spans are now refused with a named
+  command instead of passing the check and failing the render. `\hdots`,
+  `\notag`, and `\nonumber` are accepted. `references/output-contracts.md`
+  lists the usual rewrites, for example `\not\in` to `\notin`.
 - The bundled Review Desk now renders math with KaTeX 0.18.10 throughout
   (previously 0.16.47 markup with 0.17.0 styles), outside the
   GHSA-238p-pmpm-9mq7 range. `econ-review/assets/review-desk.zip` is rebuilt.
