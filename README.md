@@ -218,7 +218,7 @@ A local web viewer that turns a long review into a decided, trackable revision p
 
 Everything stays on your machine — no uploads or accounts.
 
-The recommended installer includes a verified, prebuilt copy with `--with-review-desk`; it prints one stable launch command and opens `http://127.0.0.1:48127/`. Launching it again reuses the verified local server; `--port PORT` selects another loopback port. Your decisions are saved in the browser for that address, so export them before switching browsers or ports. To try the Desk before your first review finishes, choose **Open review folder** and select `docs/sample-review/review` from a checkout of this repository: a small synthetic review package. Node.js is required only to modify or rebuild the viewer; see [review-viewer/README.md](review-viewer/README.md).
+The recommended installer includes a verified, prebuilt copy with `--with-review-desk`; it prints one stable launch command and opens `http://127.0.0.1:48127/`. Launching it again reuses the verified local server; `--port PORT` selects another loopback port. Your decisions are saved in the browser for that address, so export them before switching browsers or ports. To try the Desk before your first review finishes, choose **Open review folder** and select `docs/sample-review/review` from a copy of this repository (ask your agent to clone it, or use **Code → Download ZIP** on GitHub): a small synthetic review package. Node.js is required only to modify or rebuild the viewer; see [review-viewer/README.md](review-viewer/README.md).
 
 ## Roadmap
 

@@ -187,7 +187,7 @@ AI 同行评审通常败在两点之一：要么凭空捏造，要么给你一�
 
 一切都在你的电脑上完成——无上传、无账号。
 
-推荐安装方式（`--with-review-desk`）附带经过校验的预构建版本；它会输出一条固定的启动命令并打开 `http://127.0.0.1:48127/`。再次启动会复用已校验的本地服务；`--port PORT` 可换用其他回环端口。你的决定保存在浏览器中、且只对应该地址，切换浏览器或端口前请先导出。想在第一次评审完成前先试用 Review Desk，可在本仓库的检出副本中选择 **Open review folder** 并选中 `docs/sample-review/review`：这是一个小型的合成评审包。只有修改或重新构建查看器才需要 Node.js；见 [review-viewer/README.md](review-viewer/README.md)。
+推荐安装方式（`--with-review-desk`）附带经过校验的预构建版本；它会输出一条固定的启动命令并打开 `http://127.0.0.1:48127/`。再次启动会复用已校验的本地服务；`--port PORT` 可换用其他回环端口。你的决定保存在浏览器中、且只对应该地址，切换浏览器或端口前请先导出。想在第一次评审完成前先试用 Review Desk，可选择 **Open review folder**，并在本仓库的本地副本中选中 `docs/sample-review/review`（可让智能体克隆仓库，或在 GitHub 上使用 **Code → Download ZIP**）：这是一个小型的合成评审包。只有修改或重新构建查看器才需要 Node.js；见 [review-viewer/README.md](review-viewer/README.md)。
 
 ## 路线图
 
