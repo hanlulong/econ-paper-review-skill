@@ -73,7 +73,7 @@ and the bundled Review Desk. Do not ask the user to copy or run commands.
    exactly one client flag. Use native path syntax on Windows. The setup copies
    the complete standalone skill atomically (everything except the
    native-plugin manifests and `skills/` adapters), replaces a plugin-shaped
-   copy left by a release before 0.2.3, preserves a modified prior copy,
+   copy left by a release before 0.3.0, preserves a modified prior copy,
    creates or reuses a private user-owned environment, installs only the
    version-constrained core requirements, and installs the manifest-verified
    Review Desk. It never uploads a manuscript or alters a system Python
@@ -358,7 +358,7 @@ skill directory is created, start a new session. If it appears twice, identify
 which same-client copy is standalone and which is native or legacy; verify the
 standalone copy first, then remove only the duplicate belonging to that client.
 
-A standalone copy installed by a release before 0.2.3 also contains the plugin
+A standalone copy installed by a release before 0.3.0 also contains the plugin
 manifests and `skills/` adapters, so Claude Code lists it as
 `econ-review@skills-dir` and Codex shows `econ-review:econ-review` (twice) plus
 `econ-review:econ-review-setup`. Rerun the standalone update; it replaces that

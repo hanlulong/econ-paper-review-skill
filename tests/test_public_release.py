@@ -383,7 +383,7 @@ class InstallerTests(unittest.TestCase):
             destination = home / ".agents" / "skills" / "econ-review"
             legacy = home / ".codex" / "skills" / "econ-review"
             ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store")
-            # Releases before 0.2.3 copied the complete plugin tree.
+            # Releases before 0.3.0 copied the complete plugin tree.
             shutil.copytree(ROOT / "econ-review", destination, ignore=ignore)
             shutil.copytree(ROOT / "econ-review", legacy, ignore=ignore)
 

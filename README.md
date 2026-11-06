@@ -62,7 +62,7 @@ not ask me to run commands. Report completion or the one genuine blocker.
 
 Use the same prompt later to update Econ Review; the workflow is idempotent and
 reuses a compatible runtime. Updating also repairs a standalone copy installed
-before v0.2.3, which carried plugin manifests and therefore appeared as
+before v0.3.0, which carried plugin manifests and therefore appeared as
 `econ-review@skills-dir` in Claude Code and `econ-review:econ-review` in Codex.
 Installing needs an existing Python 3.10+ with working `venv` and pip
 bootstrapping support. On macOS the built-in `python3` is 3.9; install Python

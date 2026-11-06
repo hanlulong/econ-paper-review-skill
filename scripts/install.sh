@@ -213,7 +213,7 @@ PY
 # Usage: skill_tree_is_current SOURCE DESTINATION [plugin-shaped]
 # Compares DESTINATION with the standalone layout of SOURCE, which omits the
 # native-plugin payload. "plugin-shaped" compares with the complete source
-# tree instead, which is how releases before 0.2.3 copied standalone skills.
+# tree instead, which is how releases before 0.3.0 copied standalone skills.
 skill_tree_is_current() {
   python3 - "$1" "$2" "${3:-standalone}" <<'PY'
 import fnmatch

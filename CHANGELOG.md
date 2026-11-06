@@ -5,10 +5,13 @@ All notable changes to Econ Review are recorded here. Versions follow
 `econ-review--vX.Y.Z`. The version is declared in both
 `econ-review/.claude-plugin/plugin.json` and `econ-review/.codex-plugin/plugin.json`.
 
-## 0.2.3 — 2026-11-06
+## 0.3.0 — 2026-11-06
 
-A security and install-layout release. Rerun the standalone install prompt (or
-the native plugin update) to pick it up.
+A security, install-layout, PDF-ingestion and report-generator release. Rerun
+the standalone install prompt (or the native plugin update) to pick it up. It
+is a minor release because the standalone layout, PDF ingestion and generated
+reports all change; v0.2.3 was planned but never tagged, and its changes are
+included here.
 
 ### Security
 
@@ -37,6 +40,43 @@ the native plugin update) to pick it up.
 
 ### Fixed
 
+- PDF ingestion no longer fails on two common economics layouts. Text that runs
+  past the page edge (an overfull regression table, including Table 2 of the
+  bundled demo paper) is clipped to the page box and reported as a page
+  warning that the exhibit is probably cut off, instead of failing verification
+  with "invalid or out-of-page bounds". Landscape pages (`/Rotate 90` or `270`,
+  as from `pdflscape`) are recorded in their displayed orientation, so the
+  render-size check matches. A failed verification now says what to do next.
+  Regression tests cover both layouts and an end-to-end ingest of the demo
+  paper.
+- Updates are idempotent again. Running a bundled script from the installed
+  skill (the INSTALL verification step, or `finalize_review.py` during every
+  review) wrote `__pycache__`, and the next update then backed up an unchanged
+  copy as "Preserved modified prior copy". Bytecode caches for declared modules
+  no longer count as edits, `install.sh` ignores the Python installer's state
+  file, and a byte-identical copy left by `install.sh` is replaced without a
+  backup.
+- "Comment N" now means the same issue in every document. The revision plan
+  labels each item with its referee-report number (`Comment N`) or its
+  editing-comment number (`Editing comment N`) instead of numbering its own
+  items, and editing-comment cross-references say "Editing comment N". Within
+  a priority level the plan lists prerequisites first and otherwise keeps the
+  report's order of importance. The validator accepts the new labels and plans
+  from earlier releases.
+- Generated comments state each repair once. Suggestions (and the plan's
+  Action line) drop sentences of `fix.how` that restate `minimum_repair` or
+  `fix.what` in other words, and Concern drops sentences that restate the
+  Issue. Exact-substring checks missed these paraphrases, which appeared in
+  about ten comments of the bundled sample.
+- Verbatim quotes rejoin the line breaks of the PDF text layer, and the comment
+  guidance asks for quotations that run to a sentence boundary and keep the
+  words the concern depends on.
+- The revision plan names a target tier in prose ("a leading field journal")
+  instead of the schema value `leading-field`.
+- Comparator citations in "Closest literature" print the venue and DOI.
+- The delivered `review/README.md` explains how to open the review in Review
+  Desk, that decisions are stored per browser and port, and the round-2 steps;
+  its contents sentence lists only the documents the PDF contains.
 - Standalone installs no longer copy the native-plugin payload
   (`.claude-plugin/`, `.codex-plugin/`, `skills/`). With it, Claude Code loaded
   a standalone copy as the namespaced `econ-review@skills-dir` plugin and Codex
@@ -57,8 +97,40 @@ the native plugin update) to pick it up.
 - Installer tests no longer inherit an exported `CLAUDE_CONFIG_DIR` or
   `CODEX_HOME`, and viewer-dependent tests skip when the viewer is not built.
 
+### Added
+
+- Before a review, the skill asks whether the user is an author or has the
+  journal's permission when the request reads as refereeing someone else's
+  manuscript, and summarizes the AEA, Econometric Society, Elsevier and
+  Springer Nature reviewer AI policies (checked 2026-11-06) in
+  `references/red-lines.md`. The Reject/R&R recommendation stays in the report.
+- `scripts/review_location.py` reports when `review/` would be written into an
+  Overleaf project in Dropbox, another Dropbox, iCloud Drive, OneDrive or
+  Google Drive folder, or a git work tree, so the agent asks first. The default
+  location is unchanged.
+- The DiD gate covers universal rollouts (no never-treated controls, where
+  not-yet-treated comparisons run out, normalization of fully dynamic event
+  studies, citing Borusyak, Jaravel and Spiess 2024) and bad controls read as
+  mechanism evidence; the empirical preset asks about post-treatment controls.
+- The replication audit checks a data availability statement against the Data
+  and Code Availability Standard (DCAS v1.0) when an endorsing economics venue
+  is named.
+- `docs/sample-review/review/` is a small synthetic review package that Review
+  Desk can open before a first review finishes.
+- INSTALL documents a standalone uninstall and a macOS route to Python 3.10+,
+  and accepts equivalent forms of the repository origin.
+
 ### Changed
 
+- The bundled sample review (`docs/sample-review/paper-review.pdf`) predates
+  this release and is unchanged: it was produced by a model run, and no
+  structured data is stored from which to re-render it. The README says which
+  settings produced it.
+- README (English and Chinese) drops the promise of published precision and
+  recall in favour of a blind benchmark on the roadmap, since the bundled cases
+  test routing rather than recall.
+- Review Desk keeps the KaTeX 0.18.10 override under `rehype-katex` 7.0.1,
+  which declares `katex ^0.16`; the viewer's math rendering tests pass with it.
 - Optional backends: `markitdown[pdf]==0.1.7` (was 0.1.6) and
   `requests>=2.34.2,<3` for Mathpix. The core requirements, and therefore the
   managed-runtime hash, are unchanged.
@@ -69,7 +141,7 @@ the native plugin update) to pick it up.
   and source-available, and the Refine.ink comparison notes its free first
   document.
 - `INSTALL.md` documents the standalone layout, verifies it with
-  `--profile standalone`, and explains how to repair a pre-0.2.3 copy.
+  `--profile standalone`, and explains how to repair a pre-0.3.0 copy.
 
 ## 0.2.2 — 2026-07-15
 

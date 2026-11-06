@@ -1248,7 +1248,7 @@ def migrate_legacy_codex_copies(
     """Deactivate only historical Codex copies after the current install exists.
 
     ``plugin_shaped_manifest`` describes the complete source tree, including
-    the native-plugin payload that releases before 0.2.3 also copied into
+    the native-plugin payload that releases before 0.3.0 also copied into
     standalone destinations, so an unmarked copy of that layout still counts
     as generated rather than user-modified.
     """
