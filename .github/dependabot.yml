@@ -5,9 +5,28 @@ updates:
     schedule:
       interval: monthly
     groups:
-      viewer-dependencies:
+      # Majors arrive as separate pull requests so each can be reviewed and the
+      # bundled Review Desk rebuilt deliberately.
+      viewer-minor-and-patch:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # .nvmrc pins Node 22; keep the type definitions on the same major.
+      - dependency-name: "@types/node"
+        versions: [">=23"]
   - package-ecosystem: pip
     directory: /
     schedule:
       interval: monthly
+    # Raise a floor only when the current range excludes the new release;
+    # every requirements-core.txt edit changes the managed-runtime hash.
+    versioning-strategy: increase-if-necessary
+    groups:
+      python-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # reportlab is pinned for reproducible PDFs (see THIRD_PARTY_NOTICES.md);
+      # a new major needs a deliberate renderer review.
+      - dependency-name: reportlab
+        update-types: ["version-update:semver-major"]
