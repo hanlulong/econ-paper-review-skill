@@ -32,18 +32,17 @@
 
 每条意见都会引用稿件中的相关原文——如果问题出自交叉核对或计算，则直接说明依据——然后解释它为何重要、应当如何处理。示例如下（审稿报告以英文生成）：
 
-> ### Section 3: The global uniqueness claim fails at the equality boundary
+> ### 8. Section 4.2: Table 1 reports an employee mean above the employee maximum
 >
-> **Issue**: The proposition asserts strict uniqueness although the stated payoff permits a tie.
+> **Issue**: The employee mean is 23.40 even though the employee maximum is 19.00 in the same table and sample.
 >
-> **Relevant text**:
-> > The equilibrium action is unique for every parameter value.
+> **Relevant text**: Table 1 labels the employee mean as 23.40 and the employee maximum as 19.00.
 >
-> **Concern**: At equality both actions maximize payoff, so the model supports a set-valued prediction. The proposition and comparative-static summary currently state a stronger global conclusion. No tie-breaking rule or boundary restriction appears in the supplied manuscript.
+> **Concern**: An impossible mean-max relationship indicates a transcription, column-alignment, sample, or data-generation error that could extend beyond this cell. The sample description and basic data audit are not trustworthy until an impossible summary statistic is reconciled. The rendered table unambiguously displays a mean of 23.40 and a maximum of 19.00 for employees; the review cannot determine which number or column is wrong without the underlying data.
 >
-> **Suggestions**: Add a tie-breaking rule or state a set-valued equilibrium at the boundary. Align Proposition 1, its proof, and the comparative static.
+> **Suggestions**: Reproduce Table 1 from the analysis sample, correct the row or column, and audit all displayed summary statistics against the generating output. Create the table directly from the final analysis sample, compare every cell with the generating output, and update the prose mean and sample description from that same output.
 
-*（选自随附示例。完整评审会保留每一条通过验证的问题——最多 100 条实质性意见和 30 条编辑性意见。）*
+*（原文照录随附示例评审中的第 8 条意见。完整评审会保留每一条通过验证的问题——最多 100 条实质性意见和 30 条编辑性意见。）*
 
 **[阅读完整示例评审（PDF）](docs/sample-review/paper-review.pdf)**——全部 25 条意见，而不只是上面的节选。
 
@@ -60,7 +59,7 @@ exactly one active copy for this client, do not change the other client, and do
 not ask me to run commands. Report completion or the one genuine blocker.
 ```
 
-以后需要更新时，粘贴同一段话即可；安装流程是幂等的，并会复用兼容的运行环境。需要本机已有 Python 3.10+（`venv` 与 pip 引导可用）。完整解析 PDF 稿件还需要 `PATH` 中有 [Poppler](https://poppler.freedesktop.org/)；不需要 TeX、Pandoc、Node.js，也不需要管理员权限。
+以后需要更新时，粘贴同一段话即可；安装流程是幂等的，并会复用兼容的运行环境。更新还会修复 v0.2.3 之前安装的独立副本：这些副本带有插件清单，因而在 Claude Code 中显示为 `econ-review@skills-dir`、在 Codex 中显示为 `econ-review:econ-review`。需要本机已有 Python 3.10+（`venv` 与 pip 引导可用）。完整解析 PDF 稿件还需要 `PATH` 中有 [Poppler](https://poppler.freedesktop.org/)；不需要 TeX、Pandoc、Node.js，也不需要管理员权限。
 
 <details>
 <summary>从代码检出直接安装独立技能</summary>
@@ -160,7 +159,7 @@ AI 同行评审通常败在两点之一：要么凭空捏造，要么给你一�
 
 | | econ-review（本技能） | Refine.ink |
 |---|---|---|
-| **费用** | 免费、代码公开——使用你自己的 Claude Code 或 Codex 订阅 | 每次评审 $49.99（套餐价每次 $30–40，2026 年 7 月价格） |
+| **费用** | 非商业用途免费，源代码公开（source-available）——使用你自己的 Claude Code 或 Codex 订阅 | 首份文档免费，之后每次评审 $49.99（套餐价每次 $30–40，2026 年 11 月价格） |
 | **多轮迭代** | 为多轮修改而设计：评审 → 在 Review Desk 中逐条决策 → 智能体修改 → 下一轮复核每项决定 | 每次评审单独付费 |
 | **交付物** | 审稿报告 + 经验证的详细意见 + 编辑性意见 + 面向智能体的修改计划 | 审稿式实质性意见 |
 | **论文去向** | 在你自己的智能体内运行；不向我们上传任何内容，适用你现有 AI 服务商的条款 | 上传至其服务（SOC 2 / ISO 27001 认证，不用论文训练模型） |

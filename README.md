@@ -31,18 +31,17 @@ A finished review lands in a clean `review/` folder next to your paper:
 
 Every comment quotes the relevant manuscript text — or, when the issue comes from a checked comparison or calculation, states that basis directly — then explains why it matters and what to do:
 
-> ### Section 3: The global uniqueness claim fails at the equality boundary
+> ### 8. Section 4.2: Table 1 reports an employee mean above the employee maximum
 >
-> **Issue**: The proposition asserts strict uniqueness although the stated payoff permits a tie.
+> **Issue**: The employee mean is 23.40 even though the employee maximum is 19.00 in the same table and sample.
 >
-> **Relevant text**:
-> > The equilibrium action is unique for every parameter value.
+> **Relevant text**: Table 1 labels the employee mean as 23.40 and the employee maximum as 19.00.
 >
-> **Concern**: At equality both actions maximize payoff, so the model supports a set-valued prediction. The proposition and comparative-static summary currently state a stronger global conclusion. No tie-breaking rule or boundary restriction appears in the supplied manuscript.
+> **Concern**: An impossible mean-max relationship indicates a transcription, column-alignment, sample, or data-generation error that could extend beyond this cell. The sample description and basic data audit are not trustworthy until an impossible summary statistic is reconciled. The rendered table unambiguously displays a mean of 23.40 and a maximum of 19.00 for employees; the review cannot determine which number or column is wrong without the underlying data.
 >
-> **Suggestions**: Add a tie-breaking rule or state a set-valued equilibrium at the boundary. Align Proposition 1, its proof, and the comparative static.
+> **Suggestions**: Reproduce Table 1 from the analysis sample, correct the row or column, and audit all displayed summary statistics against the generating output. Create the table directly from the final analysis sample, compare every cell with the generating output, and update the prose mean and sample description from that same output.
 
-*(From the bundled example. Full reviews keep every issue that survives verification — up to 100 substantive comments and 30 editing comments.)*
+*(Comment 8 of the bundled sample review, verbatim. Full reviews keep every issue that survives verification — up to 100 substantive comments and 30 editing comments.)*
 
 **[Read the full sample review (PDF)](docs/sample-review/paper-review.pdf)** — all 25 comments, not just the excerpt above.
 
@@ -62,7 +61,9 @@ not ask me to run commands. Report completion or the one genuine blocker.
 ```
 
 Use the same prompt later to update Econ Review; the workflow is idempotent and
-reuses a compatible runtime. It needs an existing Python 3.10+ with working
+reuses a compatible runtime. Updating also repairs a standalone copy installed
+before v0.2.3, which carried plugin manifests and therefore appeared as
+`econ-review@skills-dir` in Claude Code and `econ-review:econ-review` in Codex. It needs an existing Python 3.10+ with working
 `venv` and pip bootstrapping support. Full manuscript-PDF ingestion also needs
 [Poppler](https://poppler.freedesktop.org/) on `PATH`; TeX, Pandoc, Node.js, and
 administrator access are not required.
@@ -184,7 +185,7 @@ It won't write your paper, estimate your acceptance odds, or invent citations. W
 
 | | econ-review (this skill) | Refine.ink |
 |---|---|---|
-| **Cost** | Free, open code — you bring your own Claude Code or Codex subscription | $49.99 per review ($30–40 each in packs, as of July 2026) |
+| **Cost** | Free for noncommercial use; source-available — you bring your own Claude Code or Codex subscription | First document free, then $49.99 per review ($30–40 each in packs, as of November 2026) |
 | **Iteration** | Built for rounds: review → decide each comment in Review Desk → your agents revise → the next round rechecks every decision | Each review is a separate purchase |
 | **Deliverable** | Referee report + verified detailed comments + editing comments + a revision plan written for your agents | Referee-style substantive comments |
 | **Where your paper goes** | Runs inside your own agent; nothing is uploaded to us, and your existing AI-provider terms apply | Uploaded to their service (SOC 2 / ISO 27001 certified, no training on papers) |
