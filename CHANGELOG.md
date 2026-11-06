@@ -56,7 +56,7 @@ the native plugin update) to pick it up.
   `requests>=2.34.2,<3` for Mathpix. The core requirements, and therefore the
   managed-runtime hash, are unchanged.
 - Dependabot leaves satisfied version ranges alone, groups minor and patch
-  updates, ignores reportlab majors, and keeps `@types/node` on Node 22.
+  updates, and keeps `@types/node` on Node 22.
 - README (English and Chinese): the sample excerpt is now comment 8 of the
   bundled sample review, the license is described as free for noncommercial use
   and source-available, and the Refine.ink comparison notes its free first
