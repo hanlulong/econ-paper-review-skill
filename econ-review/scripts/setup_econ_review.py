@@ -1131,6 +1131,10 @@ def ensure_runtime(
                 "--no-input",
                 "--disable-pip-version-check",
                 "--no-cache-dir",
+                # Choose the newest release with a prebuilt wheel for this
+                # platform (for example cryptography on Intel macOS) rather
+                # than building a newer source release that needs a compiler.
+                "--prefer-binary",
                 "-r",
                 str(source / "requirements-core.txt"),
             ],
@@ -1140,7 +1144,9 @@ def ensure_runtime(
         if installed.returncode:
             raise InstallError(
                 "core Python dependency installation failed; no command output was echoed to avoid "
-                "leaking credentials from package-index configuration"
+                "leaking credentials from package-index configuration. A common cause is a package "
+                "with no prebuilt wheel for this Python and platform, which pip then tries to build "
+                "from source; Python 3.12 to 3.14 from python.org, Homebrew, or uv usually avoids it"
             )
         runtime_version = python_major_minor(python)
         if runtime_version is None or runtime_version < MINIMUM_PYTHON:

@@ -155,6 +155,10 @@ included here.
   test routing rather than recall.
 - Review Desk keeps the KaTeX 0.18.10 override under `rehype-katex` 7.0.1,
   which declares `katex ^0.16`; the viewer's math rendering tests pass with it.
+- The managed runtime's `pip install` uses `--prefer-binary`, so a platform
+  without a wheel for a dependency's newest release (such as cryptography on
+  Intel macOS) gets the newest release that has one instead of a source build
+  that needs a compiler, and a failed install names that likely cause.
 - Optional backends: `markitdown[pdf]==0.1.7` (was 0.1.6) and
   `requests>=2.34.2,<3` for Mathpix. The core requirements, and therefore the
   managed-runtime hash, are unchanged.

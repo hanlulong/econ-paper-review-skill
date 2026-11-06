@@ -616,6 +616,8 @@ class ManagedInstallerTests(unittest.TestCase):
 
             pip_command = quiet.call_args_list[0].args[0]
             self.assertIn("--no-cache-dir", pip_command)
+            # Prefer wheels so platforms without the newest wheel need no compiler.
+            self.assertIn("--prefer-binary", pip_command)
 
     def test_runtime_reuse_compares_the_managed_interpreter_version(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
