@@ -1676,7 +1676,8 @@ class ManagedInstallerTests(unittest.TestCase):
             )
             self.assertEqual(len(preserved), 1)
             self.assertEqual(preserved[0].read_text(encoding="utf-8"), "preserve me")
-            self.assertIn("Preserved modified prior copy", result.stdout)
+            # The folder has no install record, so it is kept without being called modified.
+            self.assertIn("Preserved prior copy (it has no install record", result.stdout)
 
     @unittest.skipIf(os.name == "nt", "symlink creation is privilege-dependent on Windows")
     def test_install_refuses_symlinked_canonical_destination_ancestor(self) -> None:
