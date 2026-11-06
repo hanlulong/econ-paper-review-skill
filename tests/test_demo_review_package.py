@@ -59,6 +59,19 @@ class DemoReviewPackageTests(unittest.TestCase):
         }
         self.assertEqual(top_level, expected_files)
 
+    def test_delivery_readme_lists_contents_as_prose_and_explains_review_desk(self) -> None:
+        module = load_delivery_module()
+        self.assertEqual(module.combined_contents("the referee report", "the revision plan"), "the referee report and the revision plan")
+        self.assertEqual(
+            module.combined_contents("the referee report", "the editing comments", "the revision plan"),
+            "the referee report, the editing comments, and the revision plan",
+        )
+        readme = module.delivery_readme(FIXTURE)
+        self.assertIn("## Open the review in Review Desk", readme)
+        self.assertIn("http://127.0.0.1:48127/", readme)
+        self.assertIn("## Next round", readme)
+        self.assertIn("review-actions.json", readme)
+
 
 if __name__ == "__main__":
     unittest.main()
