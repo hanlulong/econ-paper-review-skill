@@ -6,8 +6,12 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import re
 import shutil
+import subprocess
 import sys
+import tempfile
+import unicodedata
 import unittest
 from datetime import date
 from pathlib import Path
@@ -64,11 +68,69 @@ class LatexMarkdownSafetyTests(unittest.TestCase):
             r"\(\write18{touch escaped}\)",
             "$$\\begin{document}x\\end{document}$$",
             "$$\\begin{tikzpicture}x\\end{tikzpicture}$$",
+            # Known bypasses of the former denylist.
+            r"$\InputIfFileExists{x}{}{}$",
+            r"$\makeatletter\@input{x}\makeatother$",
+            r"$\IfFileExists{x}{a}{b}$",
+            r"$\luafunction0$",
+            r"$\expandafter\x$",
+            r"$\readline\x to\y$",
+            r"$\luaescapestring{x}$",
+            r"$\includepdf{x}$",
+            r"$\csname input\endcsname{x}$",
+            r"$\makeatletter x\makeatother$",
+            r"$\@@input x$",
+            r"$x^^5cinput{x}$",
+            r"$x^^^^005cinput{x}$",
+            r"\(\string\input\)",
+            r"$\let\x\input$",
+            r"$\alphaé$",
+            r"$\'a$",
+            "$$\\begin{aligned}x &= \\InputIfFileExists{x}{}{}\\end{aligned}$$",
+            "\\[\n\\directlua{os.exit()}\n\\]",
         )
         for markdown in unsafe_spans:
             with self.subTest(markdown=markdown):
                 with self.assertRaisesRegex(MODULE.LatexRenderError, "unsafe"):
                     MODULE.markdown_to_latex(markdown)
+
+    def test_control_characters_are_rejected_inside_explicit_math(self) -> None:
+        for content in ("x\x01y", "x\x0b\x0b5cinput{x}", "x\x7f"):
+            with self.subTest(content=content):
+                with self.assertRaisesRegex(MODULE.LatexRenderError, "unsafe character"):
+                    MODULE._safe_math(content)
+
+    def test_math_allowlist_never_admits_file_lua_or_expansion_primitives(self) -> None:
+        for word in sorted(MODULE.MATH_CONTROL_WORDS):
+            with self.subTest(word=word):
+                self.assertRegex(word, r"^[A-Za-z]+$")
+                self.assertIsNone(MODULE.FORBIDDEN_MATH_CONTROL_WORD.match(word))
+        for primitive in (
+            "input", "InputIfFileExists", "IfFileExists", "include", "includepdf",
+            "includegraphics", "read", "readline", "openin", "luafunction",
+            "luaescapestring", "directlua", "latelua", "expandafter", "csname",
+            "makeatletter", "catcode", "scantokens", "def", "let", "write",
+        ):
+            with self.subTest(primitive=primitive):
+                self.assertNotIn(primitive, MODULE.MATH_CONTROL_WORDS)
+                self.assertIsNotNone(MODULE.FORBIDDEN_MATH_CONTROL_WORD.match(primitive))
+
+    def test_common_economics_math_passes_the_allowlist_unchanged(self) -> None:
+        spans = (
+            r"\hat{\beta}_{\mathrm{OLS}} = (X'X)^{-1}X'y",
+            r"\mathbb{E}[\varepsilon_i \mid X_i] = 0",
+            r"\sqrt{n}(\hat\theta - \theta_0) \xrightarrow{d} \mathcal{N}(0, \sigma^2)",
+            r"\left\{ x \in \mathbb{R}^k \,:\, \lVert x \rVert \le 1 \right\}",
+            r"\operatorname*{arg\,max}_{\theta \in \Theta} \sum_{i=1}^{n} \ell_i(\theta)",
+            r"\text{if } t \geq 0,\quad \Pr(D_i = 1 \mid Z_i) \neq \tfrac{1}{2}",
+            r"\$5 \times 10^{3} \approx \infty \cdot 0 \%",
+            "\\begin{aligned} y_{it} &= \\alpha_i + \\lambda_t + \\beta D_{it} \\\\ "
+            "\\partial y / \\partial x &\\propto \\int_0^1 f(u)\\, du \\end{aligned}",
+            "\\begin{cases} 1 & \\text{treated} \\\\ 0 & \\text{otherwise} \\end{cases}",
+        )
+        for content in spans:
+            with self.subTest(content=content):
+                self.assertEqual(MODULE._safe_math(content), content)
 
     def test_unmistakable_legacy_math_is_typeset_without_touching_snake_case_prose(self) -> None:
         rendered = MODULE.render_inline(
@@ -349,6 +411,100 @@ class LatexToolchainAndProfileTests(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("lualatex"), "LuaLaTeX is not installed")
 class RealLuaLatexSmokeTests(unittest.TestCase):
+    def test_local_file_contents_never_reach_the_pdf_through_math(self) -> None:
+        canary_text = "CANARYSECRETCONTENTS"
+        with tempfile.TemporaryDirectory(prefix="econ-review-canary-") as temporary:
+            canary = Path(temporary) / "canary.tex"
+            canary.write_text(canary_text + "\n", encoding="utf-8")
+            payloads = (
+                rf"$\InputIfFileExists{{{canary.as_posix()}}}{{}}{{}}$",
+                rf"$\makeatletter\@input{{{canary.as_posix()}}}\makeatother$",
+                rf"$\IfFileExists{{{canary.as_posix()}}}{{\input{{{canary.as_posix()}}}}}{{}}$",
+                rf"$\text{{\InputIfFileExists{{{canary.as_posix()}}}{{}}{{}}}}$",
+            )
+            for payload in payloads:
+                with self.subTest(payload=payload):
+                    report = document(
+                        "# Referee report\n\n## Overall assessment\n\n"
+                        f"The manuscript states {payload} in the appendix.\n"
+                    )
+                    try:
+                        result = MODULE.render_review_pdf(
+                            paper_title=PAPER_TITLE,
+                            assessment_date=ASSESSMENT_DATE,
+                            documents=[report],
+                            renderer="lualatex",
+                            page_size="letter",
+                            timeout=90,
+                        )
+                    except MODULE.LatexRenderError:
+                        continue
+                    reader = PdfReader(io.BytesIO(result.pdf_bytes))
+                    full_text = "".join(page.extract_text() or "" for page in reader.pages)
+                    # Math mode typesets the leaked letters as spaced
+                    # mathematical italics; fold them back to ASCII first.
+                    normalized = re.sub(r"\s+", "", unicodedata.normalize("NFKC", full_text))
+                    self.assertNotIn(canary_text, normalized)
+
+    def test_allowlisted_economics_math_compiles_cleanly(self) -> None:
+        sentinel = "Allowlisted math sentinel"
+        report = document(
+            "# Referee report\n\n## Overall assessment\n\n"
+            f"{sentinel}: $\\hat{{\\beta}}_{{\\mathrm{{OLS}}}} = (X'X)^{{-1}}X'y$, "
+            "$\\mathbb{E}[\\varepsilon_i \\mid X_i] = 0$, and "
+            "\\(\\sqrt{n}(\\hat\\theta - \\theta_0) \\xrightarrow{d} \\mathcal{N}(0, \\sigma^2)\\).\n\n"
+            "$$\\operatorname*{arg\\,max}_{\\theta \\in \\Theta} \\sum_{i=1}^{n} \\ell_i(\\theta)"
+            " \\quad \\text{s.t.} \\quad \\left\\lVert \\theta \\right\\rVert \\le 1$$\n\n"
+            "$$\\begin{aligned} y_{it} &= \\alpha_i + \\lambda_t + \\beta D_{it} + \\varepsilon_{it} \\\\\n"
+            "D_{it} &= \\begin{cases} 1 & \\text{if } t \\geq E_i \\\\ 0 & \\text{otherwise} \\end{cases}"
+            " \\end{aligned}$$\n"
+        )
+        result = MODULE.render_review_pdf(
+            paper_title=PAPER_TITLE,
+            assessment_date=ASSESSMENT_DATE,
+            documents=[report],
+            renderer="lualatex",
+            page_size="letter",
+            timeout=90,
+        )
+        reader = PdfReader(io.BytesIO(result.pdf_bytes))
+        full_text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        self.assertIn(sentinel, full_text)
+
+    def test_every_allowlisted_math_command_is_defined_by_the_template(self) -> None:
+        source = MODULE.build_latex_source(
+            paper_title=PAPER_TITLE,
+            assessment_date=ASSESSMENT_DATE,
+            documents=[document()],
+        )
+        # ``\of`` is only a delimiter of ``\root ... \of``; it is never defined.
+        probes = "\n".join(
+            rf"\ifdefined\{word}\else\typeout{{ECONREVIEWUNDEFINED:{word}}}\fi"
+            for word in sorted(MODULE.MATH_CONTROL_WORDS - {"of"})
+        )
+        source = source.replace(r"\end{document}", probes + "\n" + r"\end{document}")
+        with tempfile.TemporaryDirectory(prefix="econ-review-math-probe-") as temporary:
+            root = Path(temporary)
+            (root / "probe.tex").write_text(source, encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    shutil.which("lualatex") or "lualatex",
+                    "--no-shell-escape",
+                    "--interaction=nonstopmode",
+                    "--halt-on-error",
+                    "probe.tex",
+                ],
+                cwd=root,
+                capture_output=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=120,
+                check=False,
+            )
+            log = (root / "probe.log").read_text(encoding="utf-8", errors="replace")
+        self.assertEqual(completed.returncode, 0, log[-2000:])
+        self.assertEqual(re.findall(r"ECONREVIEWUNDEFINED:([A-Za-z]+)", log), [])
+
     def test_priority_heading_and_complete_first_action_share_a_page(self) -> None:
         priority_sentinel = "PRIORITYSENTINEL"
         action_sentinel = "ACTIONSENTINEL"
