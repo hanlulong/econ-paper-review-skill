@@ -210,6 +210,38 @@ for current, directories, files in os.walk(root, followlinks=False):
 PY
 }
 
+# Usage: discard_bytecode_caches DESTINATION
+# A current copy may hold __pycache__ folders from running the installed
+# scripts. They are not verified source, so delete them rather than let Python
+# load bytecode in place of the checked .py files.
+discard_bytecode_caches() {
+  python3 - "$1" <<'PY'
+import os
+import shutil
+import stat
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+caches = []
+for current, directories, _files in os.walk(root, followlinks=False):
+    for name in list(directories):
+        path = Path(current) / name
+        metadata = path.lstat()
+        if name != "__pycache__" or stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            continue
+        entries = list(path.iterdir())
+        if all(
+            stat.S_ISREG(entry.lstat().st_mode) and entry.name.endswith((".pyc", ".pyo"))
+            for entry in entries
+        ):
+            caches.append(path)
+            directories.remove(name)
+for cache in caches:
+    shutil.rmtree(cache)
+PY
+}
+
 # Usage: skill_tree_is_current SOURCE DESTINATION [plugin-shaped]
 # Compares DESTINATION with the standalone layout of SOURCE, which omits the
 # native-plugin payload. "plugin-shaped" compares with the complete source
@@ -676,6 +708,7 @@ install_one() {
     if [ "$DRY_RUN" -eq 1 ]; then
       echo "Would keep current $label: $destination"
     else
+      discard_bytecode_caches "$destination"
       echo "Already current $label: $destination"
     fi
     return

@@ -1491,8 +1491,17 @@ class ManagedInstallerTests(unittest.TestCase):
             self.assertIn("Already current Codex (project)", result.stdout)
             self.assertNotIn("Preserved", result.stdout)
             self.assertFalse(backups.exists())
+            # The caches are not verified source, so a current copy drops them
+            # (a planted header-matching .pyc would otherwise shadow the source).
+            self.assertFalse(any(destination.rglob("__pycache__")))
 
             if os.name != "nt":
+                subprocess.run(
+                    [sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import finalize_review",
+                     str(destination / "scripts")],
+                    text=True, capture_output=True, check=True, env=environment,
+                )
+                self.assertTrue(any(destination.rglob("__pycache__")))
                 merged = {**os.environ, "HOME": str(self.support_home)}
                 merged.pop("CLAUDE_CONFIG_DIR", None)
                 merged.pop("CODEX_HOME", None)
@@ -1502,6 +1511,7 @@ class ManagedInstallerTests(unittest.TestCase):
                 )
                 self.assertIn("Already current", shell.stdout)
                 self.assertNotIn("Preserved", shell.stdout)
+                self.assertFalse(any(destination.rglob("__pycache__")))
                 # A byte-identical copy without install state is not a user edit either.
                 (destination / ".econ-review-install.json").unlink()
                 result = self.run_installer(*arguments)

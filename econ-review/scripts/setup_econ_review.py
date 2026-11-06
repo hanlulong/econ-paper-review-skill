@@ -165,6 +165,26 @@ def _is_bytecode_cache_of(directory: Path, expected_files: set[str], root: Path)
     return True
 
 
+def discard_bytecode_caches(destination: Path, expected_files: set[str]) -> None:
+    """Delete ``__pycache__`` folders that hold only bytecode for declared modules.
+
+    An otherwise current copy is reported as current, but its bytecode is not
+    part of the verified source, so it is removed: Python would otherwise load
+    a planted ``.pyc`` whose header matches the source instead of the source.
+    """
+
+    caches: list[Path] = []
+    for current, directories, _names in os.walk(destination, followlinks=False):
+        current_path = Path(current)
+        for name in list(directories):
+            candidate = current_path / name
+            if _is_bytecode_cache_of(candidate, expected_files, destination):
+                caches.append(candidate)
+                directories.remove(name)
+    for cache in caches:
+        shutil.rmtree(cache)
+
+
 def _tree_has_exact_membership(
     root: Path,
     expected_files: set[str],
@@ -1170,6 +1190,7 @@ def install_one(
         print(f"Would {state} {label}: {destination}")
         return
     if destination_is_current(destination, source_manifest, runtime_python):
+        discard_bytecode_caches(destination, set(source_manifest))
         print(f"Already current {label}: {destination}")
         return
     destination.parent.mkdir(parents=True, exist_ok=True)

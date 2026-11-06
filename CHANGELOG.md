@@ -58,7 +58,8 @@ included here.
   skill (the INSTALL verification step, or `finalize_review.py` during every
   review) wrote `__pycache__`, and the next update then backed up an unchanged
   copy as "Preserved modified prior copy". Bytecode caches for declared modules
-  no longer count as edits, `install.sh` ignores the Python installer's state
+  no longer count as edits (an otherwise current copy has them deleted, so
+  Python always loads the verified source), `install.sh` ignores the Python installer's state
   file, and a byte-identical copy left by `install.sh` is replaced without a
   backup. An older copy without an install record (such as one from
   `install.sh` before 0.3.0) is still backed up, because local edits cannot be
