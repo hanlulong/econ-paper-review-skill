@@ -302,10 +302,11 @@ The steps, from a checkout or the installed skill:
    ```
 
    This removes the managed Python runtime, the support descriptor, and Review
-   Desk from the default support root (`~/Library/Application Support/econ-review`
-   on macOS, `${XDG_DATA_HOME:-~/.local/share}/econ-review` on Linux,
-   `~/.econ-review` on Windows). It reports that skill copies were unchanged;
-   that is expected.
+   Desk from the default support root:
+   `~/Library/Application Support/econ-review` on macOS,
+   `${XDG_DATA_HOME:-$HOME/.local/share}/econ-review` on Linux, and
+   `%USERPROFILE%\.econ-review` on Windows. It reports that skill copies were
+   unchanged; that is expected.
 2. Delete the client's skill folder: `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/econ-review`
    for Claude Code, `~/.agents/skills/econ-review` for Codex, or
    `PROJECT/.claude/skills/econ-review` and `PROJECT/.agents/skills/econ-review`
