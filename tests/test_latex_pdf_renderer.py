@@ -87,6 +87,11 @@ class LatexMarkdownSafetyTests(unittest.TestCase):
             r"$\alphaé$",
             r"$\'a$",
             "$$\\begin{aligned}x &= \\InputIfFileExists{x}{}{}\\end{aligned}$$",
+            # ``\\`` is one control symbol, so the letters after it are text
+            # and the following command is live, not escaped.
+            r"$\\begin{aligned}\input{x}$",
+            r"$x\\end{cases}\InputIfFileExists{x}{}{}$",
+            r"$\begin{aligned}x\end {aligned}\begin%{cases}$",
             "\\[\n\\directlua{os.exit()}\n\\]",
         )
         for markdown in unsafe_spans:
@@ -421,6 +426,7 @@ class RealLuaLatexSmokeTests(unittest.TestCase):
                 rf"$\makeatletter\@input{{{canary.as_posix()}}}\makeatother$",
                 rf"$\IfFileExists{{{canary.as_posix()}}}{{\input{{{canary.as_posix()}}}}}{{}}$",
                 rf"$\text{{\InputIfFileExists{{{canary.as_posix()}}}{{}}{{}}}}$",
+                rf"$\\begin{{aligned}}\input{{{canary.as_posix()}}}$",
             )
             for payload in payloads:
                 with self.subTest(payload=payload):

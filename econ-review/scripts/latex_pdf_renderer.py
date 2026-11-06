@@ -154,6 +154,8 @@ MATH_CONTROL_SEQUENCE = re.compile(r"\\(?:([A-Za-z\u0080-\U0010ffff]+)|(.)|\Z)",
 # ``@`` is rejected because it is the letter of internal kernel commands such
 # as ``\@input``.  Raw control characters have no place in typeset math.
 MATH_UNSAFE_CHARACTERS = re.compile(r"\^\^|@|[\x00-\x08\x0b-\x1f\x7f]")
+# The braced name that follows ``\begin`` or ``\end``.
+MATH_ENVIRONMENT_ARGUMENT = re.compile(r"\s*\{([^{}]+)\}")
 SAFE_MATH_ENVIRONMENTS = frozenset(
     {"aligned", "alignedat", "cases", "matrix", "pmatrix", "bmatrix", "smallmatrix", "split", "gathered"}
 )
@@ -290,13 +292,17 @@ def _safe_math(content: str) -> str:
         raise LatexRenderError(
             f"unsafe character {unsafe_character.group(0)!r} in an explicit math span"
         )
-    math_environment = re.compile(r"\\(begin|end)\s*\{([^{}]+)\}")
-    for match in math_environment.finditer(content):
-        if match.group(2).strip() not in SAFE_MATH_ENVIRONMENTS:
-            raise LatexRenderError("unsafe environment in an explicit math span")
-    checked = math_environment.sub("", content)
-    for match in MATH_CONTROL_SEQUENCE.finditer(checked):
+    # Scan once, left to right, exactly as TeX tokenizes: ``\\`` is one
+    # control symbol, so ``\\begin{aligned}\input`` must not be read as an
+    # environment followed by an escaped backslash.  Environment names are
+    # validated at the position where TeX would read them.
+    for match in MATH_CONTROL_SEQUENCE.finditer(content):
         word, symbol = match.group(1), match.group(2)
+        if word in {"begin", "end"}:
+            environment = MATH_ENVIRONMENT_ARGUMENT.match(content, match.end())
+            if not environment or environment.group(1).strip() not in SAFE_MATH_ENVIRONMENTS:
+                raise LatexRenderError("unsafe environment in an explicit math span")
+            continue
         if word is not None:
             if word in MATH_CONTROL_WORDS and not FORBIDDEN_MATH_CONTROL_WORD.match(word):
                 continue
