@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -93,6 +94,15 @@ class LatexMarkdownSafetyTests(unittest.TestCase):
             r"$x\\end{cases}\InputIfFileExists{x}{}{}$",
             r"$\begin{aligned}x\end {aligned}\begin%{cases}$",
             "\\[\n\\directlua{os.exit()}\n\\]",
+            # unicode-math's ``\not`` looks up and runs ``\not<argument>`` or
+            # ``\n<argument>``, and amsmath's ``\smash[...]`` runs
+            # ``\mb@<option>``: both build control-sequence names from text.
+            r"$\not{ewline}$",
+            r"$\not{\in put}$",
+            r"$\not{ocite}{x}$",
+            r"$a \not= b$",
+            r"$\smash[t]{x}$",
+            r"$\smash{x}$",
         )
         for markdown in unsafe_spans:
             with self.subTest(markdown=markdown):
@@ -115,6 +125,7 @@ class LatexMarkdownSafetyTests(unittest.TestCase):
             "includegraphics", "read", "readline", "openin", "luafunction",
             "luaescapestring", "directlua", "latelua", "expandafter", "csname",
             "makeatletter", "catcode", "scantokens", "def", "let", "write",
+            "not", "smash",
         ):
             with self.subTest(primitive=primitive):
                 self.assertNotIn(primitive, MODULE.MATH_CONTROL_WORDS)
@@ -129,6 +140,7 @@ class LatexMarkdownSafetyTests(unittest.TestCase):
             r"\operatorname*{arg\,max}_{\theta \in \Theta} \sum_{i=1}^{n} \ell_i(\theta)",
             r"\text{if } t \geq 0,\quad \Pr(D_i = 1 \mid Z_i) \neq \tfrac{1}{2}",
             r"\$5 \times 10^{3} \approx \infty \cdot 0 \%",
+            r"i \notin S,\ j \neq k,\ x_1, \hdots, x_n \nonumber",
             "\\begin{aligned} y_{it} &= \\alpha_i + \\lambda_t + \\beta D_{it} \\\\ "
             "\\partial y / \\partial x &\\propto \\int_0^1 f(u)\\, du \\end{aligned}",
             "\\begin{cases} 1 & \\text{treated} \\\\ 0 & \\text{otherwise} \\end{cases}",
@@ -477,39 +489,89 @@ class RealLuaLatexSmokeTests(unittest.TestCase):
         full_text = "\n".join(page.extract_text() or "" for page in reader.pages)
         self.assertIn(sentinel, full_text)
 
-    def test_every_allowlisted_math_command_is_defined_by_the_template(self) -> None:
+    def test_every_allowlisted_math_command_typesets_cleanly_in_both_math_fonts(self) -> None:
+        # An allowlisted command that errors or lacks a glyph would pass the
+        # scanner and then fail the render with a less useful message, so
+        # each one is typeset inline and in display, in the preferred math
+        # font and in the fallback the template uses when it is missing.
+        usage = {
+            "frac": r"\frac{a}{b}", "dfrac": r"\dfrac{a}{b}", "tfrac": r"\tfrac{a}{b}",
+            "cfrac": r"\cfrac{a}{b}", "binom": r"\binom{a}{b}", "dbinom": r"\dbinom{a}{b}",
+            "tbinom": r"\tbinom{a}{b}", "genfrac": r"\genfrac{(}{)}{0pt}{}{a}{b}",
+            "root": r"\root 3 \of {x}", "over": r"{a \over b}", "atop": r"{a \atop b}",
+            "choose": r"{a \choose b}", "left": r"\left( x \right)", "right": r"\left( x \right)",
+            "middle": r"\left( x \middle| y \right)", "overset": r"\overset{a}{b}",
+            "underset": r"\underset{a}{b}", "stackrel": r"\stackrel{a}{b}",
+            "sideset": r"\sideset{_a}{_b}\sum", "substack": r"\sum_{\substack{i \\ j}} x",
+            "limits": r"\sum\limits_{i} x", "nolimits": r"\sum\nolimits_{i} x",
+        }
+        for word in "big Big bigg Bigg bigl Bigl biggl Biggl bigm Bigm biggm Biggm".split():
+            usage[word] = rf"\{word}("
+        for word in "bigr Bigr biggr Biggr".split():
+            usage[word] = rf"\{word})"
+        environments = {
+            "alignedat": r"\begin{alignedat}{2} a &= b &\quad c &= d \end{alignedat}",
+            "gathered": r"\begin{gathered} a = b \\ c = d \end{gathered}",
+        }
+        probes = [
+            rf"\typeout{{ECONREVIEWPROBE:{word}}}\par\noindent ${snippet}$ \[{snippet}\]"
+            for word in sorted(MODULE.MATH_CONTROL_WORDS - {"of"})
+            for snippet in (usage.get(word, rf"\{word}{{x}}"),)
+        ]
+        probes += [
+            rf"\typeout{{ECONREVIEWPROBE:{name}}}\par\noindent \["
+            + environments.get(name, rf"\begin{{{name}}} a & b \\ c & d \end{{{name}}}")
+            + r"\]"
+            for name in sorted(MODULE.SAFE_MATH_ENVIRONMENTS)
+        ]
+        probes.append(r"\typeout{ECONREVIEWPROBE:END}")
         source = MODULE.build_latex_source(
             paper_title=PAPER_TITLE,
             assessment_date=ASSESSMENT_DATE,
             documents=[document()],
+        ).replace(r"\end{document}", "\n".join(probes) + "\n" + r"\end{document}")
+        preferred = r"\setmathfont{Libertinus Math}"
+        fallback = r"\setmathfont{TeX Gyre Pagella Math}"
+        self.assertIn(preferred, source)
+        self.assertIn(fallback, source)
+        failure_patterns = (
+            re.compile(r"^! .+", re.MULTILINE),
+            *MODULE.MISSING_GLYPH_PATTERNS,
+            *MODULE.UNDEFINED_PATTERNS,
         )
-        # ``\of`` is only a delimiter of ``\root ... \of``; it is never defined.
-        probes = "\n".join(
-            rf"\ifdefined\{word}\else\typeout{{ECONREVIEWUNDEFINED:{word}}}\fi"
-            for word in sorted(MODULE.MATH_CONTROL_WORDS - {"of"})
-        )
-        source = source.replace(r"\end{document}", probes + "\n" + r"\end{document}")
-        with tempfile.TemporaryDirectory(prefix="econ-review-math-probe-") as temporary:
-            root = Path(temporary)
-            (root / "probe.tex").write_text(source, encoding="utf-8")
-            completed = subprocess.run(
-                [
-                    shutil.which("lualatex") or "lualatex",
-                    "--no-shell-escape",
-                    "--interaction=nonstopmode",
-                    "--halt-on-error",
-                    "probe.tex",
-                ],
-                cwd=root,
-                capture_output=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=120,
-                check=False,
-            )
-            log = (root / "probe.log").read_text(encoding="utf-8", errors="replace")
-        self.assertEqual(completed.returncode, 0, log[-2000:])
-        self.assertEqual(re.findall(r"ECONREVIEWUNDEFINED:([A-Za-z]+)", log), [])
+        for font, variant in (("preferred", source), ("fallback", source.replace(preferred, fallback))):
+            with self.subTest(font=font), tempfile.TemporaryDirectory(
+                prefix="econ-review-math-probe-"
+            ) as temporary:
+                root = Path(temporary)
+                (root / "probe.tex").write_text(variant, encoding="utf-8")
+                completed = subprocess.run(
+                    [
+                        shutil.which("lualatex") or "lualatex",
+                        "--no-shell-escape",
+                        "--interaction=nonstopmode",
+                        "probe.tex",
+                    ],
+                    cwd=root,
+                    env={**os.environ, "max_print_line": "10000"},
+                    capture_output=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=300,
+                    check=False,
+                )
+                log = (root / "probe.log").read_text(encoding="utf-8", errors="replace")
+                segments = re.split(r"^ECONREVIEWPROBE:(\S+)\n", log, flags=re.MULTILINE)
+                failures: dict[str, str] = {}
+                for name, text in zip(segments[1::2], segments[2::2]):
+                    for pattern in failure_patterns:
+                        match = pattern.search(text)
+                        if name != "END" and match:
+                            failures[name] = match.group(0)[:160]
+                            break
+                self.assertIn("END", segments[1::2], log[-2000:])
+                self.assertEqual(failures, {})
+                self.assertEqual(completed.returncode, 0, log[-2000:])
 
     def test_priority_heading_and_complete_first_action_share_a_page(self) -> None:
         priority_sentinel = "PRIORITYSENTINEL"

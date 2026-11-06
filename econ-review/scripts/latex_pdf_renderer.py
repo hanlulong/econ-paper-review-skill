@@ -58,8 +58,13 @@ PRIORITY_HEADING = re.compile(r"^P([0-9]+)\s*[\u2012\u2013\u2014-]\s*(.+)$", re.
 # ``\makeatletter\@input``, ``\csname``, ``\luafunction``, ``^^5c`` escapes)
 # for a denylist to stay complete.  Every control word below is a
 # math-typesetting command defined by the bundled template (LaTeX, amsmath,
-# and unicode-math); none reads files, writes files, runs Lua, changes
-# category codes, or constructs other control sequences.
+# and unicode-math) that typesets cleanly in both bundled math fonts; none
+# reads files, writes files, runs Lua, changes category codes, or builds a
+# control-sequence name from span text.  That last rule excludes ``\not``
+# (unicode-math looks up and runs ``\not<argument>`` or ``\n<argument>``)
+# and ``\smash`` (amsmath runs ``\mb@<optional argument>``); write
+# ``\neq``, ``\notin``, ``\nleq`` and the other negated symbols instead.
+# ``tests/test_latex_pdf_renderer.py`` typesets every word in the template.
 MATH_CONTROL_WORDS = frozenset(
     """
     alpha beta gamma delta epsilon varepsilon zeta eta theta vartheta iota
@@ -70,28 +75,26 @@ MATH_CONTROL_WORDS = frozenset(
     varPhi varPsi varOmega
     aleph beth gimel daleth ell hbar hslash imath jmath wp Re Im partial nabla
     infty emptyset varnothing forall exists nexists neg lnot top bot angle
-    measuredangle sphericalangle prime backprime Box Diamond triangle
-    triangledown blacktriangle bigstar surd flat natural sharp clubsuit
-    diamondsuit heartsuit spadesuit complement eth mho Finv Game checkmark
+    measuredangle sphericalangle prime backprime triangle
+    surd flat natural sharp clubsuit
+    diamondsuit heartsuit spadesuit complement eth mho
     dag ddag
     pm mp times div cdot cdotp ldotp ast star circ bullet cap cup sqcap sqcup
-    vee wedge lor land setminus smallsetminus wr diamond oplus ominus otimes
-    oslash odot bigcirc dagger ddagger amalg uplus lhd rhd unlhd unrhd
+    vee wedge lor land setminus wr oplus ominus otimes
+    oslash odot bigcirc dagger ddagger amalg uplus
     triangleleft triangleright boxplus boxminus boxtimes boxdot dotplus ltimes
-    rtimes leftthreetimes rightthreetimes curlyvee curlywedge intercal
-    barwedge veebar doublebarwedge Cap Cup divideontimes
+    rtimes curlyvee curlywedge
     leq le geq ge neq ne equiv approx approxeq sim simeq backsim cong propto
     prec succ preceq succeq ll gg lll ggg subset supset subseteq supseteq
-    subsetneq supsetneq subseteqq supseteqq nsubseteq nsupseteq sqsubset
+    subsetneq supsetneq nsubseteq nsupseteq sqsubset
     sqsupset sqsubseteq sqsupseteq in ni notin owns vdash dashv models vDash
-    Vdash perp mid nmid parallel nparallel smile frown asymp doteq bowtie Join
-    leqslant geqslant lesssim gtrsim lessapprox gtrapprox lneq gneq lneqq
+    Vdash perp mid nmid parallel nparallel smile frown asymp doteq bowtie
+    leqslant geqslant lesssim gtrsim lneq gneq lneqq
     gneqq leqq geqq nleq ngeq nless ngtr nsim ncong triangleq coloneq eqcolon
     vartriangleleft vartriangleright trianglelefteq trianglerighteq precsim
-    succsim precapprox succapprox preccurlyeq succcurlyeq curlyeqprec
-    curlyeqsucc therefore because between pitchfork lessgtr gtrless
-    lesseqgtr gtreqless eqsim circeq bumpeq Bumpeq risingdotseq fallingdotseq
-    Subset Supset
+    succsim preccurlyeq succcurlyeq curlyeqprec
+    curlyeqsucc therefore because between lessgtr gtrless
+    lesseqgtr gtreqless eqsim circeq risingdotseq fallingdotseq
     to gets leftarrow rightarrow Leftarrow Rightarrow leftrightarrow
     Leftrightarrow longleftarrow longrightarrow Longleftarrow Longrightarrow
     longleftrightarrow Longleftrightarrow mapsto longmapsto uparrow downarrow
@@ -99,11 +102,11 @@ MATH_CONTROL_WORDS = frozenset(
     hookleftarrow hookrightarrow implies impliedby iff rightleftharpoons
     leftrightharpoons rightharpoonup rightharpoondown leftharpoonup
     leftharpoondown upharpoonleft upharpoonright downharpoonleft
-    downharpoonright twoheadrightarrow twoheadleftarrow rightsquigarrow leadsto
+    downharpoonright twoheadrightarrow twoheadleftarrow rightsquigarrow
     nrightarrow nleftarrow nRightarrow nLeftarrow nleftrightarrow
     nLeftrightarrow leftleftarrows rightrightarrows leftrightarrows
     rightleftarrows Lsh Rsh looparrowleft looparrowright curvearrowleft
-    curvearrowright multimap xrightarrow xleftarrow
+    curvearrowright xrightarrow xleftarrow
     sum prod coprod int iint iiint oint bigcup bigcap bigoplus bigotimes
     bigodot bigvee bigwedge bigsqcup biguplus
     arccos arcsin arctan arg cos cosh cot coth csc deg det dim exp gcd hom inf
@@ -121,12 +124,12 @@ MATH_CONTROL_WORDS = frozenset(
     frac dfrac tfrac cfrac binom dbinom tbinom genfrac sqrt root of over
     choose atop left right middle big Big bigg Bigg bigl bigr Bigl Bigr biggl
     biggr Biggl Biggr bigm Bigm biggm Biggm overset underset stackrel substack
-    sideset limits nolimits displaystyle textstyle scriptstyle
-    scriptscriptstyle phantom vphantom hphantom smash mathstrut boxed cdots
-    ldots dots dotsc dotsb dotsm dotsi dotso vdots ddots colon quad qquad
+    sideset limits nolimits notag nonumber displaystyle textstyle scriptstyle
+    scriptscriptstyle phantom vphantom hphantom mathstrut boxed cdots
+    ldots hdots dots dotsc dotsb dotsm dotsi dotso vdots ddots colon quad qquad
     enspace thinspace medspace thickspace negthinspace negmedspace
     negthickspace mathop mathbin mathrel mathord mathpunct mathopen mathclose
-    mathinner not langle rangle lceil rceil lfloor rfloor lvert rvert lVert
+    mathinner langle rangle lceil rceil lfloor rfloor lvert rvert lVert
     rVert vert Vert backslash lbrace rbrace lbrack rbrack ulcorner urcorner
     llcorner lrcorner
     """.split()
@@ -141,7 +144,9 @@ FORBIDDEN_MATH_CONTROL_WORD = re.compile(
     r"^(?:lua|input|include|IfFileExists|read|expandafter|csname|makeat|"
     r"directlua|latelua|write|immediate|open|catcode|scantokens|def|edef|"
     r"gdef|xdef|let|futurelet|special|shipout|every|pdfextension|"
-    r"usepackage|documentclass|newcommand|renewcommand|ExplSyntax|ShellEscape)",
+    r"usepackage|documentclass|newcommand|renewcommand|ExplSyntax|ShellEscape|"
+    # Exact names: these build a control-sequence name from their argument.
+    r"(?:not|smash)\Z)",
     re.IGNORECASE,
 )
 # A TeX control sequence: a backslash followed by a run of letters (in
