@@ -61,7 +61,7 @@ class PdfBackendTests(unittest.TestCase):
             MODULE,
             "mathpix_http_requirement_status",
             return_value=MODULE.RequirementStatus(
-                "requests", "requests>=2.32,<3", "2.32.0", "compatible",
+                "requests", "requests>=2.34.2,<3", "2.34.2", "compatible",
             ),
         )
         self.requests_version.start()
