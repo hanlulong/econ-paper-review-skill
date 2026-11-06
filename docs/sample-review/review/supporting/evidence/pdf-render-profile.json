@@ -1,0 +1,20 @@
+{
+  "attempts": [
+    {
+      "outcome": "accepted",
+      "renderer": "latexmk-lualatex",
+      "return_code": 0
+    }
+  ],
+  "compiler_version": "Latexmk, John Collins, 27 Dec. 2024. Version 4.86a",
+  "diagnostics": [],
+  "document_count": 3,
+  "engine": "LuaLaTeX",
+  "latex_sha256": "bb5726bb042326e4748b59e2f08f1507b83af1aff16a80bf1fad27dd7b868f79",
+  "page_count": 9,
+  "page_size": "letter",
+  "pdf_sha256": "c1f96c44b801a8b9d05bdbd9dd4f66df0dec497dd93898e842b5a07cb1bc504c",
+  "renderer": "latexmk-lualatex",
+  "source_date_epoch": 1783944000,
+  "template_sha256": "066fa14e5435a6378ba2488fa896893c658a29ee40b6b951f46e1f91d6aee925"
+}

@@ -1,0 +1,9 @@
+{
+  "schema_version": "0.1",
+  "review_id": "synthetic-valid-001",
+  "source_render": "Complete rendered synthetic fixture",
+  "inventory_complete_within_assessment_boundary": true,
+  "no_figures_confirmed": true,
+  "figures": [],
+  "boundary_notes": "The one-paragraph theory fixture contains no visual exhibits."
+}
