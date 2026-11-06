@@ -91,6 +91,45 @@ BT /F1 9 Tf 72 60 Td (Synthetic footer) Tj ET
         writer.write(handle)
 
 
+def make_layout_pdf(path: Path) -> None:
+    """A portrait page with an overfull table row and a /Rotate 90 landscape table page."""
+    writer = PdfWriter()
+    font = DictionaryObject({
+        NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/BaseFont"): NameObject("/Helvetica"),
+        NameObject("/Encoding"): NameObject("/WinAnsiEncoding"),
+    })
+    font_ref = writer._add_object(font)
+    pages = (
+        b"""
+BT /F1 11 Tf 72 720 Td (Table 2 reports the robustness checks for the main estimate.) Tj ET
+BT /F1 10 Tf 72 690 Td (Outcome) Tj 90 0 Td (Baseline) Tj 90 0 Td (Controls) Tj 90 0 Td (Region trends) Tj 90 0 Td (Wild bootstrap) Tj 90 0 Td (Municipality clustered) Tj ET
+BT /F1 10 Tf 72 670 Td (Log productivity) Tj 90 0 Td (0.034) Tj 90 0 Td (0.033) Tj 90 0 Td (0.030) Tj 90 0 Td (0.034) Tj 90 0 Td (0.035) Tj ET
+""",
+        # Content drawn in the rotated frame so that viewers show it upright.
+        b"""
+q 0 1 -1 0 612 0 cm
+BT /F1 11 Tf 72 540 Td (Table 3: Landscape estimates by cohort) Tj ET
+BT /F1 10 Tf 72 510 Td (Cohort   2011   2012   2013   2014   2015   2016   2017   2018) Tj ET
+BT /F1 10 Tf 72 490 Td (Effect   0.021   0.027   0.030   0.033   0.035   0.036   0.034   0.031) Tj ET
+Q
+""",
+    )
+    for index, commands in enumerate(pages):
+        page = writer.add_blank_page(width=612, height=792)
+        page[NameObject("/Resources")] = DictionaryObject({
+            NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref}),
+        })
+        stream = DecodedStreamObject()
+        stream.set_data(commands)
+        page[NameObject("/Contents")] = writer._add_object(stream)
+        if index == 1:
+            page[NameObject("/Rotate")] = NumberObject(90)
+    with path.open("wb") as handle:
+        writer.write(handle)
+
+
 def package(review: Path, source_id: str = "SRC-01") -> Path:
     return review / "evidence" / "pdf-ingestion" / source_id
 
@@ -343,6 +382,19 @@ class PdfCandidateClassificationTests(unittest.TestCase):
         self.assertEqual(legacy_a, legacy_b)
 
 
+class PdfPageGeometryTests(unittest.TestCase):
+    def test_boxes_are_clipped_to_the_page_and_offpage_boxes_are_dropped(self) -> None:
+        self.assertEqual(MODULE.clamp_bbox([500.0, 10.0, 615.13, 20.0], 612.0, 792.0), [500.0, 10.0, 612.0, 20.0])
+        self.assertEqual(MODULE.clamp_bbox([-3.0, -1.0, 40.0, 20.0], 612.0, 792.0), [0.0, 0.0, 40.0, 20.0])
+        self.assertIsNone(MODULE.clamp_bbox([640.0, 10.0, 700.0, 20.0], 612.0, 792.0))
+
+    def test_page_rotation_is_read_per_page_from_pdfinfo(self) -> None:
+        output = "Pages:  3\nPage    1 size: 612 x 792 pts\nPage    1 rot:   0\nPage    2 rot:   90\nPage    3 rot:   -90\n"
+        completed = subprocess.CompletedProcess(["pdfinfo"], 0, stdout=output, stderr="")
+        with mock.patch.object(MODULE, "run", return_value=completed):
+            self.assertEqual(MODULE.page_rotations(Path("x.pdf"), 3), {1: 0, 2: 90, 3: 270})
+
+
 class PdfObjectRegionTests(unittest.TestCase):
     @staticmethod
     def block(
@@ -468,6 +520,46 @@ class PdfIngestionTests(unittest.TestCase):
             )
             self.assertIn("already current", result.stdout)
             self.assertEqual((first / "ingestion.json").read_bytes(), before)
+
+    def test_overfull_text_and_landscape_pages_ingest_with_layout_warnings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pdf = root / "layout.pdf"
+            make_layout_pdf(pdf)
+            output = self.ingest(pdf, root / "review")
+            self.assertEqual(self.run_cli("check", str(output)).returncode, 0)
+            manifest = json.loads((output / "ingestion.json").read_text())
+            portrait, landscape = manifest["pages"]
+            self.assertEqual((portrait["width_points"], portrait["height_points"]), (612, 792))
+            self.assertEqual((landscape["width_points"], landscape["height_points"]), (792, 612))
+            portrait_warnings = " ".join(portrait["warnings"])
+            self.assertIn("extend past the page edge and were clipped", portrait_warnings)
+            self.assertIn("rotated 90 degrees", " ".join(landscape["warnings"]))
+            for row in manifest["blocks"]:
+                width = manifest["pages"][row["page"] - 1]["width_points"]
+                height = manifest["pages"][row["page"] - 1]["height_points"]
+                x0, y0, x1, y1 = row["bbox"]
+                self.assertTrue(0 <= x0 < x1 <= width and 0 <= y0 < y1 <= height, row)
+            markdown = (output / "manuscript.md").read_text()
+            self.assertIn("Municipality", markdown)
+            self.assertIn("Landscape estimates by cohort", markdown)
+            landscape_blocks = [row for row in manifest["blocks"] if row["page"] == 2]
+            caption = next(row for row in landscape_blocks if "Landscape estimates" in row["raw_text"])
+            # Upright text on the displayed landscape page runs left to right near the top.
+            self.assertLess(caption["bbox"][1], 150)
+            self.assertGreater(caption["bbox"][2] - caption["bbox"][0], caption["bbox"][3] - caption["bbox"][1])
+
+    def test_bundled_demo_paper_ingests_end_to_end(self) -> None:
+        demo = ROOT / "docs" / "sample-review" / "demo-paper.pdf"
+        if not demo.is_file():
+            self.skipTest("docs/sample-review/demo-paper.pdf is not present in this checkout")
+        with tempfile.TemporaryDirectory() as tmp:
+            output = self.ingest(demo, Path(tmp) / "review")
+            self.assertEqual(self.run_cli("check", str(output)).returncode, 0)
+            manifest = json.loads((output / "ingestion.json").read_text())
+            warnings = " ".join(" ".join(page["warnings"]) for page in manifest["pages"])
+            self.assertIn("extend past the page edge", warnings)
+            self.assertIn("Municipality", (output / "manuscript.md").read_text())
 
     def test_current_ingestion_generates_exactly_one_authenticated_scope_anchor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

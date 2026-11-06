@@ -552,6 +552,36 @@ def normalize_line(words: list[str]) -> str:
     return text.strip()
 
 
+def page_rotations(pdf: Path, page_count: int) -> dict[int, int]:
+    """Return each page's /Rotate value (0, 90, 180 or 270) as Poppler reports it."""
+    if page_count < 1:
+        return {}
+    result = run(["pdfinfo", "-f", "1", "-l", str(page_count), str(pdf)], text=True)
+    rotations: dict[int, int] = {}
+    for line in result.stdout.splitlines():
+        match = re.match(r"\s*Page\s+(\d+)\s+rot:\s*(-?\d+)", line)
+        if match:
+            rotations[int(match.group(1))] = int(match.group(2)) % 360
+    return rotations
+
+
+def clamp_bbox(bbox: list[float], width: float, height: float) -> list[float] | None:
+    """Clip a box to the page; None when nothing of it lies on the page."""
+    x0, y0, x1, y1 = bbox
+    clipped = [
+        round(min(max(x0, 0.0), width), 3), round(min(max(y0, 0.0), height), 3),
+        round(min(max(x1, 0.0), width), 3), round(min(max(y1, 0.0), height), 3),
+    ]
+    if clipped[0] >= clipped[2] or clipped[1] >= clipped[3]:
+        return None
+    return clipped
+
+
+def short_excerpt(text: str, limit: int = 40) -> str:
+    value = " ".join(text.split())
+    return value if len(value) <= limit else value[: limit - 3].rstrip() + "..."
+
+
 def parse_bbox_layout(
     pdf: Path, destination: Path, source_id: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
@@ -567,10 +597,25 @@ def parse_bbox_layout(
     pages: list[dict[str, Any]] = []
     blocks: list[dict[str, Any]] = []
     block_number = 0
-    for page_number, page in enumerate((node for node in root.iter() if local_name(node.tag) == "page"), 1):
+    page_nodes = [node for node in root.iter() if local_name(node.tag) == "page"]
+    rotations = page_rotations(pdf, len(page_nodes))
+    for page_number, page in enumerate(page_nodes, 1):
         width = float_attr(page, "width")
         height = float_attr(page, "height")
-        pages.append({"page": page_number, "width": width, "height": height})
+        rotation = rotations.get(page_number, 0)
+        layout_warnings: list[str] = []
+        if rotation in {90, 270}:
+            # pdftotext reports the unrotated media box but places words in the
+            # displayed (rotated) frame, which is also what pdftoppm renders.
+            width, height = height, width
+            layout_warnings.append(
+                f"page is rotated {rotation} degrees (landscape); coordinates and the render use the displayed orientation"
+            )
+        elif rotation == 180:
+            layout_warnings.append("page is rotated 180 degrees; coordinates and the render use the displayed orientation")
+        overflow_blocks: list[str] = []
+        offpage_blocks: list[str] = []
+        pages.append({"page": page_number, "width": width, "height": height, "layout_warnings": layout_warnings})
         for element in page.iter():
             if local_name(element.tag) != "block":
                 continue
@@ -585,18 +630,36 @@ def parse_bbox_layout(
             text = "\n".join(lines).strip()
             if not text:
                 continue
+            raw_bbox = [
+                float_attr(element, "xMin"), float_attr(element, "yMin"),
+                float_attr(element, "xMax"), float_attr(element, "yMax"),
+            ]
+            bbox = clamp_bbox(raw_bbox, width, height)
+            if bbox is None:
+                offpage_blocks.append(short_excerpt(text))
+                continue
+            if bbox != raw_bbox:
+                overflow_blocks.append(short_excerpt(text))
             block_number += 1
             blocks.append({
                 "id": source_block_id(source_id, block_number),
                 "page": page_number,
-                "bbox": [
-                    float_attr(element, "xMin"), float_attr(element, "yMin"),
-                    float_attr(element, "xMax"), float_attr(element, "yMax"),
-                ],
+                "bbox": bbox,
                 "raw_text": text,
                 "page_width": width,
                 "page_height": height,
             })
+        if overflow_blocks:
+            layout_warnings.append(
+                f"{len(overflow_blocks)} text block(s) extend past the page edge and were clipped to the page box "
+                "(for example an overfull table or equation); the exhibit is likely cut off in the PDF itself, so check "
+                "the render and treat it as a layout defect: " + "; ".join(f"'{item}'" for item in overflow_blocks[:5])
+            )
+        if offpage_blocks:
+            layout_warnings.append(
+                f"{len(offpage_blocks)} text block(s) lie entirely outside the visible page and were excluded from the "
+                "reading surface; readers of the PDF cannot see them: " + "; ".join(f"'{item}'" for item in offpage_blocks[:5])
+            )
     bbox_path.unlink(missing_ok=True)
     return pages, blocks, repairs
 
@@ -1209,6 +1272,13 @@ def create_objects(
         relative = Path("objects") / folder / f"{object_id}.png"
         destination = stage / relative
         metadata = page_by_number[page]
+        clipped = clamp_bbox([float(value) for value in bbox], metadata["width"], metadata["height"])
+        if clipped is None:
+            clipped = [0.0, 0.0, float(metadata["width"]), float(metadata["height"])]
+            warnings = [*warnings, "The detected region lies outside the visible page; the crop shows the whole page instead."]
+        if clipped != [round(float(value), 3) for value in bbox]:
+            warnings = [*warnings, "The detected region extends past the page edge and was clipped to the page box; check the render for cut-off content."]
+        bbox = clipped
         crop_render(rendered[page - 1], bbox, (metadata["width"], metadata["height"]), destination)
         record = {
             "id": object_id, "page": page, "bbox": [round(value, 3) for value in bbox], "caption": caption,
@@ -2000,6 +2070,7 @@ def ingest(args: argparse.Namespace) -> Path:
             text = native
             ocr_text: str | None = None
             warnings: list[str] = []
+            warnings.extend(page.get("layout_warnings", []))
             native_controls = controls(native)
             if native_controls:
                 warnings.append("native text contains control glyphs: " + ", ".join(native_controls))
@@ -2199,7 +2270,11 @@ def ingest(args: argparse.Namespace) -> Path:
                 shutil.rmtree(destination)
             if backup and backup.exists():
                 backup.rename(destination)
-            raise IngestionError("committed ingestion failed verification:\n- " + "\n- ".join(errors))
+            raise IngestionError(
+                "committed ingestion failed verification:\n- " + "\n- ".join(errors)
+                + "\nThe new output was discarded. Read the original PDF and its page renders directly, record the "
+                "failed ingestion as a bounded limitation in the review, and report this message as a skill issue."
+            )
         if backup and backup.exists():
             shutil.rmtree(backup)
         print(f"PDF ingestion created: {destination}")
