@@ -137,12 +137,47 @@ def standalone_files(files: Iterable[Path]) -> list[Path]:
     return [relative for relative in files if relative.parts[0] not in PLUGIN_ONLY_ROOTS]
 
 
-def _tree_has_exact_membership(root: Path, expected_files: set[str]) -> bool:
+def _is_bytecode_cache_of(directory: Path, expected_files: set[str], root: Path) -> bool:
+    """Return whether *directory* is a ``__pycache__`` of declared modules only.
+
+    Running a bundled script (the INSTALL verification step, ``finalize_review.py``)
+    writes ``__pycache__/<module>.<tag>.pyc`` beside the declared ``.py`` files.
+    Such a cache is not a user edit. Anything else inside it, a nested directory,
+    a link, or bytecode for a module without declared source, still counts.
+    """
+
+    if directory.name != "__pycache__" or _is_link_or_junction(directory) or not directory.is_dir():
+        return False
+    parent = directory.parent.relative_to(root).as_posix()
+    prefix = "" if parent == "." else f"{parent}/"
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return False
+    for entry in entries:
+        if _is_link_or_junction(entry) or not entry.is_file():
+            return False
+        if entry.suffix.casefold() not in IGNORED_SUFFIXES:
+            return False
+        module = entry.name.split(".", 1)[0]
+        if f"{prefix}{module}.py" not in expected_files:
+            return False
+    return True
+
+
+def _tree_has_exact_membership(
+    root: Path,
+    expected_files: set[str],
+    *,
+    allow_bytecode_caches: bool = False,
+) -> bool:
     """Return whether *root* contains exactly the declared regular files.
 
     The comparison includes directories so an undeclared empty directory, link,
     junction, reparse point, or non-regular file cannot survive an idempotent
     installation check and later participate in Python module shadowing.
+    With *allow_bytecode_caches*, ``__pycache__`` directories that hold only
+    bytecode for declared modules are disregarded.
     """
 
     expected_directories = {""}
@@ -175,10 +210,15 @@ def _tree_has_exact_membership(root: Path, expected_files: set[str]) -> bool:
                 return False
             relative_directory = current_path.relative_to(root).as_posix()
             actual_directories.add("" if relative_directory == "." else relative_directory)
+            kept_directories: list[str] = []
             for name in directories:
                 candidate = current_path / name
                 if _is_link_or_junction(candidate) or not candidate.is_dir():
                     return False
+                if allow_bytecode_caches and _is_bytecode_cache_of(candidate, expected_files, root):
+                    continue
+                kept_directories.append(name)
+            directories[:] = kept_directories
             for name in names:
                 candidate = current_path / name
                 if _is_link_or_junction(candidate) or not candidate.is_file():
@@ -266,7 +306,7 @@ def destination_is_current(
     if not destination.is_dir() or _is_link_or_junction(destination):
         return False
     expected_files = set(source_manifest) | {".econ-review-install.json"}
-    if not _tree_has_exact_membership(destination, expected_files):
+    if not _tree_has_exact_membership(destination, expected_files, allow_bytecode_caches=True):
         return False
     state_path = destination / ".econ-review-install.json"
     if _is_link_or_junction(state_path):
@@ -325,6 +365,7 @@ def managed_destination_is_intact(destination: Path) -> bool:
             or not _tree_has_exact_membership(
                 destination,
                 set(source_manifest) | {".econ-review-install.json"},
+                allow_bytecode_caches=True,
             )
         ):
             return False
@@ -346,7 +387,9 @@ def destination_matches_source(
     if (
         not destination.is_dir()
         or _is_link_or_junction(destination)
-        or not _tree_has_exact_membership(destination, set(source_manifest))
+        or not _tree_has_exact_membership(
+            destination, set(source_manifest), allow_bytecode_caches=True,
+        )
     ):
         return False
     try:
@@ -1129,7 +1172,12 @@ def install_one(
     stage = Path(tempfile.mkdtemp(prefix=".econ-review-stage-", dir=destination.parent))
     rollback = destination.with_name(f".{destination.name}.backup-{uuid.uuid4().hex}")
     had_previous = _path_present(destination)
-    preserve_previous = had_previous and not managed_destination_is_intact(destination)
+    # A copy that is byte-identical to this source (for example one written by
+    # scripts/install.sh, which records no install state) is not a user edit.
+    preserve_previous = had_previous and not (
+        managed_destination_is_intact(destination)
+        or destination_matches_source(destination, source_manifest)
+    )
     try:
         for relative in files:
             target = stage / relative

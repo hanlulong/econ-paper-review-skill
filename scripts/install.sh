@@ -244,7 +244,26 @@ def digest(path):
     return value.hexdigest()
 
 
-def manifest(root, *, ignore_source_artifacts):
+# What running the installed skill or the Python installer leaves behind in a
+# destination. Neither is a user edit, so neither makes an otherwise current
+# copy look modified.
+generated_root_files = {".econ-review-install.json", ".econ-review-runtime.json"}
+
+
+def bytecode_cache(path):
+    metadata = path.lstat()
+    if path.name != "__pycache__" or stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        return False
+    for entry in path.iterdir():
+        entry_metadata = entry.lstat()
+        if not stat.S_ISREG(entry_metadata.st_mode) or not entry.name.endswith((".pyc", ".pyo")):
+            return False
+        if not (path.parent / (entry.name.split(".", 1)[0] + ".py")).is_file():
+            return False
+    return True
+
+
+def manifest(root, *, ignore_source_artifacts, ignore_run_artifacts=False):
     if not root.is_dir() or root.is_symlink():
         raise OSError("tree root is missing or unsafe")
     records = {}
@@ -253,6 +272,8 @@ def manifest(root, *, ignore_source_artifacts):
         kept_directories = []
         for name in directories:
             if ignore_source_artifacts and ignored(name):
+                continue
+            if ignore_run_artifacts and bytecode_cache(current_path / name):
                 continue
             if (
                 ignore_source_artifacts
@@ -272,6 +293,8 @@ def manifest(root, *, ignore_source_artifacts):
         for name in files:
             if ignore_source_artifacts and ignored(name):
                 continue
+            if ignore_run_artifacts and current_path == root and name in generated_root_files:
+                continue
             path = current_path / name
             metadata = path.lstat()
             if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
@@ -289,6 +312,7 @@ try:
     current = manifest(source, ignore_source_artifacts=True) == manifest(
         destination,
         ignore_source_artifacts=False,
+        ignore_run_artifacts=True,
     )
 except OSError:
     current = False

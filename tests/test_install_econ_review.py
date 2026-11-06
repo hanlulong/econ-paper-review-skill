@@ -1437,6 +1437,64 @@ class ManagedInstallerTests(unittest.TestCase):
                     )
                     self.assertEqual(validated.returncode, 0, validated.stdout + validated.stderr)
 
+    def test_running_installed_scripts_does_not_make_the_next_update_back_up(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "project"
+            project.mkdir()
+            arguments = ("--local", str(project), "--codex", "--copy-only")
+            self.run_installer(*arguments)
+            destination = project / ".agents" / "skills" / "econ-review"
+            environment = os.environ.copy()
+            environment.pop("PYTHONDONTWRITEBYTECODE", None)
+            # INSTALL.md's verification step and every review run execute
+            # bundled scripts from the installed tree, which writes bytecode.
+            subprocess.run(
+                [sys.executable, str(destination / "scripts" / "validate_skill_package.py"), str(destination)],
+                text=True, capture_output=True, check=True, env=environment,
+            )
+            subprocess.run(
+                [sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import finalize_review",
+                 str(destination / "scripts")],
+                text=True, capture_output=True, check=True, env=environment,
+            )
+            self.assertTrue(any(destination.rglob("__pycache__")))
+            backups = self.support_home / ".openeconai" / "backups" / "econ-review"
+            result = self.run_installer(*arguments)
+            self.assertIn("Already current Codex (project)", result.stdout)
+            self.assertNotIn("Preserved", result.stdout)
+            self.assertFalse(backups.exists())
+
+            if os.name != "nt":
+                merged = {**os.environ, "HOME": str(self.support_home)}
+                merged.pop("CLAUDE_CONFIG_DIR", None)
+                merged.pop("CODEX_HOME", None)
+                shell = subprocess.run(
+                    ["bash", str(ROOT / "scripts" / "install.sh"), "--local", str(project), "--codex"],
+                    text=True, capture_output=True, check=True, env=merged,
+                )
+                self.assertIn("Already current", shell.stdout)
+                self.assertNotIn("Preserved", shell.stdout)
+                # A byte-identical copy without install state is not a user edit either.
+                (destination / ".econ-review-install.json").unlink()
+                result = self.run_installer(*arguments)
+                self.assertIn("Installed Codex (project)", result.stdout)
+                self.assertNotIn("Preserved", result.stdout)
+                self.assertFalse(backups.exists())
+
+    def test_bytecode_cache_without_declared_source_still_counts_as_a_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "project"
+            project.mkdir()
+            arguments = ("--local", str(project), "--codex", "--copy-only")
+            self.run_installer(*arguments)
+            cache = project / ".agents" / "skills" / "econ-review" / "scripts" / "__pycache__"
+            cache.mkdir()
+            (cache / "planted_module.cpython-312.pyc").write_bytes(b"not declared")
+            result = self.run_installer(*arguments)
+            self.assertIn("Installed Codex (project)", result.stdout)
+            self.assertIn("Preserved modified prior copy", result.stdout)
+            self.assertFalse(cache.exists())
+
     def test_unmarked_plugin_shaped_codex_legacy_copy_is_removed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
