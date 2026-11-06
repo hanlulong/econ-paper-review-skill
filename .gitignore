@@ -33,3 +33,7 @@ skills-lock.json
 /test_paper3/
 /research/
 /demo-paper/
+
+# Stray root-level PDFs (manuscripts, downloads) are never source; the tracked
+# sample and fixture PDFs live under docs/ and tests/.
+/*.pdf
