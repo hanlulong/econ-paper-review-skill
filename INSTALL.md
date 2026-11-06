@@ -270,11 +270,12 @@ reports "Already current" for anything that is.
 
 Plugin removal intentionally keeps the user-owned runtime and Review Desk. The
 same support data serves the plugin in both clients and every standalone copy,
-so remove it only when you are removing the last Econ Review copy: first check,
-read-only, that the other client has neither the plugin (`claude plugin list
---json`, `codex plugin list`) nor a standalone copy (see the paths in
-"Uninstall the standalone skill"), and that no project-local copy you still use
-remains. If any copy remains, skip the cleanup below and only remove the plugin.
+so remove it only when you are removing the last Econ Review copy. First
+check, read-only, that no other copy remains: the plugin in the other client
+(`claude plugin list --json` or `codex plugin list`), a standalone copy in
+either client (paths in "Uninstall the standalone skill"), or a project-local
+copy you still use. If any copy remains, skip the cleanup below and only remove
+the plugin.
 To remove the support data too, do it first, while the plugin's scripts are
 still installed. `PLUGIN_ROOT` is the installed plugin folder that contains
 `scripts/setup_econ_review.py`; the `econ-review-setup` skill knows it, or ask
