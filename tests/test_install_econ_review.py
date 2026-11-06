@@ -28,6 +28,26 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+PLUGIN_ONLY_ROOTS = (".claude-plugin", ".codex-plugin", "skills")
+
+
+def add_plugin_payload(skill: Path) -> None:
+    """Give a synthetic source the native-plugin layout of the real package."""
+
+    for manifest in (".claude-plugin", ".codex-plugin"):
+        (skill / manifest).mkdir()
+        (skill / manifest / "plugin.json").write_text(
+            '{"name": "econ-review", "skills": "./skills/"}\n',
+            encoding="utf-8",
+        )
+    for name in ("econ-review", "econ-review-setup"):
+        (skill / "skills" / name).mkdir(parents=True)
+        (skill / "skills" / name / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: Synthetic adapter.\n---\n",
+            encoding="utf-8",
+        )
+
+
 class InstallerFixture:
     def __init__(self, root: Path, *, doctor_exit: int = 0) -> None:
         self.root = root
@@ -1301,6 +1321,138 @@ class ManagedInstallerTests(unittest.TestCase):
             )
             self.assertEqual(len(backups), 1)
             self.assertEqual(backups[0].read_text(encoding="utf-8"), "tampered")
+
+    def assert_standalone_layout(self, destination: Path) -> None:
+        self.assertTrue((destination / "SKILL.md").is_file())
+        for name in PLUGIN_ONLY_ROOTS:
+            self.assertFalse(
+                MODULE._path_present(destination / name),
+                f"standalone install contains plugin payload: {name}",
+            )
+
+    def test_standalone_install_omits_native_plugin_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            add_plugin_payload(fixture.skill)
+            project = root / "project"
+            project.mkdir()
+            arguments = (
+                "--source",
+                str(fixture.skill),
+                "--local",
+                str(project),
+                "--all",
+                "--copy-only",
+            )
+            self.run_installer(*arguments)
+            for destination in (
+                project / ".claude" / "skills" / "econ-review",
+                project / ".agents" / "skills" / "econ-review",
+            ):
+                self.assert_standalone_layout(destination)
+                state = json.loads(
+                    (destination / ".econ-review-install.json").read_text(encoding="utf-8")
+                )
+                self.assertFalse(
+                    any(
+                        relative.split("/", 1)[0] in PLUGIN_ONLY_ROOTS
+                        for relative in state["source_manifest"]
+                    )
+                )
+            repeated = self.run_installer(*arguments)
+            self.assertEqual(repeated.stdout.count("Already current"), 2)
+            for client in (".claude-plugin", ".codex-plugin", "skills"):
+                self.assertTrue((fixture.skill / client).is_dir())
+
+    def test_plugin_shaped_standalone_install_is_migrated(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            add_plugin_payload(fixture.skill)
+            project = root / "project"
+            project.mkdir()
+            intact = project / ".agents" / "skills" / "econ-review"
+            modified = project / ".claude" / "skills" / "econ-review"
+            # Reproduce the 0.2.2 layout: a managed copy of the full plugin tree.
+            files = MODULE.validate_source(fixture.skill)
+            plugin_manifest = MODULE.file_manifest(fixture.skill, files)
+            with mock.patch.object(MODULE.Path, "home", return_value=self.support_home):
+                for destination in (intact, modified):
+                    MODULE.install_one(
+                        fixture.skill,
+                        files,
+                        plugin_manifest,
+                        destination,
+                        "legacy layout",
+                        None,
+                        dry_run=False,
+                    )
+            self.assertTrue((intact / ".codex-plugin" / "plugin.json").is_file())
+            (modified / "skills" / "econ-review" / "SKILL.md").write_text(
+                "local edit", encoding="utf-8"
+            )
+
+            result = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--local",
+                str(project),
+                "--all",
+                "--copy-only",
+            )
+
+            self.assertIn("Installed Codex (project)", result.stdout)
+            self.assertIn("Installed Claude Code (project)", result.stdout)
+            self.assert_standalone_layout(intact)
+            self.assert_standalone_layout(modified)
+            backups = self.support_home / ".openeconai" / "backups" / "econ-review"
+            preserved = list(backups.rglob("SKILL.md"))
+            self.assertEqual(
+                [path.read_text(encoding="utf-8") for path in preserved if path.parent.name == "econ-review"],
+                ["local edit"],
+            )
+            self.assertEqual(result.stdout.count("Preserved modified prior copy"), 1)
+
+    def test_real_package_installs_as_a_valid_standalone_skill(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "project"
+            project.mkdir()
+            self.run_installer("--local", str(project), "--all", "--copy-only")
+            validator = ROOT / "econ-review" / "scripts" / "validate_skill_package.py"
+            for destination in (
+                project / ".claude" / "skills" / "econ-review",
+                project / ".agents" / "skills" / "econ-review",
+            ):
+                self.assert_standalone_layout(destination)
+                for profile in ("auto", "standalone"):
+                    validated = subprocess.run(
+                        [sys.executable, str(validator), "--profile", profile, str(destination)],
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+                    self.assertEqual(validated.returncode, 0, validated.stdout + validated.stderr)
+
+    def test_unmarked_plugin_shaped_codex_legacy_copy_is_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            add_plugin_payload(fixture.skill)
+            legacy = self.support_home / ".codex" / "skills" / "econ-review"
+            shutil.copytree(fixture.skill, legacy)
+
+            result = self.run_installer(
+                "--source",
+                str(fixture.skill),
+                "--global",
+                "--codex",
+                "--copy-only",
+            )
+
+            self.assert_standalone_layout(self.support_home / ".agents" / "skills" / "econ-review")
+            self.assertFalse(legacy.exists())
+            self.assertIn("Removed generated legacy Codex copy", result.stdout)
 
     def test_codex_global_install_migrates_only_codex_legacy_copy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

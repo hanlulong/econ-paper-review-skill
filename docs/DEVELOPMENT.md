@@ -33,8 +33,15 @@ The standalone skill is the primary user path. `econ-review/` is the canonical,
 self-contained distribution unit: it carries the review workflow, all
 deterministic scripts, dependency contracts, the verified Review Desk archive,
 and manifests for the optional native-plugin route. The managed standalone
-installer copies this package to the selected client's skill directory and
-prepares mutable user-owned support state outside that copy.
+installer copies this package to the selected client's skill directory, minus
+the native-plugin payload (`.claude-plugin/`, `.codex-plugin/`, and the
+`skills/` adapters), and prepares mutable user-owned support state outside that
+copy. A direct copy that kept the plugin payload would load as the namespaced
+`econ-review@skills-dir` plugin in Claude Code and as duplicate
+`econ-review:econ-review` skills in Codex. `validate_skill_package.py` applies
+the plugin contract to a tree that carries any of that payload and the
+standalone contract otherwise; `--profile plugin` or `--profile standalone`
+selects one explicitly.
 
 For direct installation from a trusted checkout, the repository wrapper
 delegates to the canonical setup tool. It creates or reuses one
@@ -246,7 +253,7 @@ generator. It can therefore pass while an unrelated sibling artifact is stale.
 command that supports a claim that a review is final.
 
 ```bash
-python3 econ-review/scripts/validate_skill_package.py econ-review
+python3 econ-review/scripts/validate_skill_package.py --profile plugin econ-review
 python3 -m unittest discover -s tests -v
 python3 econ-review/scripts/generate_reports.py --check tests/fixtures/valid-review
 python3 econ-review/scripts/generate_fix_plan.py --check tests/fixtures/valid-review

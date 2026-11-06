@@ -371,6 +371,33 @@ class InstallerTests(unittest.TestCase):
             self.assertFalse((destination / ".DS_Store").exists())
             self.assertFalse((destination / "scripts" / "__pycache__").exists())
             self.assertFalse(list(destination.parent.glob(".econ-review.*")))
+            for plugin_only in (".claude-plugin", ".codex-plugin", "skills"):
+                self.assertFalse((destination / plugin_only).exists(), plugin_only)
+
+    def test_shell_install_replaces_plugin_shaped_copies(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            destination = home / ".agents" / "skills" / "econ-review"
+            legacy = home / ".codex" / "skills" / "econ-review"
+            ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store")
+            # Releases before 0.2.3 copied the complete plugin tree.
+            shutil.copytree(ROOT / "econ-review", destination, ignore=ignore)
+            shutil.copytree(ROOT / "econ-review", legacy, ignore=ignore)
+
+            result = self.run_installer(
+                ROOT / "scripts" / "install.sh", "--global", "--codex", env={"HOME": str(home)},
+            )
+
+            self.assertIn("Installed Codex (global)", result.stdout)
+            self.assertIn("Removed generated legacy Codex copy", result.stdout)
+            self.assertFalse(legacy.exists())
+            self.assertTrue((destination / "SKILL.md").is_file())
+            for plugin_only in (".claude-plugin", ".codex-plugin", "skills"):
+                self.assertFalse((destination / plugin_only).exists(), plugin_only)
+            repeated = self.run_installer(
+                ROOT / "scripts" / "install.sh", "--global", "--codex", env={"HOME": str(home)},
+            )
+            self.assertIn("Already current Codex (global)", repeated.stdout)
 
     def test_repeat_install_skips_exact_tree_and_repairs_drift(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

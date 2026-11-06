@@ -210,8 +210,12 @@ for current, directories, files in os.walk(root, followlinks=False):
 PY
 }
 
+# Usage: skill_tree_is_current SOURCE DESTINATION [plugin-shaped]
+# Compares DESTINATION with the standalone layout of SOURCE, which omits the
+# native-plugin payload. "plugin-shaped" compares with the complete source
+# tree instead, which is how releases before 0.2.3 copied standalone skills.
 skill_tree_is_current() {
-  python3 - "$1" "$2" <<'PY'
+  python3 - "$1" "$2" "${3:-standalone}" <<'PY'
 import fnmatch
 import hashlib
 import os
@@ -219,11 +223,13 @@ import stat
 import sys
 from pathlib import Path
 
-source, destination = map(Path, sys.argv[1:])
+source, destination = map(Path, sys.argv[1:3])
+plugin_shaped = sys.argv[3] == "plugin-shaped"
 ignore_patterns = (
     ".DS_Store", "__pycache__", "*.pyc", "*.pyo",
     ".pytest_cache", ".mypy_cache", ".ruff_cache",
 )
+plugin_only_roots = {".claude-plugin", ".codex-plugin", "skills"}
 
 
 def ignored(name):
@@ -247,6 +253,13 @@ def manifest(root, *, ignore_source_artifacts):
         kept_directories = []
         for name in directories:
             if ignore_source_artifacts and ignored(name):
+                continue
+            if (
+                ignore_source_artifacts
+                and not plugin_shaped
+                and current_path == root
+                and name in plugin_only_roots
+            ):
                 continue
             path = current_path / name
             metadata = path.lstat()
@@ -657,15 +670,28 @@ import sys
 from pathlib import Path
 
 source, stage = map(Path, sys.argv[1:])
+artifact_patterns = shutil.ignore_patterns(
+    ".DS_Store", "__pycache__", "*.pyc", "*.pyo",
+    ".pytest_cache", ".mypy_cache", ".ruff_cache",
+)
+# A direct copy is a standalone skill. The native-plugin manifests and the
+# skills/ adapters would make clients load it as a namespaced plugin.
+plugin_only_roots = {".claude-plugin", ".codex-plugin", "skills"}
+
+
+def ignore(directory, names):
+    ignored = set(artifact_patterns(directory, names))
+    if Path(directory) == source:
+        ignored |= plugin_only_roots.intersection(names)
+    return ignored
+
+
 shutil.copytree(
     source,
     stage,
     dirs_exist_ok=True,
     symlinks=True,
-    ignore=shutil.ignore_patterns(
-        ".DS_Store", "__pycache__", "*.pyc", "*.pyo",
-        ".pytest_cache", ".mypy_cache", ".ruff_cache",
-    ),
+    ignore=ignore,
 )
 PY
   validate_skill_tree "$ACTIVE_STAGE" || fail "staged package validation failed"
@@ -716,7 +742,8 @@ migrate_legacy_codex_copy() {
     fi
     unsafe_ancestor="$(legacy_parent_is_safe "$legacy")" \
       || fail "refusing legacy migration through a linked or junction ancestor: $unsafe_ancestor"
-    if skill_tree_is_current "$SOURCE_DIR" "$legacy"; then
+    if skill_tree_is_current "$SOURCE_DIR" "$legacy" \
+      || skill_tree_is_current "$SOURCE_DIR" "$legacy" plugin-shaped; then
       if [ "$DRY_RUN" -eq 1 ]; then
         echo "Would remove generated legacy Codex copy: $legacy"
       else

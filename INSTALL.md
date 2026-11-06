@@ -3,7 +3,11 @@
 Standalone skill installation is the default. It preserves the short
 `/econ-review` command in Claude Code and `$econ-review` mention in Codex, while
 still allowing the skill to activate automatically from an ordinary paper-review
-request. Native plugin installation remains available as an optional alternative.
+request. A standalone copy contains the skill only: the native-plugin manifests
+(`.claude-plugin/`, `.codex-plugin/`) and the `skills/` adapters stay in the
+plugin package, because either client would otherwise load the copy as a
+namespaced plugin. Native plugin installation remains available as an optional
+alternative.
 
 Use one installation method per client. Claude Code and Codex need separate
 standalone copies when both clients are used, but those copies must come from the
@@ -58,12 +62,15 @@ and the bundled Review Desk. Do not ask the user to copy or run commands.
 
    Run these commands from the verified checkout and replace `--CLIENT` with
    exactly one client flag. Use native path syntax on Windows. The setup copies
-   the complete skill atomically, preserves a modified prior copy, creates or
-   reuses a private user-owned environment, installs only the version-constrained
-   core requirements, and installs the manifest-verified Review Desk. It never
-   uploads a manuscript or alters a system Python environment. Default support
-   paths are keyed by the core-requirements hash and Review Desk bundle hash;
-   an update with different support content is additive rather than destructive.
+   the complete standalone skill atomically (everything except the
+   native-plugin manifests and `skills/` adapters), replaces a plugin-shaped
+   copy left by a release before 0.2.3, preserves a modified prior copy,
+   creates or reuses a private user-owned environment, installs only the
+   version-constrained core requirements, and installs the manifest-verified
+   Review Desk. It never uploads a manuscript or alters a system Python
+   environment. Default support paths are keyed by the core-requirements hash
+   and Review Desk bundle hash; an update with different support content is
+   additive rather than destructive.
 6. Preserve the setup tool's PDF-readiness distinction. Exit `0` means the core
    runtime, PDF ingestion, and Review Desk passed. Exit `2` normally means the
    runtime and Review Desk are ready but Poppler is absent. Install Poppler only
@@ -77,9 +84,12 @@ and the bundled Review Desk. Do not ask the user to copy or run commands.
      no automatic-invocation opt-out.
    - `agents/openai.yaml` does not disable implicit invocation.
    - The installed tree matches the verified source manifest.
-   - `setup_econ_review.py --runtime-path` returns the verified managed Python.
+   - The standalone tree contains no `.claude-plugin/`, `.codex-plugin/`, or
+     `skills/` directory.
+   - `INSTALLED_SKILL/scripts/setup_econ_review.py --runtime-path` returns the
+     verified managed Python.
    - That interpreter passes
-     `INSTALLED_SKILL/scripts/validate_skill_package.py INSTALLED_SKILL`.
+     `INSTALLED_SKILL/scripts/validate_skill_package.py --profile standalone INSTALLED_SKILL`.
    - The Review Desk launcher's printed integrity check succeeds.
 8. Only after step 7 passes, remove same-client duplicates. Remove the exact
    native plugin through that client's plugin manager and remove the former
@@ -291,3 +301,10 @@ frontmatter description. If the skill does not appear after a new top-level
 skill directory is created, start a new session. If it appears twice, identify
 which same-client copy is standalone and which is native or legacy; verify the
 standalone copy first, then remove only the duplicate belonging to that client.
+
+A standalone copy installed by a release before 0.2.3 also contains the plugin
+manifests and `skills/` adapters, so Claude Code lists it as
+`econ-review@skills-dir` and Codex shows `econ-review:econ-review` (twice) plus
+`econ-review:econ-review-setup`. Rerun the standalone update; it replaces that
+copy with the standalone layout and restores `/econ-review` and
+`$econ-review`.

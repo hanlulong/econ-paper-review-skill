@@ -2,9 +2,11 @@
 """Prepare econ-review from its self-contained skill or plugin package.
 
 Direct-source mode installs the skill for both agents, creates or reuses one
-managed Python environment, and runs the PDF-ingestion doctor. Plugin mode can
-prepare only the shared runtime and Review Desk without creating duplicate
-skill copies. ``--copy-only`` preserves the original lightweight behavior.
+managed Python environment, and runs the PDF-ingestion doctor. Direct copies
+are standalone skills: the native-plugin manifests and ``skills/`` adapters
+stay in the plugin package only. Plugin mode can prepare only the shared
+runtime and Review Desk without creating duplicate skill copies.
+``--copy-only`` preserves the original lightweight behavior.
 """
 
 from __future__ import annotations
@@ -45,6 +47,11 @@ IGNORED_DIRECTORY_NAMES = {
 IGNORED_FILE_NAMES = {".DS_Store"}
 IGNORED_SUFFIXES = {".pyc", ".pyo"}
 GENERATED_FILES = {".econ-review-install.json", ".econ-review-runtime.json"}
+# Native-plugin payload that must never reach a standalone skill directory.
+# With these present, Claude Code loads a direct copy as the namespaced
+# ``econ-review@skills-dir`` plugin and Codex lists ``econ-review:econ-review``
+# twice plus the plugin-only ``econ-review-setup`` skill.
+PLUGIN_ONLY_ROOTS = frozenset({".claude-plugin", ".codex-plugin", "skills"})
 REQUIRED_POPPLER_COMMANDS = ("pdfinfo", "pdftotext", "pdftoppm")
 REVIEW_DESK_BUNDLE = Path("assets/review-desk.zip")
 SUPPORT_DESCRIPTOR_NAME = "runtime.json"
@@ -122,6 +129,12 @@ def _source_files(root: Path) -> list[Path]:
             portable_names.add(portable)
             files.append(relative)
     return sorted(files, key=lambda path: path.as_posix())
+
+
+def standalone_files(files: Iterable[Path]) -> list[Path]:
+    """Return the source files that belong in a standalone skill directory."""
+
+    return [relative for relative in files if relative.parts[0] not in PLUGIN_ONLY_ROOTS]
 
 
 def _tree_has_exact_membership(root: Path, expected_files: set[str]) -> bool:
@@ -1182,8 +1195,15 @@ def migrate_legacy_codex_copies(
     runtime_python: Path | None,
     *,
     dry_run: bool,
+    plugin_shaped_manifest: dict[str, str] | None = None,
 ) -> None:
-    """Deactivate only historical Codex copies after the current install exists."""
+    """Deactivate only historical Codex copies after the current install exists.
+
+    ``plugin_shaped_manifest`` describes the complete source tree, including
+    the native-plugin payload that releases before 0.2.3 also copied into
+    standalone destinations, so an unmarked copy of that layout still counts
+    as generated rather than user-modified.
+    """
 
     current = Path.home() / ".agents" / "skills" / "econ-review"
     home_boundary = Path.home().expanduser().absolute()
@@ -1220,9 +1240,13 @@ def migrate_legacy_codex_copies(
                     f"legacy Codex path escapes its configured migration boundary: {legacy}"
                 )
             ancestor = ancestor.parent
-        generated = managed_destination_is_intact(legacy) or destination_matches_source(
-            legacy,
-            source_manifest,
+        generated = (
+            managed_destination_is_intact(legacy)
+            or destination_matches_source(legacy, source_manifest)
+            or (
+                plugin_shaped_manifest is not None
+                and destination_matches_source(legacy, plugin_shaped_manifest)
+            )
         )
         if dry_run:
             action = "remove generated" if generated else "preserve modified"
@@ -1857,6 +1881,11 @@ def _perform_setup(
 ) -> int:
     """Apply or preview setup after validation and lock selection."""
 
+    # Direct skill destinations are standalone skills, never plugin roots.
+    # Replacing an older plugin-shaped copy with this exact file set removes
+    # its stale plugin manifests and adapters in the same atomic swap.
+    plugin_shaped_manifest = file_manifest(source, files)
+    files = standalone_files(files)
     source_manifest = file_manifest(source, files)
     core_version = requirements_digest(source / "requirements-core.txt")
     destinations = (
@@ -1915,6 +1944,7 @@ def _perform_setup(
             source_manifest,
             runtime_python,
             dry_run=args.dry_run,
+            plugin_shaped_manifest=plugin_shaped_manifest,
         )
     review_desk_path: Path | None = None
     if args.with_review_desk:

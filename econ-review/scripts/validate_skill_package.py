@@ -51,6 +51,10 @@ REQUIRED_RUNTIME = {
     "validate_review.py",
 }
 REVIEW_DESK_BUNDLE = Path("assets/review-desk.zip")
+# Native-plugin payload: required in the plugin package, forbidden in a
+# standalone skill copy (which would otherwise load as a namespaced plugin).
+PLUGIN_ONLY_ROOTS = (".claude-plugin", ".codex-plugin", "skills")
+PROFILES = ("auto", "plugin", "standalone")
 REVIEW_DESK_REQUIRED_FILES = {
     "app/LICENSE.txt",
     "app/THIRD_PARTY_NOTICES.txt",
@@ -503,6 +507,40 @@ def _validate_plugin_payload(
     _validate_review_desk_bundle(root, errors)
 
 
+def _path_present(path: Path) -> bool:
+    try:
+        path.lstat()
+    except OSError:
+        return False
+    return True
+
+
+def _resolve_profile(root: Path, profile: str) -> str:
+    """Choose the plugin or standalone contract for *root*.
+
+    ``auto`` treats any native-plugin path as a claim to be a plugin package,
+    so a partial plugin payload fails the complete plugin contract instead of
+    passing as a standalone skill.
+    """
+
+    if profile not in PROFILES:
+        raise ValueError(f"profile must be one of {', '.join(PROFILES)}")
+    if profile != "auto":
+        return profile
+    if any(_path_present(root / name) for name in PLUGIN_ONLY_ROOTS):
+        return "plugin"
+    return "standalone"
+
+
+def _validate_standalone_layout(root: Path, errors: list[str]) -> None:
+    for name in PLUGIN_ONLY_ROOTS:
+        if _path_present(root / name):
+            errors.append(
+                f"standalone skill must not contain native-plugin payload: {name}"
+            )
+    _validate_review_desk_bundle(root, errors)
+
+
 def _validate_runtime(root: Path, errors: list[str]) -> None:
     scripts = root / "scripts"
     if not scripts.is_dir():
@@ -561,7 +599,13 @@ def _validate_runtime(root: Path, errors: list[str]) -> None:
             errors.append(f"runtime references missing schema: assets/{name}")
 
 
-def validate_skill_package(root: Path) -> list[str]:
+def validate_skill_package(root: Path, profile: str = "auto") -> list[str]:
+    """Validate a plugin package or a standalone skill copy.
+
+    ``plugin`` requires both native manifests and the ``skills/`` adapters;
+    ``standalone`` forbids them; ``auto`` picks ``plugin`` whenever any of that
+    payload is present and ``standalone`` otherwise.
+    """
     errors: list[str] = []
     root = root.expanduser().absolute()
     if _is_link_or_junction(root):
@@ -569,6 +613,7 @@ def validate_skill_package(root: Path) -> list[str]:
     root = root.resolve()
     if not root.is_dir():
         return [f"skill directory does not exist: {root}"]
+    resolved_profile = _resolve_profile(root, profile)
 
     for current, directories, files in os.walk(root, followlinks=False):
         safe_directories: list[str] = []
@@ -625,7 +670,8 @@ def validate_skill_package(root: Path) -> list[str]:
     if not isinstance(name, str) or not SKILL_NAME.fullmatch(name) or len(name) > 64:
         errors.append("SKILL.md name must be 1-64 lowercase letters, digits, or single hyphens")
     if name != root.name and not (
-        isinstance(name, str)
+        resolved_profile == "plugin"
+        and isinstance(name, str)
         and isinstance(description, str)
         and _is_versioned_plugin_cache(root, name, description)
     ):
@@ -667,7 +713,10 @@ def validate_skill_package(root: Path) -> list[str]:
     _validate_links(root, errors)
     _validate_reference_navigation(root, errors)
     _validate_json_schemas(root, errors)
-    _validate_plugin_payload(root, name, description, errors)
+    if resolved_profile == "plugin":
+        _validate_plugin_payload(root, name, description, errors)
+    else:
+        _validate_standalone_layout(root, errors)
     _validate_runtime(root, errors)
     return errors
 
@@ -681,8 +730,18 @@ def main(argv: list[str] | None = None) -> int:
         default=Path(__file__).resolve().parents[1],
         help="directory containing SKILL.md (defaults to this installed skill)",
     )
+    parser.add_argument(
+        "--profile",
+        choices=PROFILES,
+        default="auto",
+        help=(
+            "package contract: plugin (native manifests and skills/ adapters "
+            "required), standalone (forbidden), or auto (plugin when any of "
+            "that payload is present)"
+        ),
+    )
     args = parser.parse_args(argv)
-    errors = validate_skill_package(args.skill_directory)
+    errors = validate_skill_package(args.skill_directory, args.profile)
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
