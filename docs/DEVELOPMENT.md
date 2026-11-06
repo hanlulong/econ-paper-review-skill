@@ -179,6 +179,14 @@ during delivery, `create_delivery.py` projects that canonical package into
 delivery tests exercise the nested layout, rebuild, rollback, and dirty-parent
 guards. Do not duplicate the fixture merely to mirror its delivered location.
 
+The one deliberate copy is `docs/sample-review/review/`, the Review Desk demo
+package: the reader delivery of the fixture, produced without model calls by
+finalizing a copy of the fixture inside a `supporting/` folder. When the fixture
+or the delivery generator changes, rebuild it the same way (`cp -R
+tests/fixtures/valid-review DEMO/supporting`, then `finalize_review.py
+DEMO/supporting`) and copy the result over; `tests/test_demo_review_package.py`
+fails until it matches.
+
 `upgrade_review_v03.py` is a maintainer-only helper for deliberate v0.2-to-v0.3
 migration and rank repair. Current user workflows do not migrate old packages
 silently: validate an old package under its declared contract, or copy it and run
