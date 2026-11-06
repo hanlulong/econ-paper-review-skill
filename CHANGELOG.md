@@ -57,7 +57,10 @@ included here.
   copy as "Preserved modified prior copy". Bytecode caches for declared modules
   no longer count as edits, `install.sh` ignores the Python installer's state
   file, and a byte-identical copy left by `install.sh` is replaced without a
-  backup.
+  backup. An older copy without an install record (such as one from
+  `install.sh` before 0.3.0) is still backed up, because local edits cannot be
+  ruled out, but it is reported as "Preserved prior copy" rather than as
+  modified.
 - "Comment N" now means the same issue in every document. The revision plan
   labels each item with its referee-report number (`Comment N`) or its
   editing-comment number (`Editing comment N`) instead of numbering its own
@@ -68,7 +71,7 @@ included here.
   editing-comment cross-references. `finalize_review.py --check` re-renders the
   plan with the 0.3.0 numbering, so finalize an older package again to bring
   it current. Review Desk's own numbering and Suggestions text are unchanged
-  in 0.3.0: it still numbers every comment "Comment N" in list order and merges
+  in 0.3.0: it still numbers every comment "Comment #N" in list order and merges
   `fix.what` and `fix.how` only when one repeats the other.
 - Suggestions drop most restated repairs. Sentences of `fix.how` that restate
   `minimum_repair` or `fix.what` in other words are dropped, and Concern drops
@@ -76,9 +79,9 @@ included here.
   paraphrases, which appeared in about ten comments of the bundled sample; the
   heuristic still misses some. A sentence is never dropped when it states a
   contingency, adds a number, quoted text or identifier (such as `DOI` or
-  `F`), adds a content word other than a generic repair verb, or is written in
-  a script the heuristic cannot compare word by word, and locators such as
-  "Sec. 3" or "p. 7" are not split. The revision plan's Action line keeps the
+  `F`), or adds a content word other than a generic repair verb. Words in any
+  script count (Chinese, Japanese and Korean text is compared by character
+  pairs), and locators such as "Sec. 3" or "p. 7" are not split. The revision plan's Action line keeps the
   full `fix.how`, merging only exact repeats as before.
 - Verbatim quotes rejoin the line breaks of the PDF text layer (a line ending
   in a hyphen keeps the hyphen and joins without a space, and Windows line

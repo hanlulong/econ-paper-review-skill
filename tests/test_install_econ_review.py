@@ -1417,6 +1417,34 @@ class ManagedInstallerTests(unittest.TestCase):
             )
             self.assertEqual(result.stdout.count("Preserved modified prior copy"), 1)
 
+    def test_unrecorded_plugin_shaped_copy_is_replaced_or_preserved_without_calling_it_modified(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            add_plugin_payload(fixture.skill)
+            project = root / "project"
+            project.mkdir()
+            identical = project / ".agents" / "skills" / "econ-review"
+            edited = project / ".claude" / "skills" / "econ-review"
+            # A copy made without install state (as scripts/install.sh did before 0.3.0).
+            for destination in (identical, edited):
+                shutil.copytree(fixture.skill, destination)
+            (edited / "SKILL.md").write_text("local edit", encoding="utf-8")
+
+            result = self.run_installer(
+                "--source", str(fixture.skill), "--local", str(project), "--all", "--copy-only",
+            )
+
+            self.assert_standalone_layout(identical)
+            self.assert_standalone_layout(edited)
+            self.assertNotIn("Preserved modified prior copy", result.stdout)
+            self.assertEqual(result.stdout.count("Preserved prior copy (it has no install record"), 1)
+            backups = self.support_home / ".openeconai" / "backups" / "econ-review"
+            preserved = [path for path in backups.rglob("SKILL.md") if path.read_text(encoding="utf-8") == "local edit"]
+            self.assertEqual(len(preserved), 1)
+            # Only the edited copy was backed up; the identical one was replaced in place.
+            self.assertEqual(len({path.relative_to(backups).parts[0] for path in backups.rglob("SKILL.md")}), 1)
+
     def test_real_package_installs_as_a_valid_standalone_skill(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp) / "project"

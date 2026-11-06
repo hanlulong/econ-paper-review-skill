@@ -1158,6 +1158,7 @@ def install_one(
     runtime_python: Path | None,
     *,
     dry_run: bool,
+    plugin_shaped_manifest: dict[str, str] | None = None,
 ) -> None:
     require_safe_skill_destination(destination, label)
     if dry_run:
@@ -1176,11 +1177,17 @@ def install_one(
     rollback = destination.with_name(f".{destination.name}.backup-{uuid.uuid4().hex}")
     had_previous = _path_present(destination)
     # A copy that is byte-identical to this source (for example one written by
-    # scripts/install.sh, which records no install state) is not a user edit.
+    # scripts/install.sh, which records no install state), or to this source's
+    # full plugin-shaped tree, is not a user edit.
     preserve_previous = had_previous and not (
         managed_destination_is_intact(destination)
         or destination_matches_source(destination, source_manifest)
+        or (
+            plugin_shaped_manifest is not None
+            and destination_matches_source(destination, plugin_shaped_manifest)
+        )
     )
+    unrecorded_previous = had_previous and not (destination / ".econ-review-install.json").is_file()
     try:
         for relative in files:
             target = stage / relative
@@ -1217,7 +1224,16 @@ def install_one(
                     raise InstallError(
                         f"could not preserve the prior {label}; the update was rolled back"
                     )
-                print(f"Preserved modified prior copy: {preserved}")
+                if unrecorded_previous:
+                    # Copies from scripts/install.sh before 0.3.0 record no
+                    # install state, so an unchanged older copy cannot be told
+                    # apart from an edited one; keep it, but do not call it modified.
+                    print(
+                        "Preserved prior copy (it has no install record, so local edits "
+                        f"cannot be ruled out): {preserved}"
+                    )
+                else:
+                    print(f"Preserved modified prior copy: {preserved}")
             else:
                 shutil.rmtree(rollback)
     print(f"Installed {label}: {destination}")
@@ -1989,6 +2005,7 @@ def _perform_setup(
             label,
             runtime_python,
             dry_run=args.dry_run,
+            plugin_shaped_manifest=plugin_shaped_manifest,
         )
     if scope == "global" and not args.support_only and args.agent in {"all", "codex"}:
         migrate_legacy_codex_copies(
