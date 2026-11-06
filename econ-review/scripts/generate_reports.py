@@ -1584,8 +1584,15 @@ def render_current_writing_report(
     ledger: dict[str, Any],
     writing_audit: dict[str, Any],
     run: dict[str, Any],
+    *,
+    legacy_comment_labels: bool = False,
 ) -> str:
-    """Project the current editing comments entirely from canonical JSON state."""
+    """Project the current editing comments entirely from canonical JSON state.
+
+    ``legacy_comment_labels`` reproduces the pre-0.3.0 cross-reference wording
+    ("Comment N") so the validator can accept packages finalized by earlier
+    releases.
+    """
     if writing_audit.get("schema_version") != "0.4":
         raise ValueError("canonical editing-comments generation requires writing audit schema_version 0.4")
     if writing_audit.get("review_id") != ledger.get("review_id") or run.get("review_id") != ledger.get("review_id"):
@@ -1616,8 +1623,9 @@ def render_current_writing_report(
     }
     # "Editing comment N" keeps these cross-references distinct from the
     # referee report's "Comment N" numbering; the revision plan uses both.
+    label_prefix = "Comment" if legacy_comment_labels else "Editing comment"
     comment_labels = {
-        row["id"]: f"Editing comment {index}: {optional_text(row, 'title', finding_context(row)) or required_text(row, 'issue', finding_context(row))}"
+        row["id"]: f"{label_prefix} {index}: {optional_text(row, 'title', finding_context(row)) or required_text(row, 'issue', finding_context(row))}"
         for index, row in enumerate(writing_rows, start=1)
         if isinstance(row.get("id"), str)
     }
@@ -1787,7 +1795,10 @@ def render_current_writing_report(
             lines.extend(["No correction is needed in this category.", ""])
         related_comments = related_comment_list(row, comment_labels)
         if related_comments != "—":
-            see_also = related_comments.replace("Editing comment ", "editing comment ")
+            see_also = (
+                related_comments if legacy_comment_labels
+                else related_comments.replace("Editing comment ", "editing comment ")
+            )
             lines.extend([f"See {see_also} for the full explanation and revision request.", ""])
         lines.extend([
             f"**Why it matters:** {required_text(row, 'reader_consequence', f'evidence/writing.json.mechanics[{index}]')}",
@@ -2051,7 +2062,17 @@ def main() -> int:
             outputs[writing_path] = render_writing_report(args.review_dir, ledger, writing_audit, run)
         for destination, output in outputs.items():
             if args.check:
-                if not destination.exists() or destination.read_text(encoding="utf-8") != output:
+                existing = destination.read_text(encoding="utf-8") if destination.exists() else None
+                legacy_writing_labels = (
+                    destination == writing_path
+                    and existing is not None
+                    and isinstance(writing_audit, dict)
+                    and writing_audit.get("schema_version") == "0.4"
+                    and existing == render_current_writing_report(
+                        ledger, writing_audit, run, legacy_comment_labels=True,
+                    )
+                )
+                if existing != output and not legacy_writing_labels:
                     raise ValueError(f"{destination} is not synchronized with canonical JSON state")
             else:
                 atomic_write_text(args.review_dir, destination.relative_to(args.review_dir), output)

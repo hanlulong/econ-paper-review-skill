@@ -63,8 +63,13 @@ included here.
   editing-comment number (`Editing comment N`) instead of numbering its own
   items, and editing-comment cross-references say "Editing comment N". Within
   a priority level the plan lists prerequisites first and otherwise keeps the
-  report's order of importance. The validator accepts the new labels and plans
-  from earlier releases.
+  report's order of importance. The validator accepts the new labels and
+  packages finalized by earlier releases, including their "Comment N"
+  editing-comment cross-references. `finalize_review.py --check` re-renders the
+  plan with the 0.3.0 numbering, so finalize an older package again to bring
+  it current. Review Desk's own numbering and Suggestions text are unchanged
+  in 0.3.0: it still numbers every comment "Comment N" in list order and merges
+  `fix.what` and `fix.how` only when one repeats the other.
 - Suggestions drop most restated repairs. Sentences of `fix.how` that restate
   `minimum_repair` or `fix.what` in other words are dropped, and Concern drops
   sentences that restate the Issue. Exact-substring checks missed these

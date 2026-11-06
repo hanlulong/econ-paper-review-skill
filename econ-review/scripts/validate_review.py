@@ -8502,7 +8502,11 @@ def validate_review(review_dir: Path, *, strict_complete: bool = False) -> list[
                             except (KeyError, TypeError, ValueError) as exc:
                                 errors.append(f"cannot render canonical editing-comments.md: {exc}")
                             else:
-                                if writing_report != expected_writing_report:
+                                if writing_report != expected_writing_report and (
+                                    writing_report != render_current_writing_report(
+                                        ledger, writing, run, legacy_comment_labels=True,
+                                    )
+                                ):
                                     errors.append(
                                         "editing-comments.md is not synchronized with evidence/writing.json, findings.json, and run.json"
                                     )
