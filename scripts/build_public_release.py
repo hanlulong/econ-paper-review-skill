@@ -34,6 +34,7 @@ EXPLICIT_EXCLUDED_TREE_FILES = {Path("review-viewer/public/favicon.svg")}
 ROOT_FILES = {
     Path(".gitattributes"),
     Path(".gitignore"),
+    Path("CHANGELOG.md"),
     Path("CONTRIBUTING.md"),
     Path("INSTALL.md"),
     Path("LICENSE"),
