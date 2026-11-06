@@ -71,6 +71,9 @@ class DemoReviewPackageTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:48127/", readme)
         self.assertIn("## Next round", readme)
         self.assertIn("review-actions.json", readme)
+        # Name the viewer's real control and an idempotent way to reprint the launch command.
+        self.assertIn("**Download decisions**", readme)
+        self.assertIn("--support-only --global --with-review-desk", readme)
 
 
 if __name__ == "__main__":
