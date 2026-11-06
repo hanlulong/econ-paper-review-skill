@@ -57,6 +57,29 @@ Load only the row needed for the current stage. Conditional references require a
 
 Paper-family and design tags route attention; they never activate or suppress a burden. A mixed paper may activate several components. Activate checks from the claim's object and evidentiary bridge, not from a rigid empirical or theoretical checklist.
 
+## Apply severity conservatively
+
+- `critical`: a verified issue can invalidate or make uninterpretable a central claim and could plausibly drive rejection. Every critical finding is potentially dispositive, essential before submission, and reviewer P0; the repair may be a correction, decisive reanalysis, redesign, or explicit withdrawal of the affected central claim.
+- `major`: the issue can change a headline conclusion, contribution, or credible interpretation, but a feasible repair or decisive analysis exists.
+- `minor`: a verified noncentral problem in interpretation, disclosure, exposition, notation, presentation, citation, or reproducibility.
+- `info`: a boundary or useful observation, not a criticism.
+
+Tie severity to the verified consequence for this paper, not the general importance of a method, the number of occurrences, or keywords in the prose. Do not upgrade a finding mechanically to make a ranking or recommendation look stronger.
+
+## Do not claim completion when
+
+- any source unit, active burden, headline claim, material appendix item, or applicable audit is neither checked nor explicitly bounded;
+- a quotation, visual observation, numerical claim, external-source proposition, or omission lacks resolving canonical evidence;
+- a figure or table has not been separately rendered, visually inspected, and reconciled with its caption, notes, and claims;
+- a surviving comment lacks exact evidence, fairness, a concrete repair, observable closure, or passed verification;
+- a disclosed claim-bounded data limitation is criticized as a defect, or report language exceeds the evidence;
+- capacity overflow has hidden, dropped, or weakened a distinct verified finding;
+- the final exhaustive sweep found a new surviving issue, omitted a non-excluded source unit, or lacks a recorded zero-new-finding saturation round;
+- report, editing comments, canonical ledger, coverage, synthesis, and fix plan disagree;
+- the applicable finalization receipt and package validation do not pass.
+
+Use the full stop-condition and artifact-consistency checks in [verification-protocol.md](references/verification-protocol.md) and [output-contracts.md](references/output-contracts.md); do not duplicate them from memory.
+
 ## Execute the review
 
 ### 0. Establish the boundary
@@ -122,26 +145,3 @@ Generate the current package described in [output-contracts.md](references/outpu
 Invoke `REVIEW_PYTHON` with `SKILL_ROOT/scripts/finalize_review.py` and `review/supporting` as arguments, using the active shell's native invocation syntax, as the only completion path for the current contract. It creates the signed canonical package plus the clean parent delivery headed by `review/paper-review.pdf`; the parent retains only reader files, a `reports/` folder, and `supporting/`. Individual generators and validators diagnose failures; they do not replace finalization. Do not present a package as final unless the finalizer, PDF synchronization check, and package validator pass.
 
 When `run.json.prior_round` is active, the same finalizer validates the snapshot bindings and adjudications, regenerates `evidence/round-reconciliation.md`, adds it to the manifest and PDF, and then renders the referee-report opening from the reconciled counts. The generated round report keeps the earlier issue, exact author instruction, implementation update, and reviewer conclusion visibly distinct; it uses comment titles in visible prose and confines stable IDs and status enums to hidden bindings. Do not hand-edit that Markdown projection.
-
-## Apply severity conservatively
-
-- `critical`: a verified issue can invalidate or make uninterpretable a central claim and could plausibly drive rejection. Every critical finding is potentially dispositive, essential before submission, and reviewer P0; the repair may be a correction, decisive reanalysis, redesign, or explicit withdrawal of the affected central claim.
-- `major`: the issue can change a headline conclusion, contribution, or credible interpretation, but a feasible repair or decisive analysis exists.
-- `minor`: a verified noncentral problem in interpretation, disclosure, exposition, notation, presentation, citation, or reproducibility.
-- `info`: a boundary or useful observation, not a criticism.
-
-Tie severity to the verified consequence for this paper, not the general importance of a method, the number of occurrences, or keywords in the prose. Do not upgrade a finding mechanically to make a ranking or recommendation look stronger.
-
-## Do not claim completion when
-
-- any source unit, active burden, headline claim, material appendix item, or applicable audit is neither checked nor explicitly bounded;
-- a quotation, visual observation, numerical claim, external-source proposition, or omission lacks resolving canonical evidence;
-- a figure or table has not been separately rendered, visually inspected, and reconciled with its caption, notes, and claims;
-- a surviving comment lacks exact evidence, fairness, a concrete repair, observable closure, or passed verification;
-- a disclosed claim-bounded data limitation is criticized as a defect, or report language exceeds the evidence;
-- capacity overflow has hidden, dropped, or weakened a distinct verified finding;
-- the final exhaustive sweep found a new surviving issue, omitted a non-excluded source unit, or lacks a recorded zero-new-finding saturation round;
-- report, editing comments, canonical ledger, coverage, synthesis, and fix plan disagree;
-- the applicable finalization receipt and package validation do not pass.
-
-Use the full stop-condition and artifact-consistency checks in [verification-protocol.md](references/verification-protocol.md) and [output-contracts.md](references/output-contracts.md); do not duplicate them from memory.
