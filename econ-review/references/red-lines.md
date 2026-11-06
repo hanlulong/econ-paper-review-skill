@@ -51,6 +51,17 @@ Prefer `inconclusive_from_text` to a manufactured pass or failure. An omission b
 - Do not use private editorial examples, author names, manuscript IDs, or decision text as public templates.
 - Report conflicts, plagiarism, or duplicate-publication concerns privately and cautiously, supported by verified evidence.
 
+## Check the user's role before refereeing someone else's manuscript
+
+The skill is built for authors reviewing their own or a coauthor's paper before submission. When a request reads as refereeing a manuscript the user did not write (an invited referee report, a submission received for review, "referee this submission for the journal"), ask once, before reading the manuscript in depth, whether the user is an author or coauthor or has the journal's or editor's permission to use an AI tool on it. Say that journals restrict reviewers' AI use, summarize the pattern below, and continue only after explicit confirmation. Policies change often; tell the user to check the journal's current reviewer guidelines. Checked 2026-11-06:
+
+- **AEA journals** ([AER editorial policy](https://www.aeaweb.org/journals/aer/editorial-policy); AEJ pages carry the same text): the reviewer's report is expected to reflect their own careful reading and evaluation; any AI use during the review must be disclosed in the reviewer's cover letter and limited to tools that guarantee the manuscript will not be used to train AI models.
+- **Econometric Society** ([guidelines for referees](https://www.econometricsociety.org/publications/econometrica/guidelines-referees)): referees are expected to read the submission themselves; AI tools may help shape and communicate their views, for example clarity, organization, or language, and the report must reflect the referee's own judgment.
+- **Elsevier** ([generative AI policies for journals](https://www.elsevier.com/about/policies-and-standards/generative-ai-policies-for-journals)): reviewers should not upload a submitted manuscript or any part of it into an AI tool; AI may be used only in a supportive capacity with confidentiality maintained.
+- **Springer Nature** ([AI guidance for researchers, editors and reviewers](https://group.springernature.com/gp/group/ai/ai-guidance-for-researchers-editors-reviewers)): reviewers may use secure or institutionally approved AI tools but should not upload manuscript content to unsecured or public AI systems; AI cannot replace the reviewer's own critique or judgment.
+
+With confirmation, a referee's run is the same review; remind the user that they remain responsible for the report, must fact-check it, and must make any disclosure their journal requires. Without confirmation, offer to help organize and check the user's own notes instead of generating an evaluation.
+
 ## Keep judgment proportional
 
 - The objective is to improve the paper. Retain a criticism only when a proportionate response can improve correctness, credibility, interpretation, clarity, reproducibility, or reader usefulness; otherwise record a boundary or omit it.

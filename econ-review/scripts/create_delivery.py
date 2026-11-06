@@ -108,20 +108,45 @@ def delivery_readme(review_dir: Path) -> str:
         f"{substance} substantive {'comment' if substance == 1 else 'comments'}; "
         f"{writing} editing {'comment' if writing == 1 else 'comments'}.**\n\n"
         + date_line
-        + "Start with [paper-review.pdf](paper-review.pdf). It combines the referee report, "
-        + "editing comments, revision plan"
-        + round_pdf_text
-        + " in one professionally formatted document.\n\n"
+        + "Start with [paper-review.pdf](paper-review.pdf). It combines "
+        + combined_contents(
+            "the referee report",
+            *(["the editing comments"] if writing_line else []),
+            "the revision plan",
+            *(["prior-round progress"] if round_pdf_text else []),
+        )
+        + " in one formatted document.\n\n"
         + "## Other reader files\n\n"
         + "- [Referee report](reports/referee-report.md) - overall assessment and exhaustive detailed comments.\n"
         + round_line
         + writing_line
         + "- [Revision plan](reports/revision-plan.md) - prioritized actions and completion evidence.\n\n"
+        + "## Open the review in Review Desk\n\n"
+        + "Review Desk is the optional local viewer for deciding each comment. If it was installed "
+        + "(`--with-review-desk`), run the launch command the installer printed; it opens "
+        + "<http://127.0.0.1:48127/>. If you no longer have the command, ask your agent to "
+        + "\"open this review in Review Desk\"; rerunning the installer with `--with-review-desk` prints it again. "
+        + "Choose **Open review folder** and select this whole folder; the viewer finds the review automatically.\n\n"
+        + "Your decisions are saved in that browser for that address only. Export them before you switch "
+        + "browsers, computers, or the `--port` setting.\n\n"
+        + "## Next round\n\n"
+        + "1. In Review Desk, decide every comment, export `review-actions.json` and the revision files, and save them in this folder.\n"
+        + "2. Revise the paper, or hand the exported revision plan to your agent.\n"
+        + "3. Ask your agent: \"Review the revised paper as round 2 using this review folder.\" "
+        + "The next round rechecks every decision and sweeps the whole paper again.\n\n"
         + "## Supporting material\n\n"
         + "The `supporting/` folder keeps the source evidence and working files needed for later review rounds. "
-        + "You normally do not need to open or edit it. Select this whole delivery folder in Review Desk; "
-        + "the viewer will find the review automatically.\n"
+        + "You normally do not need to open or edit it.\n"
     )
+
+
+def combined_contents(*items: str) -> str:
+    """Join document names as English prose: 'a', 'a and b', 'a, b, and c'."""
+    if len(items) <= 1:
+        return "".join(items)
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
 
 
 def reader_markdown(source: str, *, include_writing: bool, include_round: bool) -> str:
