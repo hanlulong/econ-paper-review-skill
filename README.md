@@ -193,7 +193,7 @@ Refereeing a submission for a journal? Check the journal's reviewer AI policy fi
 | | econ-review (this skill) | Refine.ink |
 |---|---|---|
 | **Cost** | Free for noncommercial use; source-available — you bring your own Claude Code or Codex subscription | First document free, then $49.99 per review ($30–40 each in packs, as of November 2026) |
-| **Iteration** | Built for rounds: review → decide each comment in Review Desk → your agents revise → the next round rechecks every decision | Each review is a separate purchase |
+| **Iteration** | Built for rounds: review → decide each comment in Review Desk → your agents revise → the next round rechecks every decision | Each review uses a paid credit (single, pack, or monthly subscription from $40 for one review) |
 | **Deliverable** | Referee report + verified detailed comments + editing comments + a revision plan written for your agents | Referee-style substantive comments |
 | **Where your paper goes** | Runs inside your own agent; nothing is uploaded to us, and your existing AI-provider terms apply | Uploaded to their service (SOC 2 / ISO 27001 certified, no training on papers) |
 | **Openness** | Every prompt, check, and rubric is in this repo — read it, fork it, tune it to your field | Closed pipeline |
