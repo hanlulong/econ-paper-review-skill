@@ -21,7 +21,7 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern static-dist"
   },
   "dependencies": {
-    "katex": "^0.17.0",
+    "katex": "0.18.10",
     "next": "16.4.5",
     "react": "19.2.7",
     "react-dom": "19.2.7",
@@ -46,7 +46,8 @@
     "wrangler": "4.110.0"
   },
   "overrides": {
-    "postcss": "8.5.32"
+    "postcss": "8.5.32",
+    "katex": "$katex"
   },
   "type": "module"
 }
