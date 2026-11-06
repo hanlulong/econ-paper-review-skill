@@ -73,6 +73,24 @@ class PublicReleaseTests(unittest.TestCase):
         )
         self.assertFalse(any(path.startswith("benchmarks/reviews/") for path in paths))
 
+    def test_every_tracked_file_is_declared_in_the_release_contract(self) -> None:
+        git = shutil.which("git")
+        if git is None or not (ROOT / ".git").exists():
+            self.skipTest("not a git checkout")
+        listed = subprocess.run(
+            [git, "-C", str(ROOT), "ls-files", "-z"],
+            capture_output=True,
+            check=False,
+        )
+        if listed.returncode != 0:
+            self.skipTest("git ls-files is unavailable")
+        tracked = {item.decode("utf-8") for item in listed.stdout.split(b"\0") if item}
+        _contract, declared = MODULE.load_file_contract(ROOT)
+        declared_paths = {path.as_posix() for path in declared}
+        self.assertEqual(sorted(tracked - declared_paths), [])
+        top_level = {Path(path) for path in tracked if "/" not in path}
+        self.assertEqual(sorted(path.as_posix() for path in top_level - MODULE.ROOT_FILES), [])
+
     def test_native_windows_install_command_is_consistent(self) -> None:
         for relative in ("README.md", "INSTALL.md", "scripts/install.sh"):
             with self.subTest(path=relative):

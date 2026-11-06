@@ -38,6 +38,7 @@ ROOT_FILES = {
     Path("INSTALL.md"),
     Path("LICENSE"),
     Path("README.md"),
+    Path("README.zh-CN.md"),
     Path("THIRD_PARTY_NOTICES.md"),
 }
 FIRST_PARTY_LICENSES = (
