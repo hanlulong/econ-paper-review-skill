@@ -10,6 +10,8 @@ Objective: improve the paper for the intended audience by resolving the verified
 
 Work from P0 to P2. A later review confirms whether each revision resolves the concern by comparing it with the **Done when** condition.
 
+Items keep the numbers they have in the referee report (**Comment N**) and the editing comments (**Editing comment N**), so each number names the same issue in every document. Within a priority level, prerequisites come first and the rest follow the report's order of importance.
+
 Unless an item says otherwise, the current design can support the stated repair. Items that need new evidence or claim narrowing say so explicitly.
 
 ## P0 — essential before submission
@@ -26,7 +28,7 @@ Unless an item says otherwise, the current design can support the stated repair.
 
 ## P2 — copyediting and optional polish
 
-### Comment 2: The proposition summary has a subject-verb agreement error
+### Editing comment 1: The proposition summary has a subject-verb agreement error
 <!-- finding_id: WRT-01 -->
 
 - **Severity:** minor

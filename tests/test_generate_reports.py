@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -38,6 +39,81 @@ class GenerateReportsTests(unittest.TestCase):
             MODULE.canonical_manifest(FIXTURE, ledger, include_writing=True),
             json.loads((FIXTURE / "review-manifest.json").read_text(encoding="utf-8")),
         )
+
+    def test_suggestions_state_a_paraphrased_repair_once(self) -> None:
+        # Pairs taken from the bundled sample review, where both versions were printed.
+        cases = (
+            ("Delete one occurrence of the.", "Change the the to the.", "Delete one occurrence of the."),
+            (
+                "Change 34 percent to 3.4 percent and audit every headline magnitude for decimal consistency.",
+                "Replace 34 percent with 3.4 percent and synchronize the chosen log-point or percent transformation across all summaries.",
+                "Change 34 percent to 3.4 percent and audit every headline magnitude for decimal consistency.",
+            ),
+            (
+                "Correct the record to The Economic Journal, 2011, 121(552):505-532, with the verified DOI.",
+                "Replace the journal, year, volume, and issue with the official record and add the verified DOI.",
+                "Correct the record to The Economic Journal, 2011, 121(552):505-532, with the verified DOI.",
+            ),
+        )
+        for what, how, expected in cases:
+            self.assertEqual(MODULE.merge_repair(what, how), expected)
+        # New implementation detail and contingencies are kept.
+        merged = MODULE.merge_repair(
+            "Treat the current causal magnitude as provisional and narrow the claim.",
+            "Show cohort-time estimates with not-yet-treated controls. If the leads persist, recast the result as descriptive.",
+        )
+        self.assertIn("Show cohort-time estimates", merged)
+        self.assertIn("If the leads persist", merged)
+        self.assertEqual(
+            MODULE.split_sentences("Encode Pedro H. C. Sant'Anna and A. Colin Cameron. Rebuild it."),
+            ["Encode Pedro H. C. Sant'Anna and A. Colin Cameron.", "Rebuild it."],
+        )
+
+    def test_concern_drops_sentences_that_restate_the_issue(self) -> None:
+        concern = MODULE.restated_concern_removed(
+            "Table 1 reports an employee mean above the employee maximum.",
+            "A mean cannot exceed the maximum, so at least one cell or label is wrong.",
+            "Readers cannot trust the descriptive statistics that frame the sample.",
+            "Table 1 reports an employee mean that is above the employee maximum.",
+        )
+        self.assertIn("A mean cannot exceed the maximum", concern)
+        self.assertIn("Readers cannot trust", concern)
+        self.assertNotIn("Table 1 reports", concern)
+
+    def test_verbatim_quotes_rejoin_pdf_line_breaks(self) -> None:
+        row = {
+            "id": "QUOTE-01",
+            "display_evidence_id": "EV-1",
+            "evidence": [{
+                "id": "EV-1", "representation": "verbatim",
+                "excerpt": "Proposition 1 predicts that gains rise with communication intensity. Table 4 confirms this\nsharply.",
+                "locator": {"section": "6"},
+            }],
+        }
+        with mock.patch.object(MODULE, "evidence_text", return_value=row["evidence"][0]["excerpt"]), \
+                mock.patch.object(MODULE, "display_evidence", return_value=row["evidence"][0]):
+            rendered = MODULE.relevant_evidence(row)
+        self.assertEqual(
+            rendered,
+            "> Proposition 1 predicts that gains rise with communication intensity. Table 4 confirms this sharply.",
+        )
+
+    def test_comparator_citation_names_venue_and_doi(self) -> None:
+        citation = MODULE._source_citation({
+            "id": "EXT-01",
+            "title": "Broadband upgrade and firm performance in rural areas",
+            "url": "https://doi.org/10.1016/j.regsciurbeco.2019.03.002",
+            "bibliographic_metadata": {
+                "authors": [
+                    {"name": "Giulia Canzian"}, {"name": "Samuele Poy"}, {"name": "Simone Schüller"},
+                ],
+                "publication_date": "2019-07-01",
+                "venue": "Regional Science and Urban Economics",
+                "identifiers": [{"scheme": "doi", "value": "10.1016/j.regsciurbeco.2019.03.002"}],
+            },
+        })
+        self.assertTrue(citation.startswith("Giulia Canzian, Samuele Poy, and Simone Schüller (2019), [Broadband"))
+        self.assertTrue(citation.endswith(", Regional Science and Urban Economics, doi:10.1016/j.regsciurbeco.2019.03.002"))
 
     def test_author_artifacts_have_compact_cross_navigation(self) -> None:
         ledger = MODULE.load(FIXTURE / "findings.json")

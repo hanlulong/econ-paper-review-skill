@@ -22,7 +22,7 @@ The synthetic manuscript is concise and readable. One objective subject-verb agr
 
 | Section | Current job | What works | Reader friction | Revision direction | Related comments |
 |---|---|---|---|---|---|
-| Complete synthetic manuscript | State the model, proposition, and boundary prediction. | The economic object and boundary case are easy to locate. | One subject-verb agreement error interrupts the proposition summary. | Correct the verb while preserving the concise structure. | Comment 1: The proposition summary has a subject-verb agreement error |
+| Complete synthetic manuscript | State the model, proposition, and boundary prediction. | The economic object and boundary case are easy to locate. | One subject-verb agreement error interrupts the proposition summary. | Correct the verb while preserving the concise structure. | Editing comment 1: The proposition summary has a subject-verb agreement error |
 
 ## Terminology, definitions, and notation
 
@@ -44,7 +44,7 @@ The synthetic fixture contains no tables or figures, so no exhibit-writing issue
 <!-- occurrence_source: main_manuscript; render_verification: verified_render -->
 - **Section 3, paragraph 2:** Replace “The proposition characterize the model's comparative static.” with “The proposition characterizes the model's comparative static.”
 
-See Comment 1: The proposition summary has a subject-verb agreement error for the full explanation and revision request.
+See editing comment 1: The proposition summary has a subject-verb agreement error for the full explanation and revision request.
 
 **Why it matters:** The sentence states the paper's main proposition, making the agreement error unusually visible.
 

@@ -13,6 +13,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from safe_io import atomic_write_text, strict_json_load  # noqa: E402
+from generate_reports import merge_repair  # noqa: E402
 
 
 NAVIGATION_START = "<!-- review-navigation:start -->"
@@ -73,6 +74,10 @@ def dependency_order(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     f"{finding_id} depends on lower-severity {dependency}; merge the shared root cause "
                     "or align the severities so the revision plan remains severity-first"
                 )
+    # Emit one item at a time: the most important item whose prerequisites are
+    # already listed. Prerequisites still come first, but an unrelated minor
+    # item no longer jumps ahead of a major one just because it has no
+    # dependencies.
     pending = set(by_id)
     emitted: list[dict[str, Any]] = []
     while pending:
@@ -86,11 +91,46 @@ def dependency_order(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not ready:  # Preserve deterministic output while exposing a dependency cycle.
             cycle = ", ".join(sorted(pending))
             raise ValueError(f"finding dependency cycle: {cycle}")
-        ready.sort(key=reviewer_order_key)
-        for row in ready:
-            emitted.append(row)
-            pending.remove(row.get("id"))
+        row = min(ready, key=reviewer_order_key)
+        emitted.append(row)
+        pending.remove(row.get("id"))
     return emitted
+
+
+def report_channel(row: dict[str, Any]) -> str:
+    return "writing" if row.get("report_channel", "substance") == "writing" else "substance"
+
+
+def comment_labels(rows: list[dict[str, Any]]) -> dict[str, str]:
+    """Return the label each finding carries in the author-facing reports.
+
+    The referee report numbers substance comments ``Comment 1..N`` and the
+    editing document numbers its comments ``Editing comment 1..M``, each in
+    importance order. The plan reuses those labels so that "Comment 8" means
+    the same issue in every document.
+    """
+    labels: dict[str, str] = {}
+    for channel, prefix in (("substance", "Comment"), ("writing", "Editing comment")):
+        selected = sorted((row for row in rows if report_channel(row) == channel), key=reviewer_order_key)
+        for index, row in enumerate(selected, start=1):
+            labels[str(row.get("id"))] = f"{prefix} {index}"
+    return labels
+
+
+TIER_LABELS = {
+    "top-general": "a top general-interest journal",
+    "leading-field": "a leading field journal",
+    "standard-field": "a field journal",
+    "regional-specialized": "a regional or specialized journal",
+}
+
+
+def target_label(target: dict[str, Any]) -> str:
+    """Name the target audience in prose, never as a raw schema value."""
+    venue = str(target.get("venue") or "").strip()
+    if venue:
+        return venue
+    return TIER_LABELS.get(str(target.get("tier") or ""), "the intended audience")
 
 
 def bucket(row: dict[str, Any]) -> str:
@@ -135,19 +175,7 @@ def combined_action(fix: dict[str, Any], finding_id: str) -> str:
     if not what and not how:
         raise ValueError(f"{finding_id} fix.what or fix.how must state an author action")
 
-    def normalized(value: str) -> str:
-        return "".join(character.lower() for character in value if character.isalnum())
-
-    if not what:
-        return how
-    if not how:
-        return what
-    what_key, how_key = normalized(what), normalized(how)
-    if what_key == how_key or how_key in what_key:
-        return what
-    if what_key in how_key:
-        return how
-    return f"{what} {how}"
+    return merge_repair(what, how)
 
 
 def reject_generic_plan_text(row: dict[str, Any]) -> None:
@@ -239,9 +267,7 @@ def render(review_dir: Path) -> str:
         raise ValueError("publishability text must be finding-specific; duplicate payoff detected")
 
     target = run.get("target") if isinstance(run.get("target"), dict) else {}
-    venue = target.get("venue") or target.get("tier")
-    if not venue or venue == "unspecified":
-        venue = "the intended audience"
+    venue = target_label(target)
     lines = [
         "# Revision Plan",
         "",
@@ -252,6 +278,15 @@ def render(review_dir: Path) -> str:
         "## How to use this plan",
         "",
         "Work from P0 to P2. A later review confirms whether each revision resolves the concern by comparing it with the **Done when** condition.",
+        "",
+        (
+            "Items keep the numbers they have in the referee report (**Comment N**) and the editing comments "
+            "(**Editing comment N**), so each number names the same issue in every document."
+            if any(report_channel(row) == "writing" for row in rows)
+            else "Items keep the numbers they have in the referee report (**Comment N**), so each number names "
+            "the same issue in both documents."
+        )
+        + " Within a priority level, prerequisites come first and the rest follow the report's order of importance.",
         "",
         "Unless an item says otherwise, the current design can support the stated repair. Items that need new evidence or claim narrowing say so explicitly.",
         "",
@@ -268,10 +303,7 @@ def render(review_dir: Path) -> str:
         for row in ordered
         if bucket(row) == priority
     ]
-    visible_numbers = {
-        str(row.get("id")): index
-        for index, row in enumerate(display_order, start=1)
-    }
+    labels_by_id = comment_labels(display_order)
     bucket_priority = {"P0": 0, "P1": 1, "P2": 2}
     by_id = {row.get("id"): row for row in rows}
     for row in rows:
@@ -280,14 +312,12 @@ def render(review_dir: Path) -> str:
                 raise ValueError(
                     f"{row.get('id')} depends on lower-priority {dependency}; promote the prerequisite or revise the dependency"
                 )
-    visible_index = 0
     for key in ("P0", "P1", "P2"):
         selected = [row for row in ordered if bucket(row) == key]
         if not selected:
             continue
         lines.extend([f"## {labels[key]}", ""])
         for row in selected:
-            visible_index += 1
             fix = row.get("fix", {})
             dependencies = fix.get("dependencies") or []
             finding_id = str(row.get("id"))
@@ -295,7 +325,7 @@ def render(review_dir: Path) -> str:
             payoff = without_self_reference(fix.get("publishability"), finding_id)
             closure = without_self_reference(fix.get("resolved_when"), finding_id)
             item_lines = [
-                f"### Comment {visible_index}: {row.get('title') or row.get('issue')}",
+                f"### {labels_by_id[finding_id]}: {row.get('title') or row.get('issue')}",
                 f"<!-- finding_id: {finding_id} -->",
                 "",
                 f"- **Severity:** {row.get('severity')}",
@@ -310,7 +340,7 @@ def render(review_dir: Path) -> str:
                 "- **Dependencies:** "
                 + (
                     "; ".join(
-                        f"Comment {visible_numbers[str(dependency)]}: "
+                        f"{labels_by_id[str(dependency)]}: "
                         f"{by_id[dependency].get('title') or by_id[dependency].get('issue')}"
                         for dependency in dependencies
                     )
