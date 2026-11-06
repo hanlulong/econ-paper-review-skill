@@ -37,7 +37,12 @@ def location_notices(directory: Path) -> list[str]:
     """Return one plain-language notice per sharing risk found for *directory*."""
 
     path = directory.expanduser().absolute()
-    parts = _parts(path)
+    try:
+        resolved = path.resolve()
+    except (OSError, RuntimeError):
+        resolved = path
+    # A symlinked folder can point into a synced location; check both forms.
+    parts = _parts(path) + ["/"] + _parts(resolved)
     notices: list[str] = []
     if _contains_sequence(parts, ("apps", "overleaf")):
         notices.append(
@@ -59,7 +64,7 @@ def location_notices(directory: Path) -> list[str]:
             f"This folder is synced by {synced}. A review/ folder here would be uploaded and shared with anyone "
             "who can see the folder."
         )
-    repository = git_work_tree(path)
+    repository = git_work_tree(path) or (git_work_tree(resolved) if resolved != path else None)
     if repository is not None:
         notices.append(
             f"This folder is inside the git work tree {repository}. Add review/ to .gitignore, or write the "

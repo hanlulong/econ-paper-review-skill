@@ -50,6 +50,22 @@ class ReviewLocationTests(unittest.TestCase):
             self.assertIn("NOTICE:", result.stdout)
             self.assertIn("Ask the user", result.stdout)
 
+    def test_symlinked_folder_is_checked_at_its_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "Library" / "CloudStorage" / "Dropbox" / "Apps" / "Overleaf" / "paper"
+            target.mkdir(parents=True)
+            link = Path(tmp) / "papers" / "jmp"
+            link.parent.mkdir()
+            try:
+                link.symlink_to(target, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks are unavailable")
+            notices = MODULE.location_notices(link)
+            self.assertEqual(len(notices), 1)
+            self.assertIn("Apps/Overleaf", notices[0])
+            (target.parent / ".git").mkdir()
+            self.assertTrue(any(".gitignore" in notice for notice in MODULE.location_notices(link)))
+
 
 if __name__ == "__main__":
     unittest.main()
