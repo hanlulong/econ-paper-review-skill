@@ -256,4 +256,4 @@ Contributions are welcome, and contributors retain ownership of their work. Befo
 
 ---
 
-If this catches something a referee would have caught, star the repo so other economists find it — and if it gets something wrong, open an issue. Bad comments are bugs here, not opinions.
+If this catches something a referee would have caught, star the repo so other economists find it — and if it gets something wrong or misses something, open an issue. Bad comments are bugs here, not opinions.

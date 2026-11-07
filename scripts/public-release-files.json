@@ -3,6 +3,7 @@
   "files": [
     ".gitattributes",
     ".github/ISSUE_TEMPLATE/bad-comment.yml",
+    ".github/ISSUE_TEMPLATE/missed-issue.yml",
     ".github/PULL_REQUEST_TEMPLATE.md",
     ".github/dependabot.yml",
     ".gitignore",
