@@ -59,9 +59,10 @@ and the bundled Review Desk. Do not ask the user to copy or run commands.
    puts them) as well as `python3`, and if `uv` is present, `uv python find
    3.12`. If none exists, stop and report that as the blocker. On macOS, where
    the built-in `python3` is 3.9, tell the user to install Python 3.13 or 3.14
-   from https://www.python.org/downloads/macos/ (3.15 is not tested yet) or run
-   `brew install python@3.12` or `uv python install 3.12`, then paste the
-   install prompt again. Select `--claude` or `--codex` for the current client,
+   from https://www.python.org/downloads/macos/ (3.15 worked in a macOS test,
+   but some dependencies do not yet ship ready-made 3.15 packages, so 3.13 or
+   3.14 is the safer choice) or run `brew install python@3.12` or
+   `uv python install 3.12`, then paste the install prompt again. Select `--claude` or `--codex` for the current client,
    show the managed setup's dry run, inspect every planned destination and
    download, and then apply the identical operation:
 
@@ -142,6 +143,11 @@ cd econ-paper-review-skill
 python3 scripts/install_econ_review.py --dry-run --global --all --with-review-desk
 python3 scripts/install_econ_review.py --global --all --with-review-desk
 ```
+
+On macOS, if `python3 --version` still reports 3.9 after you install a newer
+Python, run these commands with the versioned interpreter, for example
+`python3.12` instead of `python3`; the same applies to the other `python3`
+commands in this guide.
 
 Use `--claude` or `--codex` instead of `--all` to install only one client.
 

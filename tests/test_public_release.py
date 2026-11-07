@@ -9,6 +9,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -451,6 +452,61 @@ class InstallerTests(unittest.TestCase):
             )
             self.assertIn("dry run complete; no files changed", result.stdout)
             self.assertFalse((home / ".claude").exists())
+            self.assertFalse((home / ".agents").exists())
+
+    @staticmethod
+    def failing_python_stub(path: Path, marker: Path) -> None:
+        path.write_text(
+            f"#!/bin/sh\necho \"$0\" >> '{marker}'\nexit 1\n",
+            encoding="utf-8",
+        )
+        path.chmod(0o755)
+
+    def test_shell_installer_falls_back_to_a_versioned_python(self) -> None:
+        # On macOS, python3 is often the system 3.9 even after a newer
+        # Python is installed; the versioned name must still be found.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            home.mkdir()
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            marker = Path(tmp) / "python3-calls.txt"
+            self.failing_python_stub(bin_dir / "python3", marker)
+            (bin_dir / "python3.12").symlink_to(sys.executable)
+            result = self.run_installer(
+                ROOT / "scripts" / "install.sh",
+                "--global",
+                "--codex",
+                "--dry-run",
+                env={"HOME": str(home), "PATH": f"{bin_dir}:/usr/bin:/bin"},
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("dry run complete; no files changed", result.stdout)
+            # Only the version probe ran the too-old python3.
+            self.assertEqual(len(marker.read_text(encoding="utf-8").splitlines()), 1)
+            self.assertFalse((home / ".agents").exists())
+
+    def test_shell_installer_explains_how_to_get_a_supported_python(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            home.mkdir()
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            marker = Path(tmp) / "python-calls.txt"
+            for name in ("python3", *(f"python3.{minor}" for minor in range(10, 15))):
+                self.failing_python_stub(bin_dir / name, marker)
+            result = self.run_installer(
+                ROOT / "scripts" / "install.sh",
+                "--global",
+                "--codex",
+                "--dry-run",
+                env={"HOME": str(home), "PATH": f"{bin_dir}:/usr/bin:/bin"},
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Python 3.10 or newer is required", result.stderr)
+            self.assertIn("then rerun this script", result.stderr)
             self.assertFalse((home / ".agents").exists())
 
     def test_shell_installer_requires_an_explicit_client_selector(self) -> None:

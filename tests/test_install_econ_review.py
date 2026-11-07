@@ -963,6 +963,15 @@ class ManagedInstallerTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("must not overlap", result.stderr)
 
+    def test_too_old_python_says_to_rerun_with_a_versioned_interpreter(self) -> None:
+        with mock.patch.object(MODULE, "MINIMUM_PYTHON", (99, 0)):
+            with self.assertRaises(MODULE.InstallError) as raised:
+                MODULE.main(["--global", "--codex", "--dry-run"])
+        message = str(raised.exception)
+        self.assertIn("Python 3.10 or newer is required", message)
+        self.assertIn("rerun the same command with that versioned interpreter", message)
+        self.assertIn("python3.12 instead of python3", message)
+
     def test_support_only_rejects_ignored_agent_selectors(self) -> None:
         result = self.run_installer("--support-only", "--codex", "--dry-run", check=False)
         self.assertEqual(result.returncode, 1)

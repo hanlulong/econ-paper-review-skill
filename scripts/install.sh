@@ -58,6 +58,30 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "$1 is required"
 }
 
+# Find a Python 3.10 or newer. On macOS, `python3` is often the system 3.9 even
+# after a newer Python is installed, so also try the versioned names, including
+# the ones uv installs in ~/.local/bin.
+PYTHON=""
+select_python() {
+  local candidate
+  for candidate in python3 python3.14 python3.13 python3.12 python3.11 python3.10 \
+    "${HOME:-}/.local/bin/python3.14" "${HOME:-}/.local/bin/python3.13" \
+    "${HOME:-}/.local/bin/python3.12" "${HOME:-}/.local/bin/python3.11" \
+    "${HOME:-}/.local/bin/python3.10"; do
+    command -v "$candidate" >/dev/null 2>&1 || continue
+    if "$candidate" - >/dev/null 2>&1 <<'PY'
+import sys
+
+raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
+PY
+    then
+      PYTHON="$(command -v "$candidate")"
+      return 0
+    fi
+  done
+  return 1
+}
+
 SETUP_REQUESTED=0
 SETUP_ARGS=()
 for argument in "$@"; do
@@ -68,10 +92,10 @@ for argument in "$@"; do
   fi
 done
 if [ "$SETUP_REQUESTED" -eq 1 ]; then
-  require_command python3
+  select_python || fail "Python 3.10 or newer is required; on macOS, install Python 3.13 or 3.14 from https://www.python.org/downloads/macos/ or run 'brew install python@3.12' or 'uv python install 3.12', then rerun this script"
   [ -n "$REPO_ROOT" ] && [ -f "$REPO_ROOT/scripts/install_econ_review.py" ] \
     || fail "--setup requires a complete local checkout; run scripts/install_econ_review.py from the repository"
-  exec python3 "$REPO_ROOT/scripts/install_econ_review.py" "${SETUP_ARGS[@]}"
+  exec "$PYTHON" "$REPO_ROOT/scripts/install_econ_review.py" "${SETUP_ARGS[@]}"
 fi
 
 set_mode() {
@@ -170,7 +194,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 validate_skill_tree() {
-  python3 - "$1" <<'PY'
+  "$PYTHON" - "$1" <<'PY'
 import os
 import sys
 from pathlib import Path
@@ -215,7 +239,7 @@ PY
 # scripts. They are not verified source, so delete them rather than let Python
 # load bytecode in place of the checked .py files.
 discard_bytecode_caches() {
-  python3 - "$1" <<'PY'
+  "$PYTHON" - "$1" <<'PY'
 import os
 import shutil
 import stat
@@ -247,7 +271,7 @@ PY
 # native-plugin payload. "plugin-shaped" compares with the complete source
 # tree instead, which is how releases before 0.3.0 copied standalone skills.
 skill_tree_is_current() {
-  python3 - "$1" "$2" "${3:-standalone}" <<'PY'
+  "$PYTHON" - "$1" "$2" "${3:-standalone}" <<'PY'
 import fnmatch
 import hashlib
 import os
@@ -365,7 +389,7 @@ preserve_copy() {
     name_offset=$((name_length - 160))
     name="${name:$name_offset:160}"
   fi
-  path_hash="$(python3 - "$original_path" <<'PY'
+  path_hash="$("$PYTHON" - "$original_path" <<'PY'
 import hashlib
 import sys
 
@@ -402,7 +426,7 @@ PY
 }
 
 paths_overlap() {
-  python3 - "$1" "$2" <<'PY'
+  "$PYTHON" - "$1" "$2" <<'PY'
 import os
 import sys
 from pathlib import Path
@@ -434,7 +458,7 @@ PY
 }
 
 legacy_parent_is_safe() {
-  python3 - "$1" "$HOME" "${CODEX_HOME:-$HOME/.codex}" <<'PY'
+  "$PYTHON" - "$1" "$HOME" "${CODEX_HOME:-$HOME/.codex}" <<'PY'
 import os
 import stat
 import sys
@@ -465,7 +489,7 @@ PY
 }
 
 skill_destination_is_safe() {
-  python3 - "$1" "$HOME" <<'PY'
+  "$PYTHON" - "$1" "$HOME" <<'PY'
 import os
 import stat
 import sys
@@ -499,7 +523,7 @@ verify_and_extract_archive() {
   archive="$1"
   expected_sha="$2"
   destination="$3"
-  python3 - "$archive" "$expected_sha" "$destination" <<'PY'
+  "$PYTHON" - "$archive" "$expected_sha" "$destination" <<'PY'
 import hashlib
 import json
 import re
@@ -721,7 +745,7 @@ install_one() {
   parent="$(dirname "$destination")"
   mkdir -p "$parent"
   ACTIVE_STAGE="$(mktemp -d "$parent/.econ-review.stage.XXXXXX")"
-  python3 - "$source_dir" "$ACTIVE_STAGE" <<'PY'
+  "$PYTHON" - "$source_dir" "$ACTIVE_STAGE" <<'PY'
 import shutil
 import sys
 from pathlib import Path
@@ -821,15 +845,9 @@ migrate_legacy_codex_copy() {
   fi
 }
 
-require_command python3
+select_python || fail "Python 3.10 or newer is required; on macOS, install Python 3.13 or 3.14 from https://www.python.org/downloads/macos/ or run 'brew install python@3.12' or 'uv python install 3.12', then rerun this script"
 require_command mktemp
 require_command mv
-python3 - <<'PY' || fail "Python 3.10 or newer is required; on macOS, install Python 3.13 or 3.14 from https://www.python.org/downloads/macos/ or run 'brew install python@3.12' or 'uv python install 3.12'"
-import sys
-
-if sys.version_info < (3, 10):
-    raise SystemExit(1)
-PY
 
 SOURCE_DIR=""
 find_source

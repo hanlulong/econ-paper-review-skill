@@ -67,8 +67,10 @@ before v0.3.0, which carried plugin manifests and therefore appeared as
 Installing needs an existing Python 3.10+ with working `venv` and pip
 bootstrapping support. On macOS the built-in `python3` is 3.9; install Python
 3.13 or 3.14 from [python.org](https://www.python.org/downloads/macos/) (3.15
-is not tested yet), or run `brew install python@3.12` or
-`uv python install 3.12`, before pasting the prompt. Full manuscript-PDF ingestion also needs
+worked in a macOS test, but some dependencies do not yet ship ready-made 3.15
+packages, so 3.13 or 3.14 is the safer choice), or run
+`brew install python@3.12` or `uv python install 3.12`, before pasting the
+prompt. Full manuscript-PDF ingestion also needs
 [Poppler](https://poppler.freedesktop.org/) on `PATH`; TeX, Pandoc, Node.js, and
 administrator access are not required.
 
@@ -81,6 +83,10 @@ cd econ-paper-review-skill
 python3 scripts/install_econ_review.py --dry-run --global --all --with-review-desk
 python3 scripts/install_econ_review.py --global --all --with-review-desk
 ```
+
+On macOS, if `python3 --version` still reports 3.9 after you install a newer
+Python, run these commands with the versioned interpreter, for example
+`python3.12` instead of `python3`.
 
 Use `--claude` or `--codex` instead of `--all` when installing for only one
 client. On native Windows, run
