@@ -188,7 +188,7 @@ Any kind of economics paper: empirical, experimental, descriptive, prediction an
 
 ## What it does not do
 
-It won't write your paper, estimate your acceptance odds, or invent citations. When it couldn't check something — a dataset it didn't have, a figure it couldn't read — it says so instead of pretending. And it doesn't claim to beat human referees: treat it as a tough extra reader before submission, not a replacement for peer review.
+It won't write your paper, estimate your acceptance odds, or invent citations. When it couldn't check something — a dataset it didn't have, a figure it couldn't read — it says so instead of pretending. And it doesn't claim to beat human referees: treat it as a tough extra reader before submission, not a replacement for peer review. It also won't guess whether a paper was written with AI: it reviews the paper, not how it was produced.
 
 Refereeing a submission for a journal? Check the journal's reviewer AI policy first. Many journals bar uploading a submission to AI tools or require you to disclose AI use, and the skill asks before it reviews a manuscript you did not write.
 
