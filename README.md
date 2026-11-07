@@ -22,7 +22,7 @@
 
 ## What you get
 
-A finished review lands in a clean `review/` folder next to your paper. If that folder is synced (an Overleaf project in Dropbox, iCloud Drive, OneDrive) or tracked by git, the agent asks first, because the review is confidential:
+A finished review lands in a clean `review/` folder next to your paper. If that folder is synced (an Overleaf project in Dropbox, iCloud Drive, OneDrive, Box) or tracked by git, the agent asks first, because the review is confidential:
 
 - **`paper-review.pdf`** — the primary report: a professionally typeset, bookmarked PDF with the referee report, every detailed comment, editing comments, and the revision plan.
 - **`reports/`** — the same reports as Markdown. The revision plan is a prioritized to-do list written to be handed straight to your agents.

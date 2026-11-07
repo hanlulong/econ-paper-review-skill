@@ -35,6 +35,29 @@ class ReviewLocationTests(unittest.TestCase):
             self.assertEqual(len(notices), 1, folder)
             self.assertIn(service, notices[0])
 
+    def test_box_and_file_provider_folders_are_reported(self) -> None:
+        home = Path("/srv/home/econ")
+        synced = {
+            home / "Library" / "CloudStorage" / "Box-Box" / "paper": "Box",
+            home / "Library" / "CloudStorage" / "pCloudDrive" / "paper": "pCloudDrive",
+            home / "Library" / "CloudStorage" / "SomeSync-acct" / "paper": "SomeSync",
+            home / "Box" / "paper": "Box",
+        }
+        for folder, service in synced.items():
+            with self.subTest(folder=str(folder)):
+                notices = MODULE.location_notices(folder, home=home)
+                self.assertEqual(len(notices), 1)
+                self.assertIn(f"This folder is synced by {service}.", notices[0])
+        for folder in (home / "boxplots" / "paper", home / "project" / "Box" / "paper"):
+            with self.subTest(folder=str(folder)):
+                self.assertEqual(MODULE.location_notices(folder, home=home), [])
+        overleaf = MODULE.location_notices(
+            home / "Library" / "CloudStorage" / "Dropbox" / "Apps" / "Overleaf" / "paper",
+            home=home,
+        )
+        self.assertEqual(len(overleaf), 1)
+        self.assertIn("Apps/Overleaf", overleaf[0])
+
     def test_plain_and_git_folders(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             plain = Path(tmp) / "papers" / "broadband"
