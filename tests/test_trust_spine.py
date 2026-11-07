@@ -131,8 +131,14 @@ class TrustSpineTests(unittest.TestCase):
         ledger_path.write_text(json.dumps(ledger, indent=2) + "\n", encoding="utf-8")
         return ledger, ingestion
 
-    def test_canonical_fixture_is_source_grounded_and_finalized(self) -> None:
+    def test_canonical_fixture_is_source_grounded(self) -> None:
         self.assertEqual(MODULE.validate_review(FIXTURE), [])
+
+    @unittest.skipUnless(
+        shutil.which("latexmk") and shutil.which("lualatex"),
+        "fixture records renderer latexmk-lualatex; install TeX Live or MacTeX",
+    )
+    def test_canonical_fixture_finalizer_check(self) -> None:
         result = subprocess.run(
             [sys.executable, str(FINALIZER), str(FIXTURE), "--check"],
             capture_output=True,
