@@ -880,8 +880,10 @@ fi
 if [ "$BACKUPS_CREATED" -eq 1 ]; then
   echo "Backup locations were reported with each preserved copy above."
 fi
-case "$PLATFORM" in
-  claude) echo "Restart or reload Claude Code so it discovers the installed skill." ;;
-  codex) echo "Restart or reload Codex so it discovers the installed skill." ;;
-  all) echo "Restart or reload Claude Code and Codex so they discover the installed skill." ;;
-esac
+if [ "$DRY_RUN" -eq 0 ]; then
+  case "$PLATFORM" in
+    claude) echo "Restart or reload Claude Code so it discovers the installed skill." ;;
+    codex) echo "Restart or reload Codex so it discovers the installed skill." ;;
+    all) echo "Restart or reload Claude Code and Codex so they discover the installed skill." ;;
+  esac
+fi

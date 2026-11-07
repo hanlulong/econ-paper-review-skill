@@ -451,6 +451,7 @@ class InstallerTests(unittest.TestCase):
                 ROOT / "scripts" / "install.sh", "--global", "--all", "--dry-run", env={"HOME": str(home)},
             )
             self.assertIn("dry run complete; no files changed", result.stdout)
+            self.assertNotIn("Restart or reload", result.stdout)
             self.assertFalse((home / ".claude").exists())
             self.assertFalse((home / ".agents").exists())
 
