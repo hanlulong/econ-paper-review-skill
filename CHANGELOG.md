@@ -5,7 +5,7 @@ All notable changes to Econ Review are recorded here. Versions follow
 `econ-review--vX.Y.Z`. The version is declared in both
 `econ-review/.claude-plugin/plugin.json` and `econ-review/.codex-plugin/plugin.json`.
 
-## 0.3.0 — 2026-11-06
+## 0.3.0 — 2026-11-07
 
 A security, install-layout, PDF-ingestion and report-generator release. Rerun
 the standalone install prompt to pick it up. After a native plugin update, also
