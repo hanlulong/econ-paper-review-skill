@@ -62,9 +62,10 @@ and the bundled Review Desk. Do not ask the user to copy or run commands.
    from https://www.python.org/downloads/macos/ (3.15 worked in a macOS test,
    but some dependencies do not yet ship ready-made 3.15 packages, so 3.13 or
    3.14 is the safer choice) or run `brew install python@3.12` or
-   `uv python install 3.12`, then paste the install prompt again. Select `--claude` or `--codex` for the current client,
-   show the managed setup's dry run, inspect every planned destination and
-   download, and then apply the identical operation:
+   `uv python install 3.12`, then paste the install prompt again. Select
+   `--claude` or `--codex` for the current client, show the managed setup's dry
+   run, inspect every planned destination and download, and then apply the
+   identical operation:
 
    ```text
    PYTHON scripts/install_econ_review.py --dry-run --global --CLIENT --with-review-desk
