@@ -5,6 +5,22 @@ All notable changes to Econ Review are recorded here. Versions follow
 `econ-review--vX.Y.Z`. The version is declared in both
 `econ-review/.claude-plugin/plugin.json` and `econ-review/.codex-plugin/plugin.json`.
 
+## 0.3.2 — 2026-11-07
+
+A documentation patch release. In the skill itself only one citation link in
+the RDD gate changes; the scripts, requirements and Review Desk bundle are
+unchanged, so reviews made with 0.3.1 validate and finalize unchanged.
+
+### Documentation
+
+- The RDD gate cites the `rdrobust` and `rddensity` GitHub repositories. The
+  earlier rdpackages.github.io pages for each package now only redirect there.
+- The README and its Chinese translation say that the bundled sample review
+  suggests never-treated controls, which the demonstration manuscript does not
+  have: every municipality is connected by 2018. Since 0.3.0 the DiD gate says
+  never to recommend never-treated controls when every unit is eventually
+  treated. The sample itself was not regenerated.
+
 ## 0.3.1 — 2026-11-07
 
 A patch release: installer messages that say what will actually change, Python
