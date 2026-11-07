@@ -210,8 +210,44 @@ for current, directories, files in os.walk(root, followlinks=False):
 PY
 }
 
+# Usage: discard_bytecode_caches DESTINATION
+# A current copy may hold __pycache__ folders from running the installed
+# scripts. They are not verified source, so delete them rather than let Python
+# load bytecode in place of the checked .py files.
+discard_bytecode_caches() {
+  python3 - "$1" <<'PY'
+import os
+import shutil
+import stat
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+caches = []
+for current, directories, _files in os.walk(root, followlinks=False):
+    for name in list(directories):
+        path = Path(current) / name
+        metadata = path.lstat()
+        if name != "__pycache__" or stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            continue
+        entries = list(path.iterdir())
+        if all(
+            stat.S_ISREG(entry.lstat().st_mode) and entry.name.endswith((".pyc", ".pyo"))
+            for entry in entries
+        ):
+            caches.append(path)
+            directories.remove(name)
+for cache in caches:
+    shutil.rmtree(cache)
+PY
+}
+
+# Usage: skill_tree_is_current SOURCE DESTINATION [plugin-shaped]
+# Compares DESTINATION with the standalone layout of SOURCE, which omits the
+# native-plugin payload. "plugin-shaped" compares with the complete source
+# tree instead, which is how releases before 0.3.0 copied standalone skills.
 skill_tree_is_current() {
-  python3 - "$1" "$2" <<'PY'
+  python3 - "$1" "$2" "${3:-standalone}" <<'PY'
 import fnmatch
 import hashlib
 import os
@@ -219,11 +255,13 @@ import stat
 import sys
 from pathlib import Path
 
-source, destination = map(Path, sys.argv[1:])
+source, destination = map(Path, sys.argv[1:3])
+plugin_shaped = sys.argv[3] == "plugin-shaped"
 ignore_patterns = (
     ".DS_Store", "__pycache__", "*.pyc", "*.pyo",
     ".pytest_cache", ".mypy_cache", ".ruff_cache",
 )
+plugin_only_roots = {".claude-plugin", ".codex-plugin", "skills"}
 
 
 def ignored(name):
@@ -238,7 +276,26 @@ def digest(path):
     return value.hexdigest()
 
 
-def manifest(root, *, ignore_source_artifacts):
+# What running the installed skill or the Python installer leaves behind in a
+# destination. Neither is a user edit, so neither makes an otherwise current
+# copy look modified.
+generated_root_files = {".econ-review-install.json", ".econ-review-runtime.json"}
+
+
+def bytecode_cache(path):
+    metadata = path.lstat()
+    if path.name != "__pycache__" or stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        return False
+    for entry in path.iterdir():
+        entry_metadata = entry.lstat()
+        if not stat.S_ISREG(entry_metadata.st_mode) or not entry.name.endswith((".pyc", ".pyo")):
+            return False
+        if not (path.parent / (entry.name.split(".", 1)[0] + ".py")).is_file():
+            return False
+    return True
+
+
+def manifest(root, *, ignore_source_artifacts, ignore_run_artifacts=False):
     if not root.is_dir() or root.is_symlink():
         raise OSError("tree root is missing or unsafe")
     records = {}
@@ -247,6 +304,15 @@ def manifest(root, *, ignore_source_artifacts):
         kept_directories = []
         for name in directories:
             if ignore_source_artifacts and ignored(name):
+                continue
+            if ignore_run_artifacts and bytecode_cache(current_path / name):
+                continue
+            if (
+                ignore_source_artifacts
+                and not plugin_shaped
+                and current_path == root
+                and name in plugin_only_roots
+            ):
                 continue
             path = current_path / name
             metadata = path.lstat()
@@ -258,6 +324,8 @@ def manifest(root, *, ignore_source_artifacts):
         directories[:] = kept_directories
         for name in files:
             if ignore_source_artifacts and ignored(name):
+                continue
+            if ignore_run_artifacts and current_path == root and name in generated_root_files:
                 continue
             path = current_path / name
             metadata = path.lstat()
@@ -276,6 +344,7 @@ try:
     current = manifest(source, ignore_source_artifacts=True) == manifest(
         destination,
         ignore_source_artifacts=False,
+        ignore_run_artifacts=True,
     )
 except OSError:
     current = False
@@ -639,6 +708,7 @@ install_one() {
     if [ "$DRY_RUN" -eq 1 ]; then
       echo "Would keep current $label: $destination"
     else
+      discard_bytecode_caches "$destination"
       echo "Already current $label: $destination"
     fi
     return
@@ -657,15 +727,28 @@ import sys
 from pathlib import Path
 
 source, stage = map(Path, sys.argv[1:])
+artifact_patterns = shutil.ignore_patterns(
+    ".DS_Store", "__pycache__", "*.pyc", "*.pyo",
+    ".pytest_cache", ".mypy_cache", ".ruff_cache",
+)
+# A direct copy is a standalone skill. The native-plugin manifests and the
+# skills/ adapters would make clients load it as a namespaced plugin.
+plugin_only_roots = {".claude-plugin", ".codex-plugin", "skills"}
+
+
+def ignore(directory, names):
+    ignored = set(artifact_patterns(directory, names))
+    if Path(directory) == source:
+        ignored |= plugin_only_roots.intersection(names)
+    return ignored
+
+
 shutil.copytree(
     source,
     stage,
     dirs_exist_ok=True,
     symlinks=True,
-    ignore=shutil.ignore_patterns(
-        ".DS_Store", "__pycache__", "*.pyc", "*.pyo",
-        ".pytest_cache", ".mypy_cache", ".ruff_cache",
-    ),
+    ignore=ignore,
 )
 PY
   validate_skill_tree "$ACTIVE_STAGE" || fail "staged package validation failed"
@@ -716,7 +799,8 @@ migrate_legacy_codex_copy() {
     fi
     unsafe_ancestor="$(legacy_parent_is_safe "$legacy")" \
       || fail "refusing legacy migration through a linked or junction ancestor: $unsafe_ancestor"
-    if skill_tree_is_current "$SOURCE_DIR" "$legacy"; then
+    if skill_tree_is_current "$SOURCE_DIR" "$legacy" \
+      || skill_tree_is_current "$SOURCE_DIR" "$legacy" plugin-shaped; then
       if [ "$DRY_RUN" -eq 1 ]; then
         echo "Would remove generated legacy Codex copy: $legacy"
       else
@@ -740,7 +824,7 @@ migrate_legacy_codex_copy() {
 require_command python3
 require_command mktemp
 require_command mv
-python3 - <<'PY' || fail "Python 3.10 or newer is required"
+python3 - <<'PY' || fail "Python 3.10 or newer is required; on macOS, install Python 3.13 or 3.14 from https://www.python.org/downloads/macos/ or run 'brew install python@3.12' or 'uv python install 3.12'"
 import sys
 
 if sys.version_info < (3, 10):

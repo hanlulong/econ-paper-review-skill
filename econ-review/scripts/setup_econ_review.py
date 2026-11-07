@@ -2,9 +2,11 @@
 """Prepare econ-review from its self-contained skill or plugin package.
 
 Direct-source mode installs the skill for both agents, creates or reuses one
-managed Python environment, and runs the PDF-ingestion doctor. Plugin mode can
-prepare only the shared runtime and Review Desk without creating duplicate
-skill copies. ``--copy-only`` preserves the original lightweight behavior.
+managed Python environment, and runs the PDF-ingestion doctor. Direct copies
+are standalone skills: the native-plugin manifests and ``skills/`` adapters
+stay in the plugin package only. Plugin mode can prepare only the shared
+runtime and Review Desk without creating duplicate skill copies.
+``--copy-only`` preserves the original lightweight behavior.
 """
 
 from __future__ import annotations
@@ -45,6 +47,11 @@ IGNORED_DIRECTORY_NAMES = {
 IGNORED_FILE_NAMES = {".DS_Store"}
 IGNORED_SUFFIXES = {".pyc", ".pyo"}
 GENERATED_FILES = {".econ-review-install.json", ".econ-review-runtime.json"}
+# Native-plugin payload that must never reach a standalone skill directory.
+# With these present, Claude Code loads a direct copy as the namespaced
+# ``econ-review@skills-dir`` plugin and Codex lists ``econ-review:econ-review``
+# twice plus the plugin-only ``econ-review-setup`` skill.
+PLUGIN_ONLY_ROOTS = frozenset({".claude-plugin", ".codex-plugin", "skills"})
 REQUIRED_POPPLER_COMMANDS = ("pdfinfo", "pdftotext", "pdftoppm")
 REVIEW_DESK_BUNDLE = Path("assets/review-desk.zip")
 SUPPORT_DESCRIPTOR_NAME = "runtime.json"
@@ -124,12 +131,73 @@ def _source_files(root: Path) -> list[Path]:
     return sorted(files, key=lambda path: path.as_posix())
 
 
-def _tree_has_exact_membership(root: Path, expected_files: set[str]) -> bool:
+def standalone_files(files: Iterable[Path]) -> list[Path]:
+    """Return the source files that belong in a standalone skill directory."""
+
+    return [relative for relative in files if relative.parts[0] not in PLUGIN_ONLY_ROOTS]
+
+
+def _is_bytecode_cache_of(directory: Path, expected_files: set[str], root: Path) -> bool:
+    """Return whether *directory* is a ``__pycache__`` of declared modules only.
+
+    Running a bundled script (the INSTALL verification step, ``finalize_review.py``)
+    writes ``__pycache__/<module>.<tag>.pyc`` beside the declared ``.py`` files.
+    Such a cache is not a user edit. Anything else inside it, a nested directory,
+    a link, or bytecode for a module without declared source, still counts.
+    """
+
+    if directory.name != "__pycache__" or _is_link_or_junction(directory) or not directory.is_dir():
+        return False
+    parent = directory.parent.relative_to(root).as_posix()
+    prefix = "" if parent == "." else f"{parent}/"
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return False
+    for entry in entries:
+        if _is_link_or_junction(entry) or not entry.is_file():
+            return False
+        if entry.suffix.casefold() not in IGNORED_SUFFIXES:
+            return False
+        module = entry.name.split(".", 1)[0]
+        if f"{prefix}{module}.py" not in expected_files:
+            return False
+    return True
+
+
+def discard_bytecode_caches(destination: Path, expected_files: set[str]) -> None:
+    """Delete ``__pycache__`` folders that hold only bytecode for declared modules.
+
+    An otherwise current copy is reported as current, but its bytecode is not
+    part of the verified source, so it is removed: Python would otherwise load
+    a planted ``.pyc`` whose header matches the source instead of the source.
+    """
+
+    caches: list[Path] = []
+    for current, directories, _names in os.walk(destination, followlinks=False):
+        current_path = Path(current)
+        for name in list(directories):
+            candidate = current_path / name
+            if _is_bytecode_cache_of(candidate, expected_files, destination):
+                caches.append(candidate)
+                directories.remove(name)
+    for cache in caches:
+        shutil.rmtree(cache)
+
+
+def _tree_has_exact_membership(
+    root: Path,
+    expected_files: set[str],
+    *,
+    allow_bytecode_caches: bool = False,
+) -> bool:
     """Return whether *root* contains exactly the declared regular files.
 
     The comparison includes directories so an undeclared empty directory, link,
     junction, reparse point, or non-regular file cannot survive an idempotent
     installation check and later participate in Python module shadowing.
+    With *allow_bytecode_caches*, ``__pycache__`` directories that hold only
+    bytecode for declared modules are disregarded.
     """
 
     expected_directories = {""}
@@ -162,10 +230,15 @@ def _tree_has_exact_membership(root: Path, expected_files: set[str]) -> bool:
                 return False
             relative_directory = current_path.relative_to(root).as_posix()
             actual_directories.add("" if relative_directory == "." else relative_directory)
+            kept_directories: list[str] = []
             for name in directories:
                 candidate = current_path / name
                 if _is_link_or_junction(candidate) or not candidate.is_dir():
                     return False
+                if allow_bytecode_caches and _is_bytecode_cache_of(candidate, expected_files, root):
+                    continue
+                kept_directories.append(name)
+            directories[:] = kept_directories
             for name in names:
                 candidate = current_path / name
                 if _is_link_or_junction(candidate) or not candidate.is_file():
@@ -253,7 +326,7 @@ def destination_is_current(
     if not destination.is_dir() or _is_link_or_junction(destination):
         return False
     expected_files = set(source_manifest) | {".econ-review-install.json"}
-    if not _tree_has_exact_membership(destination, expected_files):
+    if not _tree_has_exact_membership(destination, expected_files, allow_bytecode_caches=True):
         return False
     state_path = destination / ".econ-review-install.json"
     if _is_link_or_junction(state_path):
@@ -312,6 +385,7 @@ def managed_destination_is_intact(destination: Path) -> bool:
             or not _tree_has_exact_membership(
                 destination,
                 set(source_manifest) | {".econ-review-install.json"},
+                allow_bytecode_caches=True,
             )
         ):
             return False
@@ -333,7 +407,9 @@ def destination_matches_source(
     if (
         not destination.is_dir()
         or _is_link_or_junction(destination)
-        or not _tree_has_exact_membership(destination, set(source_manifest))
+        or not _tree_has_exact_membership(
+            destination, set(source_manifest), allow_bytecode_caches=True,
+        )
     ):
         return False
     try:
@@ -761,7 +837,10 @@ def cleanup_support_state(
     ):
         if directory is not None and directory.is_dir() and not any(directory.iterdir()):
             directory.rmdir()
-    print("econ-review support cleanup complete; plugin and direct skill copies were unchanged.")
+    print(
+        "econ-review support cleanup complete; plugin and direct skill copies were not deleted, "
+        "but any that remain need their setup rerun before they can review again."
+    )
 
 
 def runtime_python_path(runtime: Path, system: str | None = None) -> Path:
@@ -1052,6 +1131,10 @@ def ensure_runtime(
                 "--no-input",
                 "--disable-pip-version-check",
                 "--no-cache-dir",
+                # Choose the newest release with a prebuilt wheel for this
+                # platform (for example cryptography on Intel macOS) rather
+                # than building a newer source release that needs a compiler.
+                "--prefer-binary",
                 "-r",
                 str(source / "requirements-core.txt"),
             ],
@@ -1061,7 +1144,9 @@ def ensure_runtime(
         if installed.returncode:
             raise InstallError(
                 "core Python dependency installation failed; no command output was echoed to avoid "
-                "leaking credentials from package-index configuration"
+                "leaking credentials from package-index configuration. A common cause is a package "
+                "with no prebuilt wheel for this Python and platform, which pip then tries to build "
+                "from source; Python 3.12 to 3.14 from python.org, Homebrew, or uv usually avoids it"
             )
         runtime_version = python_major_minor(python)
         if runtime_version is None or runtime_version < MINIMUM_PYTHON:
@@ -1099,6 +1184,7 @@ def install_one(
     runtime_python: Path | None,
     *,
     dry_run: bool,
+    plugin_shaped_manifest: dict[str, str] | None = None,
 ) -> None:
     require_safe_skill_destination(destination, label)
     if dry_run:
@@ -1110,13 +1196,25 @@ def install_one(
         print(f"Would {state} {label}: {destination}")
         return
     if destination_is_current(destination, source_manifest, runtime_python):
+        discard_bytecode_caches(destination, set(source_manifest))
         print(f"Already current {label}: {destination}")
         return
     destination.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix=".econ-review-stage-", dir=destination.parent))
     rollback = destination.with_name(f".{destination.name}.backup-{uuid.uuid4().hex}")
     had_previous = _path_present(destination)
-    preserve_previous = had_previous and not managed_destination_is_intact(destination)
+    # A copy that is byte-identical to this source (for example one written by
+    # scripts/install.sh, which records no install state), or to this source's
+    # full plugin-shaped tree, is not a user edit.
+    preserve_previous = had_previous and not (
+        managed_destination_is_intact(destination)
+        or destination_matches_source(destination, source_manifest)
+        or (
+            plugin_shaped_manifest is not None
+            and destination_matches_source(destination, plugin_shaped_manifest)
+        )
+    )
+    unrecorded_previous = had_previous and not (destination / ".econ-review-install.json").is_file()
     try:
         for relative in files:
             target = stage / relative
@@ -1153,7 +1251,16 @@ def install_one(
                     raise InstallError(
                         f"could not preserve the prior {label}; the update was rolled back"
                     )
-                print(f"Preserved modified prior copy: {preserved}")
+                if unrecorded_previous:
+                    # Copies from scripts/install.sh before 0.3.0 record no
+                    # install state, so an unchanged older copy cannot be told
+                    # apart from an edited one; keep it, but do not call it modified.
+                    print(
+                        "Preserved prior copy (it has no install record, so local edits "
+                        f"cannot be ruled out): {preserved}"
+                    )
+                else:
+                    print(f"Preserved modified prior copy: {preserved}")
             else:
                 shutil.rmtree(rollback)
     print(f"Installed {label}: {destination}")
@@ -1182,8 +1289,15 @@ def migrate_legacy_codex_copies(
     runtime_python: Path | None,
     *,
     dry_run: bool,
+    plugin_shaped_manifest: dict[str, str] | None = None,
 ) -> None:
-    """Deactivate only historical Codex copies after the current install exists."""
+    """Deactivate only historical Codex copies after the current install exists.
+
+    ``plugin_shaped_manifest`` describes the complete source tree, including
+    the native-plugin payload that releases before 0.3.0 also copied into
+    standalone destinations, so an unmarked copy of that layout still counts
+    as generated rather than user-modified.
+    """
 
     current = Path.home() / ".agents" / "skills" / "econ-review"
     home_boundary = Path.home().expanduser().absolute()
@@ -1220,9 +1334,13 @@ def migrate_legacy_codex_copies(
                     f"legacy Codex path escapes its configured migration boundary: {legacy}"
                 )
             ancestor = ancestor.parent
-        generated = managed_destination_is_intact(legacy) or destination_matches_source(
-            legacy,
-            source_manifest,
+        generated = (
+            managed_destination_is_intact(legacy)
+            or destination_matches_source(legacy, source_manifest)
+            or (
+                plugin_shaped_manifest is not None
+                and destination_matches_source(legacy, plugin_shaped_manifest)
+            )
         )
         if dry_run:
             action = "remove generated" if generated else "preserve modified"
@@ -1857,6 +1975,11 @@ def _perform_setup(
 ) -> int:
     """Apply or preview setup after validation and lock selection."""
 
+    # Direct skill destinations are standalone skills, never plugin roots.
+    # Replacing an older plugin-shaped copy with this exact file set removes
+    # its stale plugin manifests and adapters in the same atomic swap.
+    plugin_shaped_manifest = file_manifest(source, files)
+    files = standalone_files(files)
     source_manifest = file_manifest(source, files)
     core_version = requirements_digest(source / "requirements-core.txt")
     destinations = (
@@ -1909,12 +2032,14 @@ def _perform_setup(
             label,
             runtime_python,
             dry_run=args.dry_run,
+            plugin_shaped_manifest=plugin_shaped_manifest,
         )
     if scope == "global" and not args.support_only and args.agent in {"all", "codex"}:
         migrate_legacy_codex_copies(
             source_manifest,
             runtime_python,
             dry_run=args.dry_run,
+            plugin_shaped_manifest=plugin_shaped_manifest,
         )
     review_desk_path: Path | None = None
     if args.with_review_desk:
@@ -1949,7 +2074,7 @@ def _perform_setup(
         print("Lightweight copy-only installation complete; Python and system dependencies were unchanged.")
     elif healthy:
         if args.support_only:
-            print("econ-review supporting setup is complete and ready for the installed plugin.")
+            print("econ-review supporting setup is complete and ready for the installed skill.")
         else:
             print("econ-review setup complete and ready.")
     else:
@@ -1974,7 +2099,10 @@ def _perform_setup(
 def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
     if sys.version_info < MINIMUM_PYTHON:
-        raise InstallError("Python 3.10 or newer is required")
+        raise InstallError(
+            "Python 3.10 or newer is required; "
+            "on macOS, install Python 3.13 or 3.14 from https://www.python.org/downloads/macos/ or run 'brew install python@3.12' or 'uv python install 3.12'"
+        )
     source = (args.source or SKILL_ROOT).expanduser().absolute()
     if not args.with_review_desk and (args.review_desk_dir or args.review_desk_bundle):
         raise InstallError("--review-desk-dir and --review-desk-bundle require --with-review-desk")

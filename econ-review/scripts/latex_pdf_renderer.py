@@ -52,14 +52,115 @@ LEGACY_DETAILED_WRITING = re.compile(r"\bDetailed Writing Comments\b", re.IGNORE
 REVISION_ID = re.compile(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+:\s*(.+)$")
 PRIORITY_HEADING = re.compile(r"^P([0-9]+)\s*[\u2012\u2013\u2014-]\s*(.+)$", re.IGNORECASE)
 
-MATH_DENYLIST = re.compile(
-    r"\\(?:write18|immediate|openout|openin|read|input|include|includeonly|"
-    r"includegraphics|verbatiminput|lstinputlisting|addbibresource|bibliography|"
-    r"usepackage|documentclass|begin|end|catcode|csname|newcommand|renewcommand|"
-    r"def|edef|gdef|xdef|loop|repeat|special|directlua|latelua|pdfextension|"
-    r"shipout|everyjob|everyeof|scantokens|ExplSyntaxOn|ShellEscape)\b",
+# Explicit math spans are copied into the TeX source verbatim, so they are
+# checked against an allowlist rather than a denylist: TeX has too many ways
+# to read files or build control sequences (``\InputIfFileExists``,
+# ``\makeatletter\@input``, ``\csname``, ``\luafunction``, ``^^5c`` escapes)
+# for a denylist to stay complete.  Every control word below is a
+# math-typesetting command defined by the bundled template (LaTeX, amsmath,
+# and unicode-math) that typesets cleanly in both bundled math fonts; none
+# reads files, writes files, runs Lua, changes category codes, or builds a
+# control-sequence name from span text.  That last rule excludes ``\not``
+# (unicode-math looks up and runs ``\not<argument>`` or ``\n<argument>``)
+# and ``\smash`` (amsmath runs ``\mb@<optional argument>``); write
+# ``\neq``, ``\notin``, ``\nleq`` and the other negated symbols instead.
+# ``tests/test_latex_pdf_renderer.py`` typesets every word in the template.
+MATH_CONTROL_WORDS = frozenset(
+    """
+    alpha beta gamma delta epsilon varepsilon zeta eta theta vartheta iota
+    kappa varkappa lambda mu nu xi omicron pi varpi rho varrho sigma varsigma
+    tau upsilon phi varphi chi psi omega
+    Gamma Delta Theta Lambda Xi Pi Sigma Upsilon Phi Psi Omega
+    varGamma varDelta varTheta varLambda varXi varPi varSigma varUpsilon
+    varPhi varPsi varOmega
+    aleph beth gimel daleth ell hbar hslash imath jmath wp Re Im partial nabla
+    infty emptyset varnothing forall exists nexists neg lnot top bot angle
+    measuredangle sphericalangle prime backprime triangle
+    surd flat natural sharp clubsuit
+    diamondsuit heartsuit spadesuit complement eth mho
+    dag ddag
+    pm mp times div cdot cdotp ldotp ast star circ bullet cap cup sqcap sqcup
+    vee wedge lor land setminus wr oplus ominus otimes
+    oslash odot bigcirc dagger ddagger amalg uplus
+    triangleleft triangleright boxplus boxminus boxtimes boxdot dotplus ltimes
+    rtimes curlyvee curlywedge
+    leq le geq ge neq ne equiv approx approxeq sim simeq backsim cong propto
+    prec succ preceq succeq ll gg lll ggg subset supset subseteq supseteq
+    subsetneq supsetneq nsubseteq nsupseteq sqsubset
+    sqsupset sqsubseteq sqsupseteq in ni notin owns vdash dashv models vDash
+    Vdash perp mid nmid parallel nparallel smile frown asymp doteq bowtie
+    leqslant geqslant lesssim gtrsim lneq gneq lneqq
+    gneqq leqq geqq nleq ngeq nless ngtr nsim ncong triangleq coloneq eqcolon
+    vartriangleleft vartriangleright trianglelefteq trianglerighteq precsim
+    succsim preccurlyeq succcurlyeq curlyeqprec
+    curlyeqsucc therefore because between lessgtr gtrless
+    lesseqgtr gtreqless eqsim circeq risingdotseq fallingdotseq
+    to gets leftarrow rightarrow Leftarrow Rightarrow leftrightarrow
+    Leftrightarrow longleftarrow longrightarrow Longleftarrow Longrightarrow
+    longleftrightarrow Longleftrightarrow mapsto longmapsto uparrow downarrow
+    Uparrow Downarrow updownarrow Updownarrow nearrow searrow swarrow nwarrow
+    hookleftarrow hookrightarrow implies impliedby iff rightleftharpoons
+    leftrightharpoons rightharpoonup rightharpoondown leftharpoonup
+    leftharpoondown upharpoonleft upharpoonright downharpoonleft
+    downharpoonright twoheadrightarrow twoheadleftarrow rightsquigarrow
+    nrightarrow nleftarrow nRightarrow nLeftarrow nleftrightarrow
+    nLeftrightarrow leftleftarrows rightrightarrows leftrightarrows
+    rightleftarrows Lsh Rsh looparrowleft looparrowright curvearrowleft
+    curvearrowright xrightarrow xleftarrow
+    sum prod coprod int iint iiint oint bigcup bigcap bigoplus bigotimes
+    bigodot bigvee bigwedge bigsqcup biguplus
+    arccos arcsin arctan arg cos cosh cot coth csc deg det dim exp gcd hom inf
+    ker lg lim liminf limsup ln log max min Pr sec sin sinh sup tan tanh
+    injlim projlim varliminf varlimsup operatorname bmod pmod pod mod
+    hat widehat check widecheck tilde widetilde acute grave dot ddot dddot
+    ddddot breve bar vec overline underline overbrace underbrace
+    overrightarrow overleftarrow overleftrightarrow underrightarrow
+    underleftarrow underleftrightarrow mathring
+    mathrm mathbf mathit mathsf mathtt mathcal mathbb mathfrak mathscr
+    mathnormal mathbfit mathbfcal mathbfscr mathbffrak mathbfsf boldsymbol
+    symbf symrm symit symsf symtt symcal symbb symfrak symscr symup symbfit
+    symbfup symnormal text textrm textbf textit textsf texttt textnormal
+    textup textsl emph mbox
+    frac dfrac tfrac cfrac binom dbinom tbinom genfrac sqrt root of over
+    choose atop left right middle big Big bigg Bigg bigl bigr Bigl Bigr biggl
+    biggr Biggl Biggr bigm Bigm biggm Biggm overset underset stackrel substack
+    sideset limits nolimits notag nonumber displaystyle textstyle scriptstyle
+    scriptscriptstyle phantom vphantom hphantom mathstrut boxed cdots
+    ldots hdots dots dotsc dotsb dotsm dotsi dotso vdots ddots colon quad qquad
+    enspace thinspace medspace thickspace negthinspace negmedspace
+    negthickspace mathop mathbin mathrel mathord mathpunct mathopen mathclose
+    mathinner langle rangle lceil rceil lfloor rfloor lvert rvert lVert
+    rVert vert Vert backslash lbrace rbrace lbrack rbrack ulcorner urcorner
+    llcorner lrcorner
+    """.split()
+)
+# Single-character control symbols that only typeset spacing, delimiters, or
+# escaped specials.  Every other control symbol (``\@``, ``\^``, ``\'``, ...)
+# is rejected.
+MATH_CONTROL_SYMBOLS = frozenset(",:;!> {}|\\%#&$_/\n\t")
+# Defence in depth: names that must never be allowlisted, even by mistake.
+# ``tests/test_latex_pdf_renderer.py`` asserts the allowlist stays disjoint.
+FORBIDDEN_MATH_CONTROL_WORD = re.compile(
+    r"^(?:lua|input|include|IfFileExists|read|expandafter|csname|makeat|"
+    r"directlua|latelua|write|immediate|open|catcode|scantokens|def|edef|"
+    r"gdef|xdef|let|futurelet|special|shipout|every|pdfextension|"
+    r"usepackage|documentclass|newcommand|renewcommand|ExplSyntax|ShellEscape|"
+    # Exact names: these build a control-sequence name from their argument.
+    r"(?:not|smash)\Z)",
     re.IGNORECASE,
 )
+# A TeX control sequence: a backslash followed by a run of letters (in
+# LuaLaTeX, non-ASCII letters have category code 11 too, so any non-ASCII
+# character is treated as part of the name and rejects it), by exactly one
+# other character, or by nothing at the end of the span.
+MATH_CONTROL_SEQUENCE = re.compile(r"\\(?:([A-Za-z\u0080-\U0010ffff]+)|(.)|\Z)", re.DOTALL)
+# ``^^5c`` and its variants synthesize arbitrary characters (including a
+# backslash) when TeX reads input, so they may not appear in a math span.
+# ``@`` is rejected because it is the letter of internal kernel commands such
+# as ``\@input``.  Raw control characters have no place in typeset math.
+MATH_UNSAFE_CHARACTERS = re.compile(r"\^\^|@|[\x00-\x08\x0b-\x1f\x7f]")
+# The braced name that follows ``\begin`` or ``\end``.
+MATH_ENVIRONMENT_ARGUMENT = re.compile(r"\s*\{([^{}]+)\}")
 SAFE_MATH_ENVIRONMENTS = frozenset(
     {"aligned", "alignedat", "cases", "matrix", "pmatrix", "bmatrix", "smallmatrix", "split", "gathered"}
 )
@@ -90,7 +191,7 @@ _MATH_BASE = r"(?:[A-Z][A-Z0-9]*|[A-Za-z]|[\u0370-\u03ff])"
 _MATH_SUBSCRIPT = r"_(?:\{[A-Za-z0-9, +*/\-\u0370-\u03ff]+\}|[A-Za-z0-9\u0370-\u03ff]+)"
 BARE_MATH_TOKEN = re.compile(
     rf"(?<![\w\\$])(?P<math>"
-    rf"(?:Var|Cov|Corr)\([^()\s]{{1,80}}\)"
+    rf"(?:Var|Cov|Corr)\([A-Za-z0-9_,.+\-*/^'|\u0370-\u03ff]{{1,80}}\)"
     rf"|d{_MATH_BASE}/d{_MATH_BASE}(?:{_MATH_SUBSCRIPT})?"
     rf"|(?:\d+/)?{_MATH_BASE}{_MATH_SUBSCRIPT}"
     rf")(?![\w])"
@@ -183,15 +284,58 @@ def _plain_markdown(text: str) -> str:
 
 
 def _safe_math(content: str) -> str:
-    math_environment = re.compile(r"\\(begin|end)\s*\{([^{}]+)\}")
-    for match in math_environment.finditer(content):
-        if match.group(2).strip() not in SAFE_MATH_ENVIRONMENTS:
-            raise LatexRenderError("unsafe environment in an explicit math span")
-    checked = math_environment.sub("", content)
-    if MATH_DENYLIST.search(checked):
-        raise LatexRenderError("unsafe TeX command in an explicit math span")
+    """Return an explicit math span unchanged, or reject it before compilation.
+
+    Only allowlisted math control words, a few spacing/delimiter control
+    symbols, and the ``SAFE_MATH_ENVIRONMENTS`` may appear.  Rejection names
+    the offending token so the author-facing text can be rewritten as prose.
+    """
     if "\x00" in content:
         raise LatexRenderError("NUL byte in an explicit math span")
+    unsafe_character = MATH_UNSAFE_CHARACTERS.search(content)
+    if unsafe_character:
+        raise LatexRenderError(
+            f"unsafe character {unsafe_character.group(0)!r} in an explicit math span"
+        )
+    # Scan once, left to right, exactly as TeX tokenizes: ``\\`` is one
+    # control symbol, so ``\\begin{aligned}\input`` must not be read as an
+    # environment followed by an escaped backslash.  Environment names are
+    # validated at the position where TeX would read them.
+    for match in MATH_CONTROL_SEQUENCE.finditer(content):
+        word, symbol = match.group(1), match.group(2)
+        if word in {"begin", "end"}:
+            environment = MATH_ENVIRONMENT_ARGUMENT.match(content, match.end())
+            if not environment or environment.group(1).strip() not in SAFE_MATH_ENVIRONMENTS:
+                raise LatexRenderError("unsafe environment in an explicit math span")
+            continue
+        if word is not None:
+            if word in MATH_CONTROL_WORDS and not FORBIDDEN_MATH_CONTROL_WORD.match(word):
+                continue
+            raise LatexRenderError(f"unsafe TeX command \\{word} in an explicit math span")
+        if symbol is not None and symbol in MATH_CONTROL_SYMBOLS:
+            continue
+        raise LatexRenderError(
+            f"unsafe TeX control symbol {match.group(0)!r} in an explicit math span"
+        )
+    # Outside control sequences, a bare ``%`` comments out the rest of the
+    # line, a bare ``#`` is a macro-parameter character, and unbalanced braces
+    # change the group structure; all three would surface only as an opaque
+    # compile failure.
+    residue = MATH_CONTROL_SEQUENCE.sub(" ", content)
+    if "%" in residue:
+        raise LatexRenderError("unescaped % in an explicit math span (write \\% for a percent sign)")
+    if "#" in residue:
+        raise LatexRenderError("unescaped # in an explicit math span (write \\# for a number sign)")
+    depth = 0
+    for character in residue:
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth < 0:
+                break
+    if depth != 0:
+        raise LatexRenderError("unbalanced braces in an explicit math span")
     return content
 
 

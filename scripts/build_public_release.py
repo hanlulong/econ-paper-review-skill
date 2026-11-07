@@ -34,10 +34,12 @@ EXPLICIT_EXCLUDED_TREE_FILES = {Path("review-viewer/public/favicon.svg")}
 ROOT_FILES = {
     Path(".gitattributes"),
     Path(".gitignore"),
+    Path("CHANGELOG.md"),
     Path("CONTRIBUTING.md"),
     Path("INSTALL.md"),
     Path("LICENSE"),
     Path("README.md"),
+    Path("README.zh-CN.md"),
     Path("THIRD_PARTY_NOTICES.md"),
 }
 FIRST_PARTY_LICENSES = (

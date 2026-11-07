@@ -6,8 +6,13 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
+import re
 import shutil
+import subprocess
 import sys
+import tempfile
+import unicodedata
 import unittest
 from datetime import date
 from pathlib import Path
@@ -64,11 +69,102 @@ class LatexMarkdownSafetyTests(unittest.TestCase):
             r"\(\write18{touch escaped}\)",
             "$$\\begin{document}x\\end{document}$$",
             "$$\\begin{tikzpicture}x\\end{tikzpicture}$$",
+            # Known bypasses of the former denylist.
+            r"$\InputIfFileExists{x}{}{}$",
+            r"$\makeatletter\@input{x}\makeatother$",
+            r"$\IfFileExists{x}{a}{b}$",
+            r"$\luafunction0$",
+            r"$\expandafter\x$",
+            r"$\readline\x to\y$",
+            r"$\luaescapestring{x}$",
+            r"$\includepdf{x}$",
+            r"$\csname input\endcsname{x}$",
+            r"$\makeatletter x\makeatother$",
+            r"$\@@input x$",
+            r"$x^^5cinput{x}$",
+            r"$x^^^^005cinput{x}$",
+            r"\(\string\input\)",
+            r"$\let\x\input$",
+            r"$\alphaé$",
+            r"$\'a$",
+            "$$\\begin{aligned}x &= \\InputIfFileExists{x}{}{}\\end{aligned}$$",
+            # ``\\`` is one control symbol, so the letters after it are text
+            # and the following command is live, not escaped.
+            r"$\\begin{aligned}\input{x}$",
+            r"$x\\end{cases}\InputIfFileExists{x}{}{}$",
+            r"$\begin{aligned}x\end {aligned}\begin%{cases}$",
+            "\\[\n\\directlua{os.exit()}\n\\]",
+            # unicode-math's ``\not`` looks up and runs ``\not<argument>`` or
+            # ``\n<argument>``, and amsmath's ``\smash[...]`` runs
+            # ``\mb@<option>``: both build control-sequence names from text.
+            r"$\not{ewline}$",
+            r"$\not{\in put}$",
+            r"$\not{ocite}{x}$",
+            r"$a \not= b$",
+            r"$\smash[t]{x}$",
+            r"$\smash{x}$",
         )
         for markdown in unsafe_spans:
             with self.subTest(markdown=markdown):
                 with self.assertRaisesRegex(MODULE.LatexRenderError, "unsafe"):
                     MODULE.markdown_to_latex(markdown)
+
+    def test_control_characters_are_rejected_inside_explicit_math(self) -> None:
+        for content in ("x\x01y", "x\x0b\x0b5cinput{x}", "x\x7f"):
+            with self.subTest(content=content):
+                with self.assertRaisesRegex(MODULE.LatexRenderError, "unsafe character"):
+                    MODULE._safe_math(content)
+
+    def test_bare_percent_hash_and_unbalanced_braces_are_rejected_by_name(self) -> None:
+        for content, message in (
+            ("a % b", "unescaped %"),
+            ("x#1", "unescaped #"),
+            ("\\frac{a", "unbalanced braces"),
+            ("a}{b", "unbalanced braces"),
+        ):
+            with self.subTest(content=content):
+                with self.assertRaisesRegex(MODULE.LatexRenderError, message):
+                    MODULE._safe_math(content)
+        for content in ("50\\%", "\\#1", "\\{a\\}", "\\{a", "\\frac{a}{b}"):
+            with self.subTest(content=content):
+                self.assertEqual(MODULE._safe_math(content), content)
+        # Prose that only resembles a variance call stays escaped prose.
+        self.assertEqual(MODULE._render_plain_text("The Var(%) term"), "The Var(\\%) term")
+        self.assertNotIn("$", MODULE._render_plain_text("Cov(x,#y) here").replace("\\$", ""))
+
+    def test_math_allowlist_never_admits_file_lua_or_expansion_primitives(self) -> None:
+        for word in sorted(MODULE.MATH_CONTROL_WORDS):
+            with self.subTest(word=word):
+                self.assertRegex(word, r"^[A-Za-z]+$")
+                self.assertIsNone(MODULE.FORBIDDEN_MATH_CONTROL_WORD.match(word))
+        for primitive in (
+            "input", "InputIfFileExists", "IfFileExists", "include", "includepdf",
+            "includegraphics", "read", "readline", "openin", "luafunction",
+            "luaescapestring", "directlua", "latelua", "expandafter", "csname",
+            "makeatletter", "catcode", "scantokens", "def", "let", "write",
+            "not", "smash",
+        ):
+            with self.subTest(primitive=primitive):
+                self.assertNotIn(primitive, MODULE.MATH_CONTROL_WORDS)
+                self.assertIsNotNone(MODULE.FORBIDDEN_MATH_CONTROL_WORD.match(primitive))
+
+    def test_common_economics_math_passes_the_allowlist_unchanged(self) -> None:
+        spans = (
+            r"\hat{\beta}_{\mathrm{OLS}} = (X'X)^{-1}X'y",
+            r"\mathbb{E}[\varepsilon_i \mid X_i] = 0",
+            r"\sqrt{n}(\hat\theta - \theta_0) \xrightarrow{d} \mathcal{N}(0, \sigma^2)",
+            r"\left\{ x \in \mathbb{R}^k \,:\, \lVert x \rVert \le 1 \right\}",
+            r"\operatorname*{arg\,max}_{\theta \in \Theta} \sum_{i=1}^{n} \ell_i(\theta)",
+            r"\text{if } t \geq 0,\quad \Pr(D_i = 1 \mid Z_i) \neq \tfrac{1}{2}",
+            r"\$5 \times 10^{3} \approx \infty \cdot 0 \%",
+            r"i \notin S,\ j \neq k,\ x_1, \hdots, x_n \nonumber",
+            "\\begin{aligned} y_{it} &= \\alpha_i + \\lambda_t + \\beta D_{it} \\\\ "
+            "\\partial y / \\partial x &\\propto \\int_0^1 f(u)\\, du \\end{aligned}",
+            "\\begin{cases} 1 & \\text{treated} \\\\ 0 & \\text{otherwise} \\end{cases}",
+        )
+        for content in spans:
+            with self.subTest(content=content):
+                self.assertEqual(MODULE._safe_math(content), content)
 
     def test_unmistakable_legacy_math_is_typeset_without_touching_snake_case_prose(self) -> None:
         rendered = MODULE.render_inline(
@@ -349,6 +445,165 @@ class LatexToolchainAndProfileTests(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("lualatex"), "LuaLaTeX is not installed")
 class RealLuaLatexSmokeTests(unittest.TestCase):
+    def test_local_file_contents_never_reach_the_pdf_through_math(self) -> None:
+        canary_text = "CANARYSECRETCONTENTS"
+
+        def render(payload: str) -> str:
+            report = document(
+                "# Referee report\n\n## Overall assessment\n\n"
+                f"The manuscript states {payload} in the appendix.\n"
+            )
+            result = MODULE.render_review_pdf(
+                paper_title=PAPER_TITLE,
+                assessment_date=ASSESSMENT_DATE,
+                documents=[report],
+                renderer="lualatex",
+                page_size="letter",
+                timeout=90,
+            )
+            reader = PdfReader(io.BytesIO(result.pdf_bytes))
+            full_text = "".join(page.extract_text() or "" for page in reader.pages)
+            # Math mode typesets the leaked letters as spaced mathematical
+            # italics; fold them back to ASCII first.
+            return re.sub(r"\s+", "", unicodedata.normalize("NFKC", full_text))
+
+        with tempfile.TemporaryDirectory(prefix="econ-review-canary-") as temporary:
+            canary = (Path(temporary) / "canary.tex").as_posix()
+            Path(canary).write_text(canary_text + "\n", encoding="utf-8")
+            known_bypasses = (
+                rf"$\InputIfFileExists{{{canary}}}{{}}{{}}$",
+                rf"$\makeatletter\@input{{{canary}}}\makeatother$",
+            )
+            payloads = (
+                *known_bypasses,
+                rf"$\IfFileExists{{{canary}}}{{\input{{{canary}}}}}{{}}$",
+                rf"$\text{{\InputIfFileExists{{{canary}}}{{}}{{}}}}$",
+                rf"$\\begin{{aligned}}\input{{{canary}}}$",
+            )
+            # Positive control: without the span check, the known bypasses do
+            # put the file into the PDF, so the canary assertion is meaningful.
+            with mock.patch.object(MODULE, "_safe_math", side_effect=lambda content: content):
+                for payload in known_bypasses:
+                    with self.subTest(control=payload):
+                        self.assertIn(canary_text, render(payload))
+            # Every payload must be refused before TeX runs; a compile failure
+            # for some other reason would not prove the span check works.
+            for payload in payloads:
+                with self.subTest(payload=payload):
+                    with mock.patch.object(MODULE.subprocess, "run", wraps=MODULE.subprocess.run) as run:
+                        with self.assertRaisesRegex(MODULE.LatexRenderError, "unsafe"):
+                            render(payload)
+                    run.assert_not_called()
+
+    def test_allowlisted_economics_math_compiles_cleanly(self) -> None:
+        sentinel = "Allowlisted math sentinel"
+        report = document(
+            "# Referee report\n\n## Overall assessment\n\n"
+            f"{sentinel}: $\\hat{{\\beta}}_{{\\mathrm{{OLS}}}} = (X'X)^{{-1}}X'y$, "
+            "$\\mathbb{E}[\\varepsilon_i \\mid X_i] = 0$, and "
+            "\\(\\sqrt{n}(\\hat\\theta - \\theta_0) \\xrightarrow{d} \\mathcal{N}(0, \\sigma^2)\\).\n\n"
+            "$$\\operatorname*{arg\\,max}_{\\theta \\in \\Theta} \\sum_{i=1}^{n} \\ell_i(\\theta)"
+            " \\quad \\text{s.t.} \\quad \\left\\lVert \\theta \\right\\rVert \\le 1$$\n\n"
+            "$$\\begin{aligned} y_{it} &= \\alpha_i + \\lambda_t + \\beta D_{it} + \\varepsilon_{it} \\\\\n"
+            "D_{it} &= \\begin{cases} 1 & \\text{if } t \\geq E_i \\\\ 0 & \\text{otherwise} \\end{cases}"
+            " \\end{aligned}$$\n"
+        )
+        result = MODULE.render_review_pdf(
+            paper_title=PAPER_TITLE,
+            assessment_date=ASSESSMENT_DATE,
+            documents=[report],
+            renderer="lualatex",
+            page_size="letter",
+            timeout=90,
+        )
+        reader = PdfReader(io.BytesIO(result.pdf_bytes))
+        full_text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        self.assertIn(sentinel, full_text)
+
+    def test_every_allowlisted_math_command_typesets_cleanly_in_both_math_fonts(self) -> None:
+        # An allowlisted command that errors or lacks a glyph would pass the
+        # scanner and then fail the render with a less useful message, so
+        # each one is typeset inline and in display, in the preferred math
+        # font and in the fallback the template uses when it is missing.
+        usage = {
+            "frac": r"\frac{a}{b}", "dfrac": r"\dfrac{a}{b}", "tfrac": r"\tfrac{a}{b}",
+            "cfrac": r"\cfrac{a}{b}", "binom": r"\binom{a}{b}", "dbinom": r"\dbinom{a}{b}",
+            "tbinom": r"\tbinom{a}{b}", "genfrac": r"\genfrac{(}{)}{0pt}{}{a}{b}",
+            "root": r"\root 3 \of {x}", "over": r"{a \over b}", "atop": r"{a \atop b}",
+            "choose": r"{a \choose b}", "left": r"\left( x \right)", "right": r"\left( x \right)",
+            "middle": r"\left( x \middle| y \right)", "overset": r"\overset{a}{b}",
+            "underset": r"\underset{a}{b}", "stackrel": r"\stackrel{a}{b}",
+            "sideset": r"\sideset{_a}{_b}\sum", "substack": r"\sum_{\substack{i \\ j}} x",
+            "limits": r"\sum\limits_{i} x", "nolimits": r"\sum\nolimits_{i} x",
+        }
+        for word in "big Big bigg Bigg bigl Bigl biggl Biggl bigm Bigm biggm Biggm".split():
+            usage[word] = rf"\{word}("
+        for word in "bigr Bigr biggr Biggr".split():
+            usage[word] = rf"\{word})"
+        environments = {
+            "alignedat": r"\begin{alignedat}{2} a &= b &\quad c &= d \end{alignedat}",
+            "gathered": r"\begin{gathered} a = b \\ c = d \end{gathered}",
+        }
+        probes = [
+            rf"\typeout{{ECONREVIEWPROBE:{word}}}\par\noindent ${snippet}$ \[{snippet}\]"
+            for word in sorted(MODULE.MATH_CONTROL_WORDS - {"of"})
+            for snippet in (usage.get(word, rf"\{word}{{x}}"),)
+        ]
+        probes += [
+            rf"\typeout{{ECONREVIEWPROBE:{name}}}\par\noindent \["
+            + environments.get(name, rf"\begin{{{name}}} a & b \\ c & d \end{{{name}}}")
+            + r"\]"
+            for name in sorted(MODULE.SAFE_MATH_ENVIRONMENTS)
+        ]
+        probes.append(r"\typeout{ECONREVIEWPROBE:END}")
+        source = MODULE.build_latex_source(
+            paper_title=PAPER_TITLE,
+            assessment_date=ASSESSMENT_DATE,
+            documents=[document()],
+        ).replace(r"\end{document}", "\n".join(probes) + "\n" + r"\end{document}")
+        preferred = r"\setmathfont{Libertinus Math}"
+        fallback = r"\setmathfont{TeX Gyre Pagella Math}"
+        self.assertIn(preferred, source)
+        self.assertIn(fallback, source)
+        failure_patterns = (
+            re.compile(r"^! .+", re.MULTILINE),
+            *MODULE.MISSING_GLYPH_PATTERNS,
+            *MODULE.UNDEFINED_PATTERNS,
+        )
+        for font, variant in (("preferred", source), ("fallback", source.replace(preferred, fallback))):
+            with self.subTest(font=font), tempfile.TemporaryDirectory(
+                prefix="econ-review-math-probe-"
+            ) as temporary:
+                root = Path(temporary)
+                (root / "probe.tex").write_text(variant, encoding="utf-8")
+                completed = subprocess.run(
+                    [
+                        shutil.which("lualatex") or "lualatex",
+                        "--no-shell-escape",
+                        "--interaction=nonstopmode",
+                        "probe.tex",
+                    ],
+                    cwd=root,
+                    env={**os.environ, "max_print_line": "10000"},
+                    capture_output=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=300,
+                    check=False,
+                )
+                log = (root / "probe.log").read_text(encoding="utf-8", errors="replace")
+                segments = re.split(r"^ECONREVIEWPROBE:(\S+)\n", log, flags=re.MULTILINE)
+                failures: dict[str, str] = {}
+                for name, text in zip(segments[1::2], segments[2::2]):
+                    for pattern in failure_patterns:
+                        match = pattern.search(text)
+                        if name != "END" and match:
+                            failures[name] = match.group(0)[:160]
+                            break
+                self.assertIn("END", segments[1::2], log[-2000:])
+                self.assertEqual(failures, {})
+                self.assertEqual(completed.returncode, 0, log[-2000:])
+
     def test_priority_heading_and_complete_first_action_share_a_page(self) -> None:
         priority_sentinel = "PRIORITYSENTINEL"
         action_sentinel = "ACTIONSENTINEL"

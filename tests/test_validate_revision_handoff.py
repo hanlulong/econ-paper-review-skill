@@ -319,6 +319,10 @@ process.stdout.write(sha256Hex(text));
         self.assertEqual(result.stdout, hashlib.sha256(findings_path.read_bytes()).hexdigest())
 
     @unittest.skipUnless(shutil.which("node"), "Node is optional for the core skill")
+    @unittest.skipUnless(
+        (ROOT / "review-viewer" / "node_modules").is_dir(),
+        "viewer dependencies are not installed; run `npm ci` in review-viewer",
+    )
     def test_viewer_generated_plan_id_validates_cross_runtime(self) -> None:
         module_uri = (ROOT / "review-viewer/lib/revision-plan.ts").as_uri()
         script = f"""

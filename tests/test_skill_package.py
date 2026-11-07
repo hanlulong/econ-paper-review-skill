@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -36,6 +38,52 @@ class SkillPackageValidationTests(unittest.TestCase):
 
     def test_current_skill_package_passes(self) -> None:
         self.assertEqual(MODULE.validate_skill_package(ROOT / "econ-review"), [])
+        self.assertEqual(MODULE.validate_skill_package(ROOT / "econ-review", "plugin"), [])
+
+    def standalone_copy(self, temporary: str) -> Path:
+        target = self.copy_skill(temporary)
+        for name in MODULE.PLUGIN_ONLY_ROOTS:
+            shutil.rmtree(target / name)
+        return target
+
+    def test_standalone_copy_passes_without_plugin_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.standalone_copy(temporary)
+            self.assertEqual(MODULE.validate_skill_package(target), [])
+            self.assertEqual(MODULE.validate_skill_package(target, "standalone"), [])
+            plugin_errors = MODULE.validate_skill_package(target, "plugin")
+            self.assertTrue(
+                any("native plugin manifest is missing" in error for error in plugin_errors),
+                plugin_errors,
+            )
+
+    def test_standalone_profile_rejects_any_plugin_payload(self) -> None:
+        for name in MODULE.PLUGIN_ONLY_ROOTS:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                target = self.standalone_copy(temporary)
+                shutil.copytree(ROOT / "econ-review" / name, target / name)
+                errors = MODULE.validate_skill_package(target, "standalone")
+                self.assertIn(
+                    f"standalone skill must not contain native-plugin payload: {name}",
+                    errors,
+                )
+                # Auto treats a partial payload as a broken plugin, never as standalone.
+                self.assertNotEqual(MODULE.validate_skill_package(target), [])
+
+    def test_standalone_copy_must_still_use_the_skill_name_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.standalone_copy(temporary)
+            renamed = target.with_name(PLUGIN_VERSION)
+            target.rename(renamed)
+            errors = MODULE.validate_skill_package(renamed)
+            self.assertTrue(any("does not match directory name" in error for error in errors), errors)
+
+    def test_cli_accepts_an_explicit_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = self.standalone_copy(temporary)
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(MODULE.main(["--profile", "standalone", str(target)]), 0)
+                self.assertEqual(MODULE.main(["--profile", "plugin", str(target)]), 1)
 
     def test_versioned_plugin_cache_package_passes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

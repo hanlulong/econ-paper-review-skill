@@ -201,7 +201,7 @@ class PdfDependencyGateTests(unittest.TestCase):
 
     def test_explicit_optional_backends_reject_unsupported_versions(self) -> None:
         unsupported_markitdown = INGESTION.RequirementStatus(
-            "markitdown", "markitdown[pdf]==0.1.6", "0.1.5", "unsupported",
+            "markitdown", "markitdown[pdf]==0.1.7", "0.1.6", "unsupported",
         )
         markitdown_args = argparse.Namespace(
             markitdown_proposal=True, semantic_backend="none", mathpix=False,
@@ -223,7 +223,7 @@ class PdfDependencyGateTests(unittest.TestCase):
                 )
 
         unsupported_requests = BACKENDS.RequirementStatus(
-            "requests", "requests>=2.32,<3", "2.31.0", "unsupported",
+            "requests", "requests>=2.34.2,<3", "2.31.0", "unsupported",
         )
         with mock.patch.object(BACKENDS, "mathpix_http_requirement_status", return_value=unsupported_requests):
             with self.assertRaisesRegex(BACKENDS.BackendError, "unsupported"):

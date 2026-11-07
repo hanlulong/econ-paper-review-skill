@@ -3,7 +3,11 @@
 Standalone skill installation is the default. It preserves the short
 `/econ-review` command in Claude Code and `$econ-review` mention in Codex, while
 still allowing the skill to activate automatically from an ordinary paper-review
-request. Native plugin installation remains available as an optional alternative.
+request. A standalone copy contains the skill only: the native-plugin manifests
+(`.claude-plugin/`, `.codex-plugin/`) and the `skills/` adapters stay in the
+plugin package, because either client would otherwise load the copy as a
+namespaced plugin. Native plugin installation remains available as an optional
+alternative.
 
 Use one installation method per client. Claude Code and Codex need separate
 standalone copies when both clients are used, but those copies must come from the
@@ -39,15 +43,25 @@ and the bundled Review Desk. Do not ask the user to copy or run commands.
    the former `econ-review@econ-paper-review` plugin only for the selected
    client. Do not inspect, remove, back up, or migrate the other client's copy.
 4. Obtain one consistent public source snapshot over HTTPS. Prefer an existing
-   clean checkout whose origin is exactly
-   `https://github.com/hanlulong/econ-paper-review-skill`; otherwise use a
+   clean checkout whose origin is
+   `https://github.com/hanlulong/econ-paper-review-skill`. Treat the forms with
+   a `.git` suffix, a trailing slash, or the SSH address
+   `git@github.com:hanlulong/econ-paper-review-skill.git` as the same origin;
+   the README's clone command produces the `.git` form. Otherwise use a
    temporary shallow clone. Do not request or expose a GitHub token. Verify that
    the snapshot contains `econ-review/SKILL.md`, both matching client manifests,
    `econ-review/scripts/setup_econ_review.py`,
    `econ-review/requirements-core.txt`, and
    `econ-review/assets/review-desk.zip` before executing bundled code.
 5. Find an existing Python 3.10+ interpreter with working `venv` and pip
-   bootstrapping support. Select `--claude` or `--codex` for the current client,
+   bootstrapping support. Check `python3.14`, `python3.13`, `python3.12`,
+   `python3.11`, `python3.10`, and `~/.local/bin` (where `uv python install`
+   puts them) as well as `python3`, and if `uv` is present, `uv python find
+   3.12`. If none exists, stop and report that as the blocker. On macOS, where
+   the built-in `python3` is 3.9, tell the user to install Python 3.13 or 3.14
+   from https://www.python.org/downloads/macos/ (3.15 is not tested yet) or run
+   `brew install python@3.12` or `uv python install 3.12`, then paste the
+   install prompt again. Select `--claude` or `--codex` for the current client,
    show the managed setup's dry run, inspect every planned destination and
    download, and then apply the identical operation:
 
@@ -58,12 +72,15 @@ and the bundled Review Desk. Do not ask the user to copy or run commands.
 
    Run these commands from the verified checkout and replace `--CLIENT` with
    exactly one client flag. Use native path syntax on Windows. The setup copies
-   the complete skill atomically, preserves a modified prior copy, creates or
-   reuses a private user-owned environment, installs only the version-constrained
-   core requirements, and installs the manifest-verified Review Desk. It never
-   uploads a manuscript or alters a system Python environment. Default support
-   paths are keyed by the core-requirements hash and Review Desk bundle hash;
-   an update with different support content is additive rather than destructive.
+   the complete standalone skill atomically (everything except the
+   native-plugin manifests and `skills/` adapters), replaces a plugin-shaped
+   copy left by a release before 0.3.0, preserves a modified prior copy,
+   creates or reuses a private user-owned environment, installs only the
+   version-constrained core requirements, and installs the manifest-verified
+   Review Desk. It never uploads a manuscript or alters a system Python
+   environment. Default support paths are keyed by the core-requirements hash
+   and Review Desk bundle hash; an update with different support content is
+   additive rather than destructive.
 6. Preserve the setup tool's PDF-readiness distinction. Exit `0` means the core
    runtime, PDF ingestion, and Review Desk passed. Exit `2` normally means the
    runtime and Review Desk are ready but Poppler is absent. Install Poppler only
@@ -76,10 +93,15 @@ and the bundled Review Desk. Do not ask the user to copy or run commands.
    - `SKILL.md` has `name: econ-review`, the expected trigger description, and
      no automatic-invocation opt-out.
    - `agents/openai.yaml` does not disable implicit invocation.
-   - The installed tree matches the verified source manifest.
-   - `setup_econ_review.py --runtime-path` returns the verified managed Python.
+   - The installed tree matches the standalone manifest recorded in its
+     `.econ-review-install.json` (the verified source minus the native-plugin
+     payload).
+   - The standalone tree contains no `.claude-plugin/`, `.codex-plugin/`, or
+     `skills/` directory.
+   - `INSTALLED_SKILL/scripts/setup_econ_review.py --runtime-path` returns the
+     verified managed Python.
    - That interpreter passes
-     `INSTALLED_SKILL/scripts/validate_skill_package.py INSTALLED_SKILL`.
+     `INSTALLED_SKILL/scripts/validate_skill_package.py --profile standalone INSTALLED_SKILL`.
    - The Review Desk launcher's printed integrity check succeeds.
 8. Only after step 7 passes, remove same-client duplicates. Remove the exact
    native plugin through that client's plugin manager and remove the former
@@ -234,7 +256,38 @@ codex plugin marketplace upgrade openeconai
 codex plugin add econ-review@openeconai
 ```
 
+Then, in a new session, send the agent this message so the shared support data
+(including Review Desk) moves to the version the updated plugin ships:
+
+```text
+Run econ-review-setup now and finish its user-level setup with Review Desk.
+```
+
+The setup reuses the managed runtime when its requirements are unchanged and
+reports "Already current" for anything that is.
+
 ### Remove a native plugin
+
+Plugin removal intentionally keeps the user-owned runtime and Review Desk. The
+same support data serves the plugin in both clients and every standalone copy,
+so remove it only when you are removing the last Econ Review copy. First
+check, read-only, that no other copy remains: the plugin in the other client
+(`claude plugin list --json` or `codex plugin list`), a standalone copy in
+either client (paths in "Uninstall the standalone skill"), or a project-local
+copy you still use. If any copy remains, skip the cleanup below and only remove
+the plugin.
+To remove the support data too, do it first, while the plugin's scripts are
+still installed. `PLUGIN_ROOT` is the installed plugin folder that contains
+`scripts/setup_econ_review.py`; the `econ-review-setup` skill knows it, or ask
+the agent to "remove Econ Review's support data with econ-review-setup".
+Preview, then explicitly confirm the matching scope:
+
+```text
+PYTHON PLUGIN_ROOT/scripts/setup_econ_review.py --cleanup-support --global --dry-run
+PYTHON PLUGIN_ROOT/scripts/setup_econ_review.py --cleanup-support --global --confirm-cleanup
+```
+
+Then remove the plugin:
 
 ```bash
 claude plugin uninstall econ-review@openeconai
@@ -242,16 +295,56 @@ codex plugin remove econ-review@openeconai
 ```
 
 Run only the command for the applicable client. Keep the shared `openeconai`
-catalog if another OpenEconAI plugin uses it. Plugin removal intentionally keeps
-the user-owned runtime and Review Desk. To remove default support data too,
-preview and then explicitly confirm the matching scope:
+catalog if another OpenEconAI plugin uses it. Custom support locations are
+never inferred or deleted automatically.
+
+### Uninstall the standalone skill
+
+Paste this into the client:
 
 ```text
-PYTHON PLUGIN_ROOT/scripts/setup_econ_review.py --cleanup-support --global --dry-run
-PYTHON PLUGIN_ROOT/scripts/setup_econ_review.py --cleanup-support --global --confirm-cleanup
+Uninstall Econ Review's standalone skill for this client, following
+https://github.com/hanlulong/econ-paper-review-skill/blob/main/INSTALL.md
+("Uninstall the standalone skill"). Show me what will be removed before
+removing anything, and do not touch the other client's copy or the shared
+support data it still needs.
 ```
 
-Custom support locations are never inferred or deleted automatically.
+The steps, from a checkout or the installed skill:
+
+1. Decide whether this is the last Econ Review copy. The managed runtime, the
+   support descriptor and Review Desk are shared by both clients and by
+   standalone and plugin installs, so removing them breaks every other copy
+   until its setup is rerun. Check, read-only, whether any other copy remains:
+   the other client's standalone folder (paths in step 2), a project-local copy
+   you still use, or the native plugin (`claude plugin list --json`,
+   `codex plugin list`). If one remains, skip this step and say that the shared
+   support data is kept. Otherwise remove the support data first, while the
+   setup tool is still present. Preview, then confirm:
+
+   ```text
+   PYTHON INSTALLED_SKILL/scripts/setup_econ_review.py --cleanup-support --global --dry-run
+   PYTHON INSTALLED_SKILL/scripts/setup_econ_review.py --cleanup-support --global --confirm-cleanup
+   ```
+
+   This removes the managed Python runtime, the support descriptor, and Review
+   Desk from the default support root:
+   `~/Library/Application Support/econ-review` on macOS,
+   `${XDG_DATA_HOME:-$HOME/.local/share}/econ-review` on Linux, and
+   `%USERPROFILE%\.econ-review` on Windows. It reports that skill copies were
+   not deleted; that is expected.
+2. Delete the client's skill folder: `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/econ-review`
+   for Claude Code, `$HOME/.agents/skills/econ-review` for Codex, or
+   `PROJECT/.claude/skills/econ-review` and `PROJECT/.agents/skills/econ-review`
+   for a project-local install. Confirm the folder contains
+   `.econ-review-install.json` or an Econ Review `SKILL.md` before deleting it.
+3. Optionally delete earlier backups: `~/.openeconai/backups/econ-review` and
+   any `.openeconai-inactive/econ-review` folder beside a client's `skills/`
+   folder.
+
+Use `--local PROJECT` instead of `--global` in step 1 for a project-local
+install. Reviews you have already produced stay in each paper's `review/`
+folder and are never removed.
 
 ### Migrate from the former marketplace
 
@@ -291,3 +384,10 @@ frontmatter description. If the skill does not appear after a new top-level
 skill directory is created, start a new session. If it appears twice, identify
 which same-client copy is standalone and which is native or legacy; verify the
 standalone copy first, then remove only the duplicate belonging to that client.
+
+A standalone copy installed by a release before 0.3.0 also contains the plugin
+manifests and `skills/` adapters, so Claude Code lists it as
+`econ-review@skills-dir` and Codex shows `econ-review:econ-review` (twice) plus
+`econ-review:econ-review-setup`. Rerun the standalone update; it replaces that
+copy with the standalone layout and restores `/econ-review` and
+`$econ-review`.

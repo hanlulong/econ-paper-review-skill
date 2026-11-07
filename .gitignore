@@ -11,6 +11,8 @@ __pycache__/
 .tmp/
 /tmp/
 review/
+# The Review Desk demo package is a deliberate, checked-in delivery.
+!/docs/sample-review/review/
 skills-lock.json
 /review-viewer/public/reviews/
 /review-viewer/public/sample-review/
@@ -33,3 +35,7 @@ skills-lock.json
 /test_paper3/
 /research/
 /demo-paper/
+
+# Stray root-level PDFs (manuscripts, downloads) are never source; the tracked
+# sample and fixture PDFs live under docs/ and tests/.
+/*.pdf

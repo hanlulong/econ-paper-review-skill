@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -201,13 +202,24 @@ class NativePluginTests(unittest.TestCase):
     def test_claude_strict_validation(self) -> None:
         claude = shutil.which("claude")
         assert claude is not None
-        result = subprocess.run(
-            [claude, "plugin", "validate", "--strict", str(PLUGIN_ROOT)],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        with tempfile.TemporaryDirectory() as temporary:
+            # Validate against an empty, disposable client configuration so the
+            # developer's own Claude Code settings are neither read nor written.
+            environment = {
+                key: value
+                for key, value in os.environ.items()
+                if key not in {"CLAUDE_CONFIG_DIR", "CODEX_HOME"}
+            }
+            environment["HOME"] = temporary
+            environment["CLAUDE_CONFIG_DIR"] = str(Path(temporary) / ".claude")
+            result = subprocess.run(
+                [claude, "plugin", "validate", "--strict", str(PLUGIN_ROOT)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                env=environment,
+            )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_isolated_native_package_passes_package_validator(self) -> None:

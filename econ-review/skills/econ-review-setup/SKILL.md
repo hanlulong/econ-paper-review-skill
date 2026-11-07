@@ -11,8 +11,13 @@ contains this setup skill. Use the standard-library setup tool at
 home: marketplace installation already supplies it.
 
 1. Find a working Python 3.10 or newer command with `venv` and pip bootstrapping
-   support already on the machine. Do not install Python, a package manager, a
-   missing `python3-venv` component, or system software on your own.
+   support already on the machine: check `python3.14` down to `python3.10`,
+   `~/.local/bin`, and `uv python find 3.12` when `uv` is present, as well as
+   `python3`. Do not install Python, a package manager, a missing
+   `python3-venv` component, or system software on your own. On macOS, where
+   the built-in `python3` is 3.9, tell the user to install Python 3.13 or 3.14
+   from https://www.python.org/downloads/macos/ or run
+   `brew install python@3.12` or `uv python install 3.12`.
 2. Choose global support setup unless the user explicitly requests one-project
    state. For global setup, run this exact operation first with `--dry-run`:
 

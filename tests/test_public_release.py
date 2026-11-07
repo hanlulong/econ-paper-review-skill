@@ -73,6 +73,24 @@ class PublicReleaseTests(unittest.TestCase):
         )
         self.assertFalse(any(path.startswith("benchmarks/reviews/") for path in paths))
 
+    def test_every_tracked_file_is_declared_in_the_release_contract(self) -> None:
+        git = shutil.which("git")
+        if git is None or not (ROOT / ".git").exists():
+            self.skipTest("not a git checkout")
+        listed = subprocess.run(
+            [git, "-C", str(ROOT), "ls-files", "-z"],
+            capture_output=True,
+            check=False,
+        )
+        if listed.returncode != 0:
+            self.skipTest("git ls-files is unavailable")
+        tracked = {item.decode("utf-8") for item in listed.stdout.split(b"\0") if item}
+        _contract, declared = MODULE.load_file_contract(ROOT)
+        declared_paths = {path.as_posix() for path in declared}
+        self.assertEqual(sorted(tracked - declared_paths), [])
+        top_level = {Path(path) for path in tracked if "/" not in path}
+        self.assertEqual(sorted(path.as_posix() for path in top_level - MODULE.ROOT_FILES), [])
+
     def test_native_windows_install_command_is_consistent(self) -> None:
         for relative in ("README.md", "INSTALL.md", "scripts/install.sh"):
             with self.subTest(path=relative):
@@ -91,6 +109,11 @@ class PublicReleaseTests(unittest.TestCase):
                 self.assertNotRegex(content, r"(?i)(export\s+GITHUB_TOKEN|GITHUB_TOKEN\s*=|github_pat_)")
         self.assertIn("${XDG_DATA_HOME:-$HOME/.local/share}/econ-review/", install)
         self.assertNotIn("${XDG_DATA_HOME:-~/.local/share}", install)
+        # A tilde inside a parameter expansion is not expanded when quoted.
+        self.assertNotIn(":-~", install)
+        self.assertIn("${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/econ-review", install)
+        # Support cleanup is shared by every copy, so it is conditional.
+        self.assertIn("Decide whether this is the last Econ Review copy", install)
         self.assertIn("git pull --ff-only", install)
         self.assertIn("do not combine one with a standalone copy", install)
 
@@ -329,6 +352,9 @@ class InstallerTests(unittest.TestCase):
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         merged = os.environ.copy()
+        # Never let a developer's own client configuration leak into a test.
+        merged.pop("CLAUDE_CONFIG_DIR", None)
+        merged.pop("CODEX_HOME", None)
         if env:
             merged.update(env)
         return subprocess.run(
@@ -353,6 +379,33 @@ class InstallerTests(unittest.TestCase):
             self.assertFalse((destination / ".DS_Store").exists())
             self.assertFalse((destination / "scripts" / "__pycache__").exists())
             self.assertFalse(list(destination.parent.glob(".econ-review.*")))
+            for plugin_only in (".claude-plugin", ".codex-plugin", "skills"):
+                self.assertFalse((destination / plugin_only).exists(), plugin_only)
+
+    def test_shell_install_replaces_plugin_shaped_copies(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            destination = home / ".agents" / "skills" / "econ-review"
+            legacy = home / ".codex" / "skills" / "econ-review"
+            ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store")
+            # Releases before 0.3.0 copied the complete plugin tree.
+            shutil.copytree(ROOT / "econ-review", destination, ignore=ignore)
+            shutil.copytree(ROOT / "econ-review", legacy, ignore=ignore)
+
+            result = self.run_installer(
+                ROOT / "scripts" / "install.sh", "--global", "--codex", env={"HOME": str(home)},
+            )
+
+            self.assertIn("Installed Codex (global)", result.stdout)
+            self.assertIn("Removed generated legacy Codex copy", result.stdout)
+            self.assertFalse(legacy.exists())
+            self.assertTrue((destination / "SKILL.md").is_file())
+            for plugin_only in (".claude-plugin", ".codex-plugin", "skills"):
+                self.assertFalse((destination / plugin_only).exists(), plugin_only)
+            repeated = self.run_installer(
+                ROOT / "scripts" / "install.sh", "--global", "--codex", env={"HOME": str(home)},
+            )
+            self.assertIn("Already current Codex (global)", repeated.stdout)
 
     def test_repeat_install_skips_exact_tree_and_repairs_drift(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -178,6 +178,8 @@ Use the following states honestly:
 - `bounded`: one or more pages or mathematical objects cannot be transcribed safely; the review may continue only within the recorded boundary.
 - `failed`: the source, resource limits, extraction, rendering, package validation, or atomic commit failed.
 
+Page geometry follows the displayed orientation. A page with `/Rotate 90` or `/Rotate 270` (for example a `pdflscape` landscape table) is recorded with its width and height swapped, matching both the Poppler word coordinates and the page render, and the page carries a rotation warning. Text that runs past the page edge, such as an overfull regression table, is kept in the reading surface with its box clipped to the page, and the page warns that the exhibit is probably cut off in the PDF itself; treat that as a layout finding after checking the render. Text that lies wholly outside the page is excluded with a warning, because readers of the PDF cannot see it. Table and figure crops start from the caption, so a crop can miss columns beside the caption block (as on a landscape table) or, when the caption sits below the table, the table body itself; before quoting or judging an exhibit, compare its crop with the full page render and read the page render when the crop is incomplete.
+
 Encrypted PDFs, malformed page counts, unsafe paths, excessive page/file limits, missing required tools, hash failures, and broken character spans fail closed. To avoid accidental disk and memory exhaustion from render expansion, ingestion defaults to at most 500 pages and 250 MB; an operator may raise those limits explicitly up to the 2,000-page and 1 GB hard caps. Embedded JavaScript, forms, attachments, and actions are never executed.
 
 ## Parser isolation boundary

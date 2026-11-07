@@ -1,0 +1,34 @@
+{
+  "schema_version": "0.1",
+  "review_id": "synthetic-valid-001",
+  "documents": [
+    {
+      "id": "start-here",
+      "title": "Start here",
+      "group": "overview",
+      "path": "README.md",
+      "order": 0
+    },
+    {
+      "id": "referee-report",
+      "title": "Referee report",
+      "group": "overview",
+      "path": "report.md",
+      "order": 10
+    },
+    {
+      "id": "editing-comments",
+      "title": "Editing comments",
+      "group": "reports",
+      "path": "editing-comments.md",
+      "order": 10
+    },
+    {
+      "id": "revision-plan",
+      "title": "Revision plan",
+      "group": "plan",
+      "path": "fix-plan.md",
+      "order": 10
+    }
+  ]
+}

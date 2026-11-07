@@ -33,6 +33,7 @@ from generate_reports import (  # noqa: E402
     validate_current_venue_fit,
 )
 from round_reconciliation import validate_round_reconciliation  # noqa: E402
+from generate_fix_plan import comment_labels as plan_comment_labels  # noqa: E402
 
 try:
     from jsonschema import Draft202012Validator, FormatChecker
@@ -4313,14 +4314,27 @@ def validate_review(review_dir: Path, *, strict_complete: bool = False) -> list[
             plan,
             re.MULTILINE,
         )
-        plan_numbers = [
-            int(value)
-            for value in re.findall(r"^### Comment ([0-9]+):\s+", plan, re.MULTILINE)
-        ]
-        if plan_numbers != list(range(1, len(plan_numbers) + 1)):
-            errors.append("fix-plan.md comment headings must be consecutively numbered from 1")
-        if len(plan_numbers) != len(plan_ids):
+        plan_headings = re.findall(
+            r"^### ((?:Editing c|C)omment [0-9]+):\s+[^\n]*\n<!-- finding_id: ([A-Z][A-Z0-9_-]*-[0-9]{2,}) -->\s*$",
+            plan,
+            re.MULTILINE,
+        )
+        plan_heading_count = len(re.findall(r"^### (?:Editing c|C)omment [0-9]+:\s+", plan, re.MULTILINE))
+        if plan_heading_count != len(plan_ids) or len(plan_headings) != len(plan_ids):
             errors.append("each fix-plan.md comment heading requires exactly one hidden finding_id")
+        else:
+            # Current plans reuse the report labels (Comment N / Editing comment N).
+            # Plans from before 0.3.0 numbered their own items 1..N.
+            expected_labels = plan_comment_labels([item for item in active if isinstance(item, dict)])
+            report_labels = all(expected_labels.get(finding_id) == label for label, finding_id in plan_headings)
+            legacy_labels = [label for label, _ in plan_headings] == [
+                f"Comment {index}" for index in range(1, len(plan_headings) + 1)
+            ]
+            if not (report_labels or legacy_labels):
+                errors.append(
+                    "fix-plan.md headings must reuse each finding's report label "
+                    "(Comment N or Editing comment N)"
+                )
         plan_id_counts = Counter(plan_ids)
         active_ids = {item.get("id") for item in active}
         unknown_plan_ids = sorted(set(plan_ids) - active_ids)
@@ -8488,7 +8502,11 @@ def validate_review(review_dir: Path, *, strict_complete: bool = False) -> list[
                             except (KeyError, TypeError, ValueError) as exc:
                                 errors.append(f"cannot render canonical editing-comments.md: {exc}")
                             else:
-                                if writing_report != expected_writing_report:
+                                if writing_report != expected_writing_report and (
+                                    writing_report != render_current_writing_report(
+                                        ledger, writing, run, legacy_comment_labels=True,
+                                    )
+                                ):
                                     errors.append(
                                         "editing-comments.md is not synchronized with evidence/writing.json, findings.json, and run.json"
                                     )

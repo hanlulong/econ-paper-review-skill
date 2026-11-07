@@ -33,6 +33,8 @@ Do not automatically demand a decomposition. A modern group-time, imputation, in
 
 Possible remedies include clarifying the estimand, re-aggregating compatible cohort-time effects, presenting a diagnostic decomposition when informative, or narrowing interpretation.
 
+When every unit is eventually treated (a universal rollout), record the last-treated cohort and the calendar periods and event horizons that still have a valid not-yet-treated comparison. There is no never-treated group, so never recommend never-treated controls, and note that not-yet-treated comparisons disappear once the last cohort is treated. Ask how the paper identifies effects at those later horizons and in the final periods, and whether the headline aggregation leans on them.
+
 ### DID-02 — Parallel trends and anticipation burden
 
 **Trigger:** the causal interpretation relies on untreated potential-outcome trends.
@@ -45,13 +47,13 @@ Sensitivity analysis is useful when it quantifies a plausible violation and the 
 
 **Trigger:** conditional parallel trends, changing composition, time-varying controls, or selective observation.
 
-Determine whether controls are predetermined, whether treatment affects observation or group membership, and whether overlap exists in the comparison sample. Recommend weighting, outcome-regression, doubly robust, trimming, or bounding approaches only when they address the actual conditioning problem.
+Determine whether controls are predetermined, whether treatment affects observation or group membership, and whether overlap exists in the comparison sample. Treat a time-varying control that treatment can move (investment, employment, prices, take-up, or any plausible channel) as a bad control: conditioning on it can absorb part of the effect and bias the remainder. Check in particular whether the paper reads that control's coefficient, or the change in the treatment coefficient when it is added, as evidence about the mechanism; that inference needs a mediation design, not a covariate. Recommend weighting, outcome-regression, doubly robust, trimming, or bounding approaches only when they address the actual conditioning problem.
 
 ### DID-04 — Dynamic presentation supports the claim
 
 **Trigger:** event-study or dynamic-effect language.
 
-Verify base period, omitted leads/lags, cohort composition by event time, simultaneous confidence needs, bins, and whether the plotted object matches the headline estimand. Distinguish evidence of anticipation from low power, compositional changes, or normalization artifacts.
+Verify base period, omitted leads/lags, cohort composition by event time, simultaneous confidence needs, bins, and whether the plotted object matches the headline estimand. Without never-treated units, a fully dynamic specification with unit and period fixed effects is not identified: a linear trend in event time is absorbed by the fixed effects. It needs at least one normalization beyond the usual reference period (for example two pre-periods set to zero) or a restriction such as binning the endpoint horizons, which assumes effects stop changing after that horizon. Trimming the sample to a window around the event does not remove the problem. Check which restriction the paper imposes, whether it is stated, and whether it rests on a no-anticipation or parallel-trends argument rather than an ad hoc choice; imposing those assumptions directly, as imputation estimators do, is the systematic alternative. Distinguish evidence of anticipation from low power, compositional changes, or normalization artifacts.
 
 ### DID-05 — Inference matches assignment and serial dependence
 
@@ -72,5 +74,7 @@ Audit the clustering or randomization level from the design, number and balance 
 - Andrew Goodman-Bacon (2021), “Difference-in-Differences with Variation in Treatment Timing,” *Journal of Econometrics*. [DOI record](https://doi.org/10.1016/j.jeconom.2021.03.014). Supports the 2×2 comparison decomposition and the need to understand timing-group comparisons. Verified 2026-07-11.
 - Jonathan Roth (2022), “Pretest with Caution: Event-Study Estimates after Testing for Parallel Trends,” *American Economic Review: Insights*. [AEA record](https://www.aeaweb.org/articles?id=10.1257/aeri.20210236). Supports low-power and conditioning concerns around pre-trend tests. Verified 2026-07-11.
 - Ashesh Rambachan and Jonathan Roth (2023), “A More Credible Approach to Parallel Trends,” *Review of Economic Studies*. [Journal record](https://doi.org/10.1093/restud/rdad018). Supports sensitivity analysis under structured deviations from parallel trends. Verified 2026-07-11.
+
+- Kirill Borusyak, Xavier Jaravel, and Jann Spiess (2024), “Revisiting Event-Study Designs: Robust and Efficient Estimation,” *Review of Economic Studies* 91(6): 3253–3285. [DOI record](https://doi.org/10.1093/restud/rdae007). Supports the under-identification of fully dynamic specifications without never-treated units, that it persists in samples trimmed to an event window, and the imputation estimator (Proposition 1, Section 3 and Appendix A.3 of the arXiv version, 2108.12419). Verified 2026-11-06.
 
 Use these sources to frame questions, not to imply that every DiD paper must run every associated procedure.

@@ -18,6 +18,10 @@ Inventory:
 - sample restrictions, variable construction, transformations, weights, seeds, tolerances, convergence rules, uncertainty calculations, and output post-processing;
 - whether the implementation matches the manuscript's stated assumptions, estimand, sample, units, and exhibit labels.
 
+### Venue replication standard (conditional)
+
+When the user names an economics venue or tier, or the manuscript asserts that data and code are or will be available, also check the package and the manuscript's data availability statement against the [Data and Code Availability Standard](https://datacodestandard.org/) (DCAS, version 1.0, 15 December 2022; 16 rules). Its [endorsing journals](https://datacodestandard.org/journals/) include the American Economic Review, AER: Insights, the four American Economic Journals, Econometrica, the Review of Economic Studies, the Economic Journal, the Journal of Political Economy, the Journal of the European Economic Association, Quantitative Economics, and Theoretical Economics (checked 2026-11-06; confirm the named journal's current policy, for example the [AEA Data and Code Availability Policy](https://www.aeaweb.org/journals/data/data-code-policy)). Under DCAS the Data Availability Statement must let an independent researcher repeat the access steps, including any limitations and the expected monetary and time cost of access (rule 1), so restricted, confidential, or licensed data need an access path rather than a promise; and the README must clearly indicate any omission of required parts of the package "due to legal requirements or limitations or other approved agreements" (rule 16). Treat the standard as the venue's expectation, not as a finding by itself: raise a comment only when the gap affects whether a reader or the data editor could reproduce a headline result, and keep it conditional when no endorsing venue is named.
+
 Static traceability can establish that the documented pipeline appears to implement a step. It cannot establish that the code runs, that unavailable data have the stated content, or that the method is substantively valid.
 
 ## Execute in stages when authorized

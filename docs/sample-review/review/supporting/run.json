@@ -1,0 +1,207 @@
+{
+  "schema_version": "0.4",
+  "review_id": "synthetic-valid-001",
+  "paper_title": "A Boundary Case in a Static Signaling Model",
+  "assessment_date": "2026-07-13",
+  "status": "complete",
+  "mode": "full",
+  "requested_mode": "full",
+  "delivered_mode": "full",
+  "mode_transition": "none",
+  "transition_reason": null,
+  "transition_source_review_id": null,
+  "finding_granularity": {
+    "policy": "one_per_defect",
+    "consolidation_policy": null,
+    "occurrence_basis": "related_locations",
+    "unique_defect_count": 2,
+    "occurrence_count": 3,
+    "evidence_record_count": 2
+  },
+  "provenance": {
+    "git_commit": null,
+    "git_dirty": null,
+    "source_tree_sha256": null,
+    "operating_system": "portable synthetic fixture",
+    "python_version": "portable synthetic fixture",
+    "node_version": null,
+    "package_versions": {},
+    "renderer": "latexmk-lualatex",
+    "semantic_backend": null,
+    "ocr_backend": null,
+    "command": [
+      "synthetic fixture generation"
+    ],
+    "model_identity": null,
+    "prompt_identity": "econ-review v0.4 synthetic fixture",
+    "agent_count": 1
+  },
+  "target": {
+    "venue": null,
+    "tier": "unspecified"
+  },
+  "paper_family": "theory",
+  "designs": [
+    "static signaling model"
+  ],
+  "requested_addons": [],
+  "identity_handling": "identity_minimized",
+  "assessment_boundary": {
+    "sources": [
+      {
+        "source_id": "SRC-01",
+        "path": "synthetic-paper.md",
+        "status": "fully_read",
+        "notes": "Synthetic fixture",
+        "sha256": "393cc4d5f9701fab039c77807fe6b47aaef9618fec9ee942652ad218fe5e53e5"
+      }
+    ],
+    "figures": "not_present",
+    "equations": "source_preserved",
+    "appendix": "not_available",
+    "notes": "No external literature claim was made."
+  },
+  "capabilities": {
+    "live_literature_search": false,
+    "replication_code": "not_supplied"
+  },
+  "comment_policy": {
+    "minimum_target": 1,
+    "maximum": null,
+    "substance_maximum": 100,
+    "writing_maximum": 30,
+    "exhaustive": true
+  },
+  "stage_status": {
+    "intake": "passed",
+    "reconstruction": "passed",
+    "frontier": "bounded",
+    "audit": "passed",
+    "counterargument": "passed",
+    "synthesis": "passed",
+    "verification": "passed",
+    "delivery": "passed"
+  },
+  "gates_loaded": [],
+  "counts": {
+    "critical": 1,
+    "major": 0,
+    "minor": 1,
+    "info": 0,
+    "essential": 1
+  },
+  "verification_passed": true,
+  "activated_burdens": [
+    {
+      "id": "claim_consistency",
+      "parent_id": "logical_validity",
+      "object_type": "claim",
+      "status": "active",
+      "activation_basis": "observed",
+      "triggers": [
+        {
+          "kind": "anchor",
+          "ref": "ANC-01",
+          "rationale": "The global uniqueness claim conflicts with the stated boundary case."
+        }
+      ],
+      "nonactivation_reason": null
+    },
+    {
+      "id": "logical_validity",
+      "parent_id": "logical_validity",
+      "object_type": "claim",
+      "status": "active",
+      "activation_basis": "observed",
+      "triggers": [
+        {
+          "kind": "anchor",
+          "ref": "ANC-01",
+          "rationale": "The proposition must be logically consistent with the boundary case."
+        }
+      ],
+      "nonactivation_reason": null
+    },
+    {
+      "id": "technical_validity",
+      "parent_id": "technical_validity",
+      "object_type": "theory",
+      "status": "active",
+      "activation_basis": "observed",
+      "triggers": [
+        {
+          "kind": "anchor",
+          "ref": "ANC-01",
+          "rationale": "The equilibrium statement requires a technically valid treatment of equality."
+        }
+      ],
+      "nonactivation_reason": null
+    },
+    {
+      "id": "methodological_validity",
+      "parent_id": "methodological_validity",
+      "object_type": "design",
+      "status": "active",
+      "activation_basis": "observed",
+      "triggers": [
+        {
+          "kind": "anchor",
+          "ref": "ANC-03",
+          "rationale": "The complete theoretical note is audited for whether its model domain can answer the stated uniqueness question."
+        }
+      ],
+      "nonactivation_reason": null
+    },
+    {
+      "id": "writing_mechanics",
+      "parent_id": "communication_integrity",
+      "object_type": "writing",
+      "status": "active",
+      "activation_basis": "observed",
+      "triggers": [
+        {
+          "kind": "anchor",
+          "ref": "ANC-02",
+          "rationale": "The proposition summary contains a subject-verb agreement error."
+        }
+      ],
+      "nonactivation_reason": null
+    },
+    {
+      "id": "source_support",
+      "parent_id": "source_support",
+      "object_type": "literature",
+      "status": "active",
+      "activation_basis": "observed",
+      "triggers": [
+        {
+          "kind": "anchor",
+          "ref": "ANC-03",
+          "rationale": "The bounded literature frontier was assessed against the complete manuscript scope."
+        }
+      ],
+      "nonactivation_reason": null
+    },
+    {
+      "id": "figure_integrity",
+      "parent_id": "exhibit_integrity",
+      "object_type": "exhibit",
+      "status": "not_applicable",
+      "activation_basis": "not_applicable",
+      "triggers": [],
+      "nonactivation_reason": "The complete rendered source contains no figure or graphical object."
+    }
+  ],
+  "telemetry": {
+    "passes": [
+      "reconstruction",
+      "substance audit",
+      "writing audit",
+      "verification"
+    ],
+    "agents_spawned": 0,
+    "wall_clock_seconds": null,
+    "input_tokens": null,
+    "output_tokens": null
+  }
+}

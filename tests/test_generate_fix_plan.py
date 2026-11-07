@@ -36,13 +36,72 @@ class GenerateFixPlanTests(unittest.TestCase):
                 output,
                 re.compile(rf"^### .*{re.escape(finding_id)}", re.MULTILINE),
             )
-        numbers = [int(value) for value in re.findall(r"^### Comment ([0-9]+):", output, re.MULTILINE)]
-        self.assertEqual(numbers, list(range(1, len(numbers) + 1)))
-        self.assertEqual(len(numbers), len(finding_ids))
+        labels = re.findall(r"^### ((?:Editing c|C)omment [0-9]+):", output, re.MULTILINE)
+        self.assertEqual(len(labels), len(finding_ids))
+        self.assertEqual(len(set(labels)), len(labels))
+
+    def test_plan_reuses_the_report_and_editing_comment_numbers(self) -> None:
+        output = MODULE.render(FIXTURE)
+        report = (FIXTURE / "report.md").read_text(encoding="utf-8")
+        editing = (FIXTURE / "editing-comments.md").read_text(encoding="utf-8")
+
+        def numbered(markdown: str) -> dict[str, str]:
+            return {
+                finding_id: number
+                for number, finding_id in re.findall(
+                    r"^### ([0-9]+)\. [^\n]*\n<!-- finding_id: ([A-Z][A-Z0-9_-]*-[0-9]{2,}) -->$",
+                    markdown,
+                    re.MULTILINE,
+                )
+            }
+
+        expected = {key: f"Comment {value}" for key, value in numbered(report).items()}
+        expected.update({key: f"Editing comment {value}" for key, value in numbered(editing).items()})
+        plan = dict(
+            (finding_id, label)
+            for label, finding_id in re.findall(
+                r"^### ((?:Editing c|C)omment [0-9]+): [^\n]*\n<!-- finding_id: ([A-Z][A-Z0-9_-]*-[0-9]{2,}) -->$",
+                output,
+                re.MULTILINE,
+            )
+        )
+        self.assertTrue(plan)
+        self.assertEqual(plan, expected)
+        self.assertIn("Editing comment 1:", output)
+        self.assertIn("so each number names the same issue in every document", output)
+
+    def test_objective_names_the_target_tier_in_prose(self) -> None:
+        self.assertEqual(MODULE.target_label({"venue": None, "tier": "leading-field"}), "a leading field journal")
+        self.assertEqual(MODULE.target_label({"venue": None, "tier": "top-general"}), "a top general-interest journal")
+        self.assertEqual(MODULE.target_label({"venue": None, "tier": "unspecified"}), "the intended audience")
+        self.assertEqual(MODULE.target_label({"venue": "Journal of Urban Economics", "tier": "leading-field"}), "Journal of Urban Economics")
+        for tier in ("top-general", "leading-field", "standard-field", "regional-specialized"):
+            self.assertNotEqual(MODULE.target_label({"venue": None, "tier": tier}), tier)
+            self.assertTrue(MODULE.target_label({"venue": None, "tier": tier}).startswith("a "))
+
+    def test_prerequisites_come_first_and_the_rest_keep_importance_order(self) -> None:
+        base = copy.deepcopy(MODULE.load(FIXTURE / "findings.json")["findings"][0])
+        rows = []
+        for finding_id, severity, rank, dependencies in (
+            ("MAJOR-01", "major", 1, ["MAJOR-03"]),
+            ("MAJOR-02", "major", 2, []),
+            ("MAJOR-03", "major", 3, []),
+            ("MINOR-01", "minor", 4, []),
+        ):
+            row = copy.deepcopy(base)
+            row.update({"id": finding_id, "severity": severity, "decision_role": "revision_value", "importance_rank": rank})
+            row["fix"]["dependencies"] = dependencies
+            rows.append(row)
+        # The old wave order listed every dependency-free item (including the
+        # minor one) before MAJOR-01.
+        self.assertEqual(
+            [row["id"] for row in MODULE.dependency_order(rows)],
+            ["MAJOR-02", "MAJOR-03", "MAJOR-01", "MINOR-01"],
+        )
 
     def test_actions_are_checkable_and_completion_language_is_explained(self) -> None:
         output = MODULE.render(FIXTURE)
-        headings = re.findall(r"^### Comment [0-9]+:", output, re.MULTILINE)
+        headings = re.findall(r"^### (?:Editing c|C)omment [0-9]+:", output, re.MULTILINE)
         checkboxes = re.findall(r"^- \[ \] \*\*Action:\*\*", output, re.MULTILINE)
         self.assertEqual(len(checkboxes), len(headings))
         self.assertIn("Work from P0 to P2", output)
@@ -111,6 +170,18 @@ class GenerateFixPlanTests(unittest.TestCase):
             "what": "Revise Proposition 1.",
             "how": "Revise Proposition 1 and its proof.",
         }, "LOGIC-01"), "Revise Proposition 1 and its proof.")
+
+    def test_action_keeps_the_full_implementation_steps(self) -> None:
+        # The plan is acted on, so paraphrase-aware trimming is left to the report.
+        fix = {
+            "what": "Change 34 percent to 3.4 percent and audit every headline magnitude for decimal consistency.",
+            "how": "Replace 34 percent with 3.4 percent and synchronize the abstract.",
+        }
+        self.assertEqual(MODULE.combined_action(fix, "NUM-01"), f"{fix['what']} {fix['how']}")
+        self.assertEqual(
+            MODULE.combined_action({"what": "Report the clustering level.", "how": "Cluster by state."}, "SE-01"),
+            "Report the clustering level. Cluster by state.",
+        )
 
     def test_migration_boilerplate_is_rejected(self) -> None:
         row = copy.deepcopy(MODULE.load(FIXTURE / "findings.json")["findings"][0])

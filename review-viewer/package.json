@@ -21,8 +21,8 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern static-dist"
   },
   "dependencies": {
-    "katex": "^0.17.0",
-    "next": "16.2.10",
+    "katex": "0.18.10",
+    "next": "16.4.5",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-markdown": "^10.1.0",
@@ -38,7 +38,7 @@
     "@vitejs/plugin-react": "6.0.3",
     "@vitejs/plugin-rsc": "0.5.27",
     "eslint": "9.39.4",
-    "eslint-config-next": "16.2.10",
+    "eslint-config-next": "16.4.5",
     "react-server-dom-webpack": "19.2.7",
     "typescript": "5.9.3",
     "vinext": "0.0.50",
@@ -46,7 +46,8 @@
     "wrangler": "4.110.0"
   },
   "overrides": {
-    "postcss": "8.5.10"
+    "postcss": "8.5.32",
+    "katex": "$katex"
   },
   "type": "module"
 }

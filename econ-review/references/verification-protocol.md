@@ -20,6 +20,7 @@ For every surviving finding, including minor comments, record:
 | Evidence exists and matches the ledger | pass/fail |
 | Locator resolves | pass/fail |
 | Quote is verbatim or typed evidence is exact | pass/fail |
+| Quote runs to a sentence or clause boundary (or marks omissions) and keeps the words the concern depends on | pass/fail |
 | Any contradiction preserves the exact operative words and qualifiers on both sides | pass/fail/not applicable |
 | Omission search scope is explicit | pass/fail/not applicable |
 | Main text, notes, appendix, and relevant exhibits checked | pass/fail |

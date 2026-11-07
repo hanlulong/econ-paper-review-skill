@@ -1058,6 +1058,30 @@ class ValidateReviewTests(unittest.TestCase):
     def test_valid_fixture_passes(self) -> None:
         self.assertEqual(MODULE.validate_review(FIXTURE), [])
 
+    def test_editing_comments_finalized_before_0_3_0_still_validate(self) -> None:
+        # v0.2.2 packages say "Comment N" in editing-comments.md cross-references.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "review"
+            shutil.copytree(FIXTURE, target)
+            load = lambda name: json.loads((target / name).read_text(encoding="utf-8"))  # noqa: E731
+            legacy = MODULE.render_current_writing_report(
+                load("findings.json"), load("evidence/writing.json"), load("run.json"), legacy_comment_labels=True,
+            )
+            current = (target / "editing-comments.md").read_text(encoding="utf-8")
+            self.assertNotEqual(legacy, current)
+            self.assertIn("Editing comment 1", current)
+            self.assertNotIn("Editing comment 1", legacy)
+            self.assertIn("See Comment 1:", legacy)
+            (target / "editing-comments.md").write_text(legacy, encoding="utf-8")
+            refresh_finalization_receipt(target)
+            self.assertEqual(MODULE.validate_review(target), [])
+            (target / "editing-comments.md").write_text(legacy.replace("Comment 1", "Comment 9", 1), encoding="utf-8")
+            refresh_finalization_receipt(target)
+            self.assertIn(
+                "editing-comments.md is not synchronized with evidence/writing.json, findings.json, and run.json",
+                MODULE.validate_review(target),
+            )
+
     def test_coarse_family_metadata_does_not_activate_a_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "review"

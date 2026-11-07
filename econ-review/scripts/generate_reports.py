@@ -282,6 +282,178 @@ def clean_join(*values: Any) -> str:
     return " ".join(parts)
 
 
+# Paraphrase-aware sentence deduplication for author-facing prose. The ledger
+# keeps fix.what/fix.how and the Concern fields separate, and authors often
+# restate the same repair in each. Exact-substring checks miss such
+# paraphrases, so a later sentence is dropped when most of its content words
+# (after light stemming and folding of common repair verbs) already appeared.
+_DEDUP_STOPWORDS = frozenset("""
+a an the and or but if then than that this these those of to in on at by for with from as is are was were be been
+being it its into onto over under not no nor so such only also each every any all both either neither which who whom
+whose what when where how why do does did done can could should would may might must will shall their there they them
+our we you your his her one
+""".split())
+_DEDUP_SYNONYMS = {
+    **dict.fromkeys(("replace", "correct", "substitute", "rewrite", "revise", "fix", "amend", "edit"), "change"),
+    **dict.fromkeys(("delete", "drop", "withdraw", "omit", "cut"), "remove"),
+    **dict.fromkeys(("report", "present", "display", "add", "include", "state", "describe"), "show"),
+    **dict.fromkeys(("reproduce", "regenerate", "create", "rebuild", "recompute", "re-estimate", "rerun"), "rebuild"),
+    **dict.fromkeys(("audit", "compare", "verify", "check", "inspect", "confirm", "synchronize", "reconcile"), "check"),
+    **dict.fromkeys(("assertion", "claim", "sentence", "statement", "language"), "claim"),
+}
+# A sentence ends at ., ! or ? (optionally followed by a closing quote or
+# bracket) and whitespace, when the next sentence starts with a capital letter,
+# an opening quote or a bracket. Sentences rarely start with a digit, so a
+# locator such as "Sec. 3" or "p. 7" is never split.
+_SENTENCE_BREAK_CANDIDATE = re.compile(r"[.!?][”’\"')\]]*\s+(?=[A-Z“‘\"(\[])")
+# Abbreviations that end with a period but do not end a sentence (compared
+# case-insensitively, without the final period).
+_NON_TERMINAL_ABBREVIATIONS = frozenset("""
+al e.g i.e cf vs viz approx resp ca fig figs eq eqs eqn sec secs sect ch chap app apps tab tabs col cols
+p pp no nos vol vols prop props thm thms lem lemma cor def defs ass assn rem ex obs para fn n nn ref refs
+dr mr mrs ms prof st jr sr
+""".split())
+# A conditional or optional sentence adds a contingency even when it reuses words.
+_CONTINGENT_SENTENCE = re.compile(r"^(?:If|Otherwise|Optionally|Alternatively|Where|Unless|When|Should)\b")
+# Generic repair verbs (after synonym folding). A sentence whose only new
+# content words are these restates the repair ("Change the the to the.").
+_GENERIC_REPAIR_WORDS = frozenset({"change", "remove", "show", "rebuild", "check", "claim"})
+_CJK = "぀-ヿ㐀-䶿一-鿿가-힯豈-﫿"
+_CJK_RUN = re.compile(f"[{_CJK}]+")
+_QUOTED = re.compile(
+    "“([^”]+)”|‘([^’]+)’|\"([^\"]+)\"|(?<![A-Za-z0-9])'([^']+)'(?![A-Za-z0-9])"
+)
+_NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def _dedup_stem(word: str) -> str:
+    for suffix in ("ations", "ation", "ings", "ing", "edly", "ed", "es", "s", "ly"):
+        if len(word) > len(suffix) + 3 and word.endswith(suffix):
+            return word[: -len(suffix)]
+    return word
+
+
+def content_words(text: str) -> set[str]:
+    """Content words of *text*: stemmed, synonym-folded words and numbers.
+
+    Letters from any script count. Runs of Chinese, Japanese or Korean
+    characters, which are not separated by spaces, contribute character
+    bigrams (or the single character).
+    """
+    words: set[str] = set()
+    lowered = text.lower()
+    for run in _CJK_RUN.findall(lowered):
+        words.update(run[index:index + 2] for index in range(max(1, len(run) - 1)))
+    for raw in re.findall(r"[^\W\d_](?:[^\W_]|['-])*|\d+(?:\.\d+)?", _CJK_RUN.sub(" ", lowered)):
+        word = raw.strip("'-")
+        if not word or word in _DEDUP_STOPWORDS:
+            continue
+        words.add(_dedup_stem(_DEDUP_SYNONYMS.get(word, word)))
+    return words
+
+
+def anchors(text: str) -> set[str]:
+    """Specific tokens a restatement would not add: numbers, quoted strings, identifiers.
+
+    Identifiers are all-capital tokens (``DOI``, ``TWFE``, ``F``), tokens that
+    mix letters and digits (``2SLS``, ``H1``), and tokens with an underscore or
+    backslash. The first word of a sentence and the words ``I`` and ``A`` are
+    not identifiers.
+    """
+    found: set[str] = set()
+    for match in _QUOTED.finditer(text):
+        quoted = next(group for group in match.groups() if group is not None)
+        found.add("q:" + " ".join(quoted.lower().split()))
+    found.update("n:" + number.replace(",", "") for number in _NUMBER.findall(text))
+    for sentence in split_sentences(text) or [text]:
+        tokens = re.findall(r"[\w\\][\w\\.'-]*", sentence)
+        for position, token in enumerate(tokens):
+            token = token.rstrip(".'-")
+            if not token or token in {"I", "A"}:
+                continue
+            has_letter = any(character.isalpha() for character in token)
+            identifier = (
+                "_" in token or "\\" in token
+                or (has_letter and any(character.isdigit() for character in token))
+                or (has_letter and token.upper() == token and token.lower() != token
+                    and (position > 0 or len(token) > 1))
+            )
+            if identifier:
+                found.add("i:" + token)
+    return found
+
+
+def split_sentences(text: str) -> list[str]:
+    text = " ".join(text.split())
+    sentences: list[str] = []
+    start = 0
+    for match in _SENTENCE_BREAK_CANDIDATE.finditer(text):
+        before = text[start:match.start()]
+        last = re.search(r"([A-Za-z][A-Za-z.]*)$", before)
+        if last:
+            word = last.group(1)
+            if (len(word) == 1 and word.isupper()) or word.lower() in _NON_TERMINAL_ABBREVIATIONS:
+                continue
+        sentences.append(text[start:match.end()].strip())
+        start = match.end()
+    sentences.append(text[start:].strip())
+    return [sentence for sentence in sentences if sentence]
+
+
+def novel_sentences(
+    leading: list[str], candidates: list[str], *, threshold: float, context: str = "",
+) -> list[str]:
+    """Return *candidates* sentences that add something to *leading* (and *context*).
+
+    A candidate is dropped only when it adds nothing specific: it is never
+    dropped when it states a contingency, introduces a number, quoted string
+    or identifier not seen before, or yields no content words to compare. It
+    is dropped when its only new content words are generic repair verbs
+    ("Change the the to the."), or when it has more than two content words
+    and at least *threshold* of them were already seen.
+    """
+    seen_text = " ".join([context, *leading])
+    seen = content_words(seen_text)
+    seen_anchors = anchors(seen_text)
+    kept: list[str] = []
+    for sentence in candidates:
+        words = content_words(sentence)
+        novel = words - seen
+        restated = (
+            bool(words)
+            and not _CONTINGENT_SENTENCE.match(sentence)
+            and not (anchors(sentence) - seen_anchors)
+            and (
+                not (novel - _GENERIC_REPAIR_WORDS)
+                or (len(words) > 2 and len(words & seen) >= threshold * len(words))
+            )
+        )
+        if restated:
+            continue
+        kept.append(sentence)
+        seen |= words
+        seen_anchors |= anchors(sentence)
+    return kept
+
+
+def merge_repair(what: str, how: str) -> str:
+    """State one repair: the primary text plus only the new parts of the second."""
+    what = " ".join(what.split()).strip()
+    how = " ".join(how.split()).strip()
+    if not what or not how:
+        return what or how
+
+    def normalized(value: str) -> str:
+        return "".join(character.lower() for character in value if character.isalnum())
+
+    what_key, how_key = normalized(what), normalized(how)
+    if what_key == how_key or how_key in what_key:
+        return what
+    if what_key in how_key:
+        return how
+    return " ".join([what, *novel_sentences([what], split_sentences(how), threshold=0.4)])
+
+
 def display_evidence(row: dict[str, Any]) -> dict[str, Any]:
     context = finding_context(row)
     evidence_rows = row.get("evidence")
@@ -358,6 +530,16 @@ def relevant_evidence(row: dict[str, Any]) -> str:
         "computed_result",
     }:
         return content
+    if representation == "verbatim":
+        # A verbatim excerpt copied from a PDF text layer keeps the line breaks
+        # of the typeset page. Rejoin those lines into running prose so a
+        # quotation reads as the sentence it is; blank-line paragraph breaks
+        # survive. A line that ends in a hyphen before a lowercase letter is
+        # joined without a space and keeps the hyphen ("labor-market"), since
+        # the text layer cannot tell a compound from a soft hyphen.
+        content = content.replace("\r\n", "\n").replace("\r", "\n")
+        content = re.sub(r"(?<=\w-)[ \t]*(?<!\n)\n(?!\n)[ \t]*(?=[a-z])", "", content)
+        content = re.sub(r"[ \t]*(?<!\n)\n(?!\n)[ \t]*", " ", content)
     return quote(content)
 
 
@@ -441,20 +623,24 @@ def constructive_feedback(row: dict[str, Any]) -> str:
     how = optional_text(fix, "how", f"{context}.fix")
     if not what and not how:
         raise ValueError(f"{context}.fix must provide what or how for Suggestions")
+    return merge_repair(what, how)
 
-    def normalized(value: str) -> str:
-        return "".join(character.lower() for character in value if character.isalnum())
 
-    if not what:
-        return how
-    if not how:
-        return what
-    what_key, how_key = normalized(what), normalized(how)
-    if what_key == how_key or how_key in what_key:
-        return what
-    if what_key in how_key:
-        return how
-    return clean_join(what, how)
+def restated_concern_removed(issue: str, *fields: str) -> str:
+    """Join the Concern fields, dropping sentences that restate the Issue or each other.
+
+    The first Concern sentence is always kept. The threshold is higher than for
+    Suggestions because explanatory sentences legitimately reuse the issue's terms.
+    """
+    sentences = [sentence for field in fields for sentence in split_sentences(field or "")]
+    if not sentences:
+        return ""
+    unique: list[str] = []
+    for sentence in sentences:
+        if sentence not in unique:
+            unique.append(sentence)
+    first, rest = unique[0], unique[1:]
+    return " ".join([first, *novel_sentences([first], rest, threshold=0.75, context=issue)])
 
 
 def detail_block(number: int, row: dict[str, Any]) -> str:
@@ -473,7 +659,8 @@ def detail_block(number: int, row: dict[str, Any]) -> str:
         f"{context}.evidence[0].locator",
     )
     title = optional_text(row, "title", context) or issue
-    concern = clean_join(
+    concern = restated_concern_removed(
+        issue,
         optional_text(row, "why_it_matters", context),
         optional_text(row, "reader_effect", context),
         optional_text(row, "evidence_boundary", context),
@@ -832,7 +1019,23 @@ def _source_citation(source: dict[str, Any]) -> str:
     metadata = source.get("bibliographic_metadata")
     author_names: list[str] = []
     year = ""
+    venue = ""
+    doi = ""
     if isinstance(metadata, dict):
+        raw_venue = metadata.get("venue")
+        if isinstance(raw_venue, str) and raw_venue.strip():
+            venue = " ".join(raw_venue.split())
+        raw_identifiers = metadata.get("identifiers")
+        if isinstance(raw_identifiers, list):
+            doi = next(
+                (
+                    " ".join(str(row.get("value")).split())
+                    for row in raw_identifiers
+                    if isinstance(row, dict) and row.get("scheme") == "doi"
+                    and isinstance(row.get("value"), str) and row.get("value").strip()
+                ),
+                "",
+            )
         raw_authors = metadata.get("authors")
         if isinstance(raw_authors, list):
             author_names = [
@@ -857,7 +1060,13 @@ def _source_citation(source: dict[str, Any]) -> str:
     raw_url = source.get("url")
     linked_title = f"[{title_label}](<{raw_url}>)" if isinstance(raw_url, str) and raw_url.startswith("https://") else title_label
     prefix = authors + (f" ({year})" if authors and year else "")
-    return f"{prefix}, {linked_title}" if prefix else linked_title
+    citation = f"{prefix}, {linked_title}" if prefix else linked_title
+    # Name the venue and DOI so a reader can check the comparator's standing.
+    if venue:
+        citation += f", {_markdown_label(venue)}"
+    if doi:
+        citation += f", doi:{_markdown_label(doi)}"
+    return citation
 
 
 MATERIAL_LITERATURE_RELATIONS = {
@@ -1375,8 +1584,15 @@ def render_current_writing_report(
     ledger: dict[str, Any],
     writing_audit: dict[str, Any],
     run: dict[str, Any],
+    *,
+    legacy_comment_labels: bool = False,
 ) -> str:
-    """Project the current editing comments entirely from canonical JSON state."""
+    """Project the current editing comments entirely from canonical JSON state.
+
+    ``legacy_comment_labels`` reproduces the pre-0.3.0 cross-reference wording
+    ("Comment N") so the validator can accept packages finalized by earlier
+    releases.
+    """
     if writing_audit.get("schema_version") != "0.4":
         raise ValueError("canonical editing-comments generation requires writing audit schema_version 0.4")
     if writing_audit.get("review_id") != ledger.get("review_id") or run.get("review_id") != ledger.get("review_id"):
@@ -1405,8 +1621,11 @@ def render_current_writing_report(
         for row in writing_rows
         if isinstance(row.get("id"), str)
     }
+    # "Editing comment N" keeps these cross-references distinct from the
+    # referee report's "Comment N" numbering; the revision plan uses both.
+    label_prefix = "Comment" if legacy_comment_labels else "Editing comment"
     comment_labels = {
-        row["id"]: f"Comment {index}: {optional_text(row, 'title', finding_context(row)) or required_text(row, 'issue', finding_context(row))}"
+        row["id"]: f"{label_prefix} {index}: {optional_text(row, 'title', finding_context(row)) or required_text(row, 'issue', finding_context(row))}"
         for index, row in enumerate(writing_rows, start=1)
         if isinstance(row.get("id"), str)
     }
@@ -1576,7 +1795,11 @@ def render_current_writing_report(
             lines.extend(["No correction is needed in this category.", ""])
         related_comments = related_comment_list(row, comment_labels)
         if related_comments != "—":
-            lines.extend([f"See {related_comments} for the full explanation and revision request.", ""])
+            see_also = (
+                related_comments if legacy_comment_labels
+                else related_comments.replace("Editing comment ", "editing comment ")
+            )
+            lines.extend([f"See {see_also} for the full explanation and revision request.", ""])
         lines.extend([
             f"**Why it matters:** {required_text(row, 'reader_consequence', f'evidence/writing.json.mechanics[{index}]')}",
             "",
@@ -1839,7 +2062,17 @@ def main() -> int:
             outputs[writing_path] = render_writing_report(args.review_dir, ledger, writing_audit, run)
         for destination, output in outputs.items():
             if args.check:
-                if not destination.exists() or destination.read_text(encoding="utf-8") != output:
+                existing = destination.read_text(encoding="utf-8") if destination.exists() else None
+                legacy_writing_labels = (
+                    destination == writing_path
+                    and existing is not None
+                    and isinstance(writing_audit, dict)
+                    and writing_audit.get("schema_version") == "0.4"
+                    and existing == render_current_writing_report(
+                        ledger, writing_audit, run, legacy_comment_labels=True,
+                    )
+                )
+                if existing != output and not legacy_writing_labels:
                     raise ValueError(f"{destination} is not synchronized with canonical JSON state")
             else:
                 atomic_write_text(args.review_dir, destination.relative_to(args.review_dir), output)
