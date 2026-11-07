@@ -35,6 +35,7 @@ ROOT_FILES = {
     Path(".gitattributes"),
     Path(".gitignore"),
     Path("CHANGELOG.md"),
+    Path("CITATION.cff"),
     Path("CONTRIBUTING.md"),
     Path("INSTALL.md"),
     Path("LICENSE"),

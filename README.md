@@ -22,7 +22,7 @@
 
 ## What you get
 
-A finished review lands in a clean `review/` folder next to your paper. If that folder is synced (an Overleaf project in Dropbox, iCloud Drive, OneDrive) or tracked by git, the agent asks first, because the review is confidential:
+A finished review lands in a clean `review/` folder next to your paper. If that folder is synced (an Overleaf project in Dropbox, iCloud Drive, OneDrive, Box) or tracked by git, the agent asks first, because the review is confidential:
 
 - **`paper-review.pdf`** — the primary report: a professionally typeset, bookmarked PDF with the referee report, every detailed comment, editing comments, and the revision plan.
 - **`reports/`** — the same reports as Markdown. The revision plan is a prioritized to-do list written to be handed straight to your agents.
@@ -67,8 +67,10 @@ before v0.3.0, which carried plugin manifests and therefore appeared as
 Installing needs an existing Python 3.10+ with working `venv` and pip
 bootstrapping support. On macOS the built-in `python3` is 3.9; install Python
 3.13 or 3.14 from [python.org](https://www.python.org/downloads/macos/) (3.15
-is not tested yet), or run `brew install python@3.12` or
-`uv python install 3.12`, before pasting the prompt. Full manuscript-PDF ingestion also needs
+worked in a macOS test, but some dependencies do not yet ship ready-made 3.15
+packages, so 3.13 or 3.14 is the safer choice), or run
+`brew install python@3.12` or `uv python install 3.12`, before pasting the
+prompt. Full manuscript-PDF ingestion also needs
 [Poppler](https://poppler.freedesktop.org/) on `PATH`; TeX, Pandoc, Node.js, and
 administrator access are not required.
 
@@ -81,6 +83,10 @@ cd econ-paper-review-skill
 python3 scripts/install_econ_review.py --dry-run --global --all --with-review-desk
 python3 scripts/install_econ_review.py --global --all --with-review-desk
 ```
+
+On macOS, if `python3 --version` still reports 3.9 after you install a newer
+Python, run these commands with the versioned interpreter, for example
+`python3.12` instead of `python3`.
 
 Use `--claude` or `--codex` instead of `--all` when installing for only one
 client. On native Windows, run
@@ -182,7 +188,7 @@ Any kind of economics paper: empirical, experimental, descriptive, prediction an
 
 ## What it does not do
 
-It won't write your paper, estimate your acceptance odds, or invent citations. When it couldn't check something — a dataset it didn't have, a figure it couldn't read — it says so instead of pretending. And it doesn't claim to beat human referees: treat it as a tough extra reader before submission, not a replacement for peer review.
+It won't write your paper, estimate your acceptance odds, or invent citations. When it couldn't check something — a dataset it didn't have, a figure it couldn't read — it says so instead of pretending. And it doesn't claim to beat human referees: treat it as a tough extra reader before submission, not a replacement for peer review. It also won't guess whether a paper was written with AI: it reviews the paper, not how it was produced.
 
 Refereeing a submission for a journal? Check the journal's reviewer AI policy first. Many journals bar uploading a submission to AI tools or require you to disclose AI use, and the skill asks before it reviews a manuscript you did not write.
 
@@ -250,4 +256,4 @@ Contributions are welcome, and contributors retain ownership of their work. Befo
 
 ---
 
-If this catches something a referee would have caught, star the repo so other economists find it — and if it gets something wrong, open an issue. Bad comments are bugs here, not opinions.
+If this catches something a referee would have caught, star the repo so other economists find it — and if it gets something wrong or misses something, open an issue. Bad comments are bugs here, not opinions.

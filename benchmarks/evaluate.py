@@ -121,6 +121,12 @@ def evaluate_case(case: dict, *, reviews: Path = REVIEWS, finalizer: Path = FINA
             and finding.get("report_channel", "substance") == "substance"
         )
     ]
+    active_writing_count = sum(
+        1
+        for finding in findings
+        if finding.get("status") in {"open", "challenged"}
+        and finding.get("report_channel", "substance") == "writing"
+    )
 
     required_matches = {
         concept["id"]: concept_matches(finding_payloads, concept["patterns"])
@@ -163,6 +169,9 @@ def evaluate_case(case: dict, *, reviews: Path = REVIEWS, finalizer: Path = FINA
         "required_issue_matches": required_matches,
         "forbidden_false_positives": forbidden,
         "forbidden_issue_matches": forbidden_matches,
+        # Context for reading recall: more findings can match more patterns.
+        "active_substance_count": len(finding_payloads),
+        "active_writing_count": active_writing_count,
     }
 
 

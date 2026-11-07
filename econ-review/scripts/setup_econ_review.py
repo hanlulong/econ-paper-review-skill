@@ -293,6 +293,12 @@ def _write_json(path: Path, value: object) -> None:
     )
 
 
+def _private_json_bytes(value: object) -> bytes:
+    """Serialize a user-owned descriptor exactly as it is written to disk."""
+
+    return (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
+
+
 def _atomic_private_json(path: Path, value: object) -> None:
     """Replace a user-owned descriptor without following an existing link."""
 
@@ -304,9 +310,7 @@ def _atomic_private_json(path: Path, value: object) -> None:
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
         descriptor = os.open(temporary, flags, 0o600)
         try:
-            data = (
-                json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
-            ).encode("utf-8")
+            data = _private_json_bytes(value)
             with os.fdopen(descriptor, "wb") as stream:
                 descriptor = -1
                 stream.write(data)
@@ -1020,15 +1024,29 @@ def record_support_runtime(
         "runtime": str(actual_runtime.absolute()),
         "schema_version": "1",
     }
+    previous: bytes | None = None
+    if descriptor.is_file() and not _is_link_or_junction(descriptor):
+        try:
+            previous = descriptor.read_bytes()
+        except OSError:
+            previous = None
+    unchanged = previous == _private_json_bytes(value)
     if dry_run:
-        print(f"Would record managed runtime for Econ Review: {descriptor}")
+        if unchanged:
+            print(f"Would keep current managed runtime record for Econ Review: {descriptor}")
+        else:
+            print(f"Would record managed runtime for Econ Review: {descriptor}")
         return
     if python.absolute() != actual_python.absolute():
         raise InstallError("managed Python path changed before its descriptor was written")
     if not runtime_is_reusable(runtime, source):
         raise InstallError("refusing to record a managed runtime that failed verification")
+    # Always rewrite: the atomic write also restores private permissions.
     _atomic_private_json(descriptor, value)
-    print(f"Recorded managed runtime for Econ Review: {descriptor}")
+    if unchanged:
+        print(f"Already current managed runtime record for Econ Review: {descriptor}")
+    else:
+        print(f"Recorded managed runtime for Econ Review: {descriptor}")
 
 
 def recorded_runtime_python(descriptor: Path, source: Path) -> Path | None:
@@ -1076,9 +1094,16 @@ def ensure_runtime(
 ) -> Path:
     _actual_runtime, python = resolve_runtime_location(runtime)
     if dry_run:
-        action = "Would verify and reuse or replace" if runtime.exists() else "Would create"
-        print(f"{action} managed Python runtime: {runtime}")
-        print(f"Would install core requirements from: {source / 'requirements-core.txt'}")
+        requirements = source / "requirements-core.txt"
+        if not runtime.exists():
+            print(f"Would create managed Python runtime: {runtime}")
+            print(f"Would install core requirements from: {requirements}")
+        elif refresh:
+            print(f"Would replace managed Python runtime: {runtime}")
+            print(f"Would install core requirements from: {requirements}")
+        else:
+            print(f"Would verify and reuse or replace managed Python runtime: {runtime}")
+            print(f"Would install core requirements from {requirements} only if that runtime is replaced")
         return python
     if not refresh and reuse_if_bound and runtime_is_reusable(runtime, source):
         actual_runtime, python = resolve_runtime_location(runtime)
@@ -1185,20 +1210,20 @@ def install_one(
     *,
     dry_run: bool,
     plugin_shaped_manifest: dict[str, str] | None = None,
-) -> None:
+) -> bool:
+    """Install one skill copy; return whether it was (or would be) written."""
+
     require_safe_skill_destination(destination, label)
     if dry_run:
-        state = (
-            "already current"
-            if destination_is_current(destination, source_manifest, runtime_python)
-            else "install"
-        )
-        print(f"Would {state} {label}: {destination}")
-        return
+        if destination_is_current(destination, source_manifest, runtime_python):
+            print(f"Would keep current {label}: {destination}")
+            return False
+        print(f"Would install {label}: {destination}")
+        return True
     if destination_is_current(destination, source_manifest, runtime_python):
         discard_bytecode_caches(destination, set(source_manifest))
         print(f"Already current {label}: {destination}")
-        return
+        return False
     destination.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix=".econ-review-stage-", dir=destination.parent))
     rollback = destination.with_name(f".{destination.name}.backup-{uuid.uuid4().hex}")
@@ -1264,6 +1289,7 @@ def install_one(
             else:
                 shutil.rmtree(rollback)
     print(f"Installed {label}: {destination}")
+    return True
 
 
 def legacy_codex_destinations() -> list[Path]:
@@ -1290,8 +1316,11 @@ def migrate_legacy_codex_copies(
     *,
     dry_run: bool,
     plugin_shaped_manifest: dict[str, str] | None = None,
-) -> None:
+) -> bool:
     """Deactivate only historical Codex copies after the current install exists.
+
+    Return whether any legacy copy was (or, in a dry run, would be) removed
+    or moved out of discovery.
 
     ``plugin_shaped_manifest`` describes the complete source tree, including
     the native-plugin payload that releases before 0.3.0 also copied into
@@ -1308,6 +1337,7 @@ def migrate_legacy_codex_copies(
         runtime_python,
     ):
         raise InstallError("refusing legacy migration before the current Codex skill is verified")
+    changed = False
     for legacy in legacy_codex_destinations():
         if not _path_present(legacy):
             continue
@@ -1342,6 +1372,7 @@ def migrate_legacy_codex_copies(
                 and destination_matches_source(legacy, plugin_shaped_manifest)
             )
         )
+        changed = True
         if dry_run:
             action = "remove generated" if generated else "preserve modified"
             print(f"Would {action} legacy Codex copy: {legacy}")
@@ -1363,6 +1394,7 @@ def migrate_legacy_codex_copies(
         runtime_python,
     ):
         raise InstallError("the current Codex skill failed verification after legacy migration")
+    return changed
 
 
 def _strict_json_object(data: bytes, label: str) -> dict[str, object]:
@@ -1792,7 +1824,9 @@ def install_review_desk(
             launcher_temporary.unlink(missing_ok=True)
             pointer_temporary.unlink(missing_ok=True)
         print(f"Installed Review Desk launcher: {launcher}")
-    elif not dry_run:
+    elif dry_run:
+        print(f"Would keep current Review Desk launcher: {launcher}")
+    else:
         print(f"Already current Review Desk launcher: {launcher}")
     launcher_python = runtime_python or Path(sys.executable)
     if (system or platform.system()) == "Windows" and runtime_python is not None:
@@ -2023,8 +2057,9 @@ def _perform_setup(
             source,
             dry_run=args.dry_run,
         )
+    skill_changed = False
     for destination, label in destinations:
-        install_one(
+        skill_changed |= install_one(
             source,
             files,
             source_manifest,
@@ -2035,7 +2070,7 @@ def _perform_setup(
             plugin_shaped_manifest=plugin_shaped_manifest,
         )
     if scope == "global" and not args.support_only and args.agent in {"all", "codex"}:
-        migrate_legacy_codex_copies(
+        skill_changed |= migrate_legacy_codex_copies(
             source_manifest,
             runtime_python,
             dry_run=args.dry_run,
@@ -2090,9 +2125,18 @@ def _perform_setup(
             "codex": "Codex",
             "all": "Claude Code and Codex",
         }
-        print(
-            f"Restart or reload {clients[args.agent]} so it discovers the installed skill."
-        )
+        name = clients[args.agent]
+        plural = args.agent == "all"
+        if skill_changed:
+            print(
+                f"Restart or reload {name} so "
+                f"{'they discover' if plural else 'it discovers'} the installed skill."
+            )
+        else:
+            print(
+                f"No skill files changed. If {name} {'do' if plural else 'does'} not list "
+                f"Econ Review yet, restart or reload {'them' if plural else 'it'}."
+            )
     return 0 if healthy else 2
 
 
@@ -2101,7 +2145,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if sys.version_info < MINIMUM_PYTHON:
         raise InstallError(
             "Python 3.10 or newer is required; "
-            "on macOS, install Python 3.13 or 3.14 from https://www.python.org/downloads/macos/ or run 'brew install python@3.12' or 'uv python install 3.12'"
+            "on macOS, install Python 3.13 or 3.14 from https://www.python.org/downloads/macos/ or run 'brew install python@3.12' or 'uv python install 3.12', "
+            "then rerun the same command with that versioned interpreter, for example python3.12 instead of python3 "
+            "(uv installs it in ~/.local/bin)"
         )
     source = (args.source or SKILL_ROOT).expanduser().absolute()
     if not args.with_review_desk and (args.review_desk_dir or args.review_desk_bundle):

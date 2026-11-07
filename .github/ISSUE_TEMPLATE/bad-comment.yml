@@ -3,6 +3,18 @@ description: A review comment was wrong, unfair, or invented — bad comments ar
 title: "[Bad comment]: "
 labels: ["bad-comment"]
 body:
+  - type: dropdown
+    id: what
+    attributes:
+      label: What went wrong
+      options:
+        - Invented a quote, number, or fact
+        - Misread what the paper says
+        - Unfair or out of proportion
+        - An editing comment changed the meaning
+        - Other
+    validations:
+      required: true
   - type: textarea
     id: comment
     attributes:
@@ -20,8 +32,15 @@ body:
   - type: input
     id: setup
     attributes:
-      label: Review mode and client
-      placeholder: "full mode, Claude Code (macOS)"
+      label: Review mode, client and model
+      placeholder: "full mode, Claude Code (macOS), model name"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Econ Review version (if known)
+      description: "Plugin users: the plugin manager shows it. For a standalone copy, give the date you installed or last updated it."
   - type: textarea
     id: extra
     attributes:

@@ -14,7 +14,7 @@ Start with [paper-review.pdf](paper-review.pdf). It combines the referee report,
 
 ## Open the review in Review Desk
 
-Review Desk is the optional local viewer for deciding each comment. If it was installed (`--with-review-desk`), run the launch command the installer printed; it opens <http://127.0.0.1:48127/>. If you no longer have the command, ask your agent to "open this review in Review Desk". The agent can print it again without reinstalling by running the skill's `scripts/setup_econ_review.py --support-only --global --with-review-desk` (`--local PROJECT` for a project-local install), or `econ-review-setup` for the native plugin. Choose **Open review folder** and select this whole folder; the viewer finds the review automatically.
+Review Desk is the optional local viewer for deciding each comment. If it was installed (`--with-review-desk`), run the launch command the installer printed; it opens <http://127.0.0.1:48127/>. If you no longer have the command, ask your agent to "open this review in Review Desk". The agent can print it again without changing anything by running the skill's `scripts/setup_econ_review.py --support-only --global --with-review-desk --dry-run` (`--local PROJECT` for a project-local install), or `econ-review-setup` for the native plugin. If that dry run says it would create the runtime or install Review Desk or its launcher, the printed command will not work yet, and the agent should offer the real setup instead. Choose **Open review folder** and select this whole folder; the viewer finds the review automatically.
 
 Your decisions are saved in that browser for that address only. Export them before you switch browsers, computers, or the `--port` setting.
 

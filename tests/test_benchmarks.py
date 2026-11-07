@@ -156,6 +156,37 @@ class BenchmarkHarnessTests(unittest.TestCase):
                 "<unnamed>",
             )
 
+    def test_evaluated_case_reports_active_finding_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            reviews = Path(temporary)
+            review = reviews / "synthetic-case"
+            review.mkdir(parents=True)
+            (review / "run.json").write_text(
+                json.dumps({"activated_burdens": []}), encoding="utf-8"
+            )
+            (review / "findings.json").write_text(
+                json.dumps({
+                    "findings": [
+                        {"id": "SUB-01", "status": "open", "issue": "The sample changes."},
+                        {"id": "SUB-02", "status": "challenged", "report_channel": "substance",
+                         "issue": "The bound is loose."},
+                        {"id": "SUB-03", "status": "resolved", "issue": "A fixed typo in Table 2."},
+                        {"id": "WRT-01", "status": "open", "report_channel": "writing",
+                         "issue": "The abstract buries the result."},
+                        {"id": "WRT-02", "status": "dismissed", "report_channel": "writing",
+                         "issue": "A dismissed style note."},
+                    ],
+                }),
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                MODULE.subprocess, "run", return_value=mock.Mock(returncode=0)
+            ):
+                result = MODULE.evaluate_case(self.minimal_case(), reviews=reviews)
+            self.assertEqual(result["status"], "evaluated")
+            self.assertEqual(result["active_substance_count"], 2)
+            self.assertEqual(result["active_writing_count"], 1)
+
     def test_concept_terms_cannot_match_across_different_findings(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             reviews = Path(temporary)

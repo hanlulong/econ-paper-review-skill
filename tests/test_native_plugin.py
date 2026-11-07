@@ -38,6 +38,15 @@ PLUGIN_VERSION = strict_json(CLAUDE_MANIFEST_PATH)["version"]
 
 
 class NativePluginTests(unittest.TestCase):
+    def test_citation_file_carries_the_plugin_version(self) -> None:
+        citation = (ROOT / "CITATION.cff").read_text(encoding="utf-8")
+        version = re.search(r'^version:\s*"?([^"\n]+)"?$', citation, re.MULTILINE)
+        self.assertIsNotNone(version)
+        self.assertEqual(version.group(1), PLUGIN_VERSION)
+        released = re.search(r'^date-released:\s*"?(\d{4}-\d{2}-\d{2})"?$', citation, re.MULTILINE)
+        self.assertIsNotNone(released)
+        self.assertNotIn("email", citation)
+
     def test_source_repository_does_not_publish_a_marketplace(self) -> None:
         self.assertFalse((ROOT / ".claude-plugin" / "marketplace.json").exists())
         release_contract = strict_json(ROOT / "scripts" / "public-release-files.json")

@@ -73,7 +73,8 @@ class DemoReviewPackageTests(unittest.TestCase):
         self.assertIn("review-actions.json", readme)
         # Name the viewer's real control and an idempotent way to reprint the launch command.
         self.assertIn("**Download decisions**", readme)
-        self.assertIn("--support-only --global --with-review-desk", readme)
+        self.assertIn("--support-only --global --with-review-desk --dry-run", readme)
+        self.assertIn("the printed command will not work yet", readme)
 
 
 if __name__ == "__main__":

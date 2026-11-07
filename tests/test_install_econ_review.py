@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import importlib.util
 import hashlib
+import io
 import json
 import os
 import shlex
@@ -535,13 +537,27 @@ class ManagedInstallerTests(unittest.TestCase):
                 "run",
                 side_effect=AssertionError("dry run spawned a child process"),
             ):
-                planned = MODULE.ensure_runtime(
-                    runtime,
-                    fixture.skill,
-                    refresh=False,
-                    dry_run=True,
-                )
+                reuse_output = io.StringIO()
+                with contextlib.redirect_stdout(reuse_output):
+                    planned = MODULE.ensure_runtime(
+                        runtime,
+                        fixture.skill,
+                        refresh=False,
+                        dry_run=True,
+                    )
+                refresh_output = io.StringIO()
+                with contextlib.redirect_stdout(refresh_output):
+                    MODULE.ensure_runtime(
+                        runtime,
+                        fixture.skill,
+                        refresh=True,
+                        dry_run=True,
+                    )
             self.assertEqual(planned, python)
+            self.assertIn("Would verify and reuse or replace managed Python runtime", reuse_output.getvalue())
+            self.assertIn("only if that runtime is replaced", reuse_output.getvalue())
+            self.assertIn(f"Would replace managed Python runtime: {runtime}", refresh_output.getvalue())
+            self.assertIn("Would install core requirements from: ", refresh_output.getvalue())
 
     def test_runtime_builder_preflight_runs_only_when_creation_is_needed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -963,6 +979,15 @@ class ManagedInstallerTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("must not overlap", result.stderr)
 
+    def test_too_old_python_says_to_rerun_with_a_versioned_interpreter(self) -> None:
+        with mock.patch.object(MODULE, "MINIMUM_PYTHON", (99, 0)):
+            with self.assertRaises(MODULE.InstallError) as raised:
+                MODULE.main(["--global", "--codex", "--dry-run"])
+        message = str(raised.exception)
+        self.assertIn("Python 3.10 or newer is required", message)
+        self.assertIn("rerun the same command with that versioned interpreter", message)
+        self.assertIn("python3.12 instead of python3", message)
+
     def test_support_only_rejects_ignored_agent_selectors(self) -> None:
         result = self.run_installer("--support-only", "--codex", "--dry-run", check=False)
         self.assertEqual(result.returncode, 1)
@@ -990,6 +1015,11 @@ class ManagedInstallerTests(unittest.TestCase):
             )
             first = self.run_installer(*arguments, env=env)
             self.assertIn("setup complete and ready", first.stdout)
+            self.assertIn("Recorded managed runtime for Econ Review", first.stdout)
+            self.assertIn(
+                "Restart or reload Claude Code and Codex so they discover the installed skill.",
+                first.stdout,
+            )
             runtime_python = MODULE.runtime_python_path(runtime.absolute())
             self.assertTrue(runtime_python.is_file())
             destinations = (
@@ -1011,7 +1041,16 @@ class ManagedInstallerTests(unittest.TestCase):
             marker.write_text("keep", encoding="utf-8")
             second = self.run_installer(*arguments, env=env)
             self.assertIn("Reusing managed Python runtime", second.stdout)
-            self.assertEqual(second.stdout.count("Already current"), 2)
+            # Both skill copies plus the unchanged runtime record.
+            self.assertEqual(second.stdout.count("Already current"), 3)
+            self.assertIn("Already current managed runtime record for Econ Review", second.stdout)
+            self.assertNotIn("Recorded managed runtime", second.stdout)
+            self.assertIn(
+                "No skill files changed. If Claude Code and Codex do not list Econ Review yet, "
+                "restart or reload them.",
+                second.stdout,
+            )
+            self.assertNotIn("so they discover", second.stdout)
             self.assertEqual(marker.read_text(encoding="utf-8"), "keep")
 
     def test_copy_only_preserves_lightweight_behavior(self) -> None:
@@ -1099,6 +1138,38 @@ class ManagedInstallerTests(unittest.TestCase):
             self.assertIn("Already current Review Desk", second.stdout)
             self.assertIn("Already current Review Desk launcher", second.stdout)
             self.assertEqual([path.name for path in (desk_root / "versions").iterdir()], [installed.name])
+
+    def test_review_desk_dry_run_reports_a_current_launcher(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            project = root / "project"
+            project.mkdir()
+            desk_root = root / "desk"
+            arguments = (
+                "--source",
+                str(fixture.skill),
+                "--local",
+                str(project),
+                "--codex",
+                "--copy-only",
+                "--with-review-desk",
+                "--review-desk-dir",
+                str(desk_root),
+                "--review-desk-bundle",
+                str(ROOT / "econ-review" / "assets" / "review-desk.zip"),
+            )
+            self.run_installer(*arguments)
+            launcher = desk_root / "launch_review_desk.py"
+            before = launcher.stat().st_mtime_ns
+            dry = self.run_installer(*arguments, "--dry-run")
+            self.assertIn("Would keep current Review Desk:", dry.stdout)
+            self.assertIn(f"Would keep current Review Desk launcher: {launcher}", dry.stdout)
+            self.assertIn(f"Would keep current Codex (project): {project / '.agents' / 'skills' / 'econ-review'}", dry.stdout)
+            self.assertIn("Review Desk launch command", dry.stdout)
+            self.assertNotIn("Would already", dry.stdout)
+            self.assertNotIn("Restart or reload", dry.stdout)
+            self.assertEqual(launcher.stat().st_mtime_ns, before)
 
     def test_windows_review_desk_cmd_is_installed_and_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1295,6 +1366,91 @@ class ManagedInstallerTests(unittest.TestCase):
                 json.loads(descriptor.read_text(encoding="utf-8"))["python"],
                 str(MODULE.runtime_python_path(runtime.absolute())),
             )
+
+    def local_runtime_descriptor(self, fixture: InstallerFixture, project: Path) -> Path:
+        with mock.patch.object(MODULE.Path, "home", return_value=self.support_home), \
+                mock.patch.dict(
+                    os.environ,
+                    {"XDG_DATA_HOME": str(self.support_home / ".local" / "share")},
+                ):
+            return MODULE.support_descriptor_default(
+                "local",
+                project.resolve(),
+                version_key=MODULE.requirements_digest(fixture.skill / "requirements-core.txt"),
+            )
+
+    def test_rerun_and_dry_run_messages_describe_what_would_change(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            project = root / "project"
+            project.mkdir()
+            runtime = root / "runtime"
+            arguments = (
+                "--source",
+                str(fixture.skill),
+                "--runtime-dir",
+                str(runtime),
+                "--local",
+                str(project),
+                "--codex",
+            )
+            first = self.run_installer(*arguments)
+            self.assertIn("Recorded managed runtime for Econ Review", first.stdout)
+            self.assertIn("Restart or reload Codex so it discovers the installed skill.", first.stdout)
+            descriptor = self.local_runtime_descriptor(fixture, project)
+            recorded = descriptor.read_bytes()
+
+            before = descriptor.stat()
+            dry = self.run_installer(*arguments, "--dry-run")
+            self.assertIn("Would keep current Codex (project)", dry.stdout)
+            self.assertIn("Would keep current managed runtime record for Econ Review", dry.stdout)
+            self.assertIn(
+                f"Would verify and reuse or replace managed Python runtime: {runtime.absolute()}",
+                dry.stdout,
+            )
+            self.assertIn("only if that runtime is replaced", dry.stdout)
+            self.assertNotIn("Would already", dry.stdout)
+            self.assertNotIn("Restart or reload", dry.stdout)
+            after = descriptor.stat()
+            self.assertEqual(after.st_mtime_ns, before.st_mtime_ns)
+            self.assertEqual(after.st_ino, before.st_ino)
+
+            if os.name != "nt":
+                # The rewrite also restores private permissions on the record.
+                descriptor.chmod(0o644)
+            second = self.run_installer(*arguments)
+            self.assertIn("Already current managed runtime record for Econ Review", second.stdout)
+            self.assertNotIn("Recorded managed runtime", second.stdout)
+            self.assertEqual(descriptor.read_bytes(), recorded)
+            if os.name != "nt":
+                self.assertEqual(stat.S_IMODE(descriptor.stat().st_mode), 0o600)
+            self.assertIn(
+                "No skill files changed. If Codex does not list Econ Review yet, restart or reload it.",
+                second.stdout,
+            )
+            self.assertNotIn("so it discovers", second.stdout)
+
+    def test_first_copy_for_both_clients_uses_the_plural_restart_hint(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = InstallerFixture(root / "source")
+            project = root / "project"
+            project.mkdir()
+            arguments = ("--source", str(fixture.skill), "--local", str(project), "--all", "--copy-only")
+            first = self.run_installer(*arguments)
+            self.assertIn(
+                "Restart or reload Claude Code and Codex so they discover the installed skill.",
+                first.stdout,
+            )
+            self.assertNotIn("so it discovers", first.stdout)
+            # Repairing one of the two copies counts as a change.
+            (project / ".claude" / "skills" / "econ-review" / "SKILL.md").write_text(
+                "edited", encoding="utf-8"
+            )
+            repaired = self.run_installer(*arguments)
+            self.assertIn("Already current Codex (project)", repaired.stdout)
+            self.assertIn("so they discover the installed skill", repaired.stdout)
 
     def test_modified_installed_file_is_repaired(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

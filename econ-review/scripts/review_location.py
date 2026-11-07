@@ -3,9 +3,10 @@
 
 The review package (confidential comments, page renders, and evidence ledgers)
 normally goes in ``review/`` beside the manuscript. When that folder is an
-Overleaf project synced through Dropbox, another cloud-synced folder, or a git
-work tree, the package would sync to coauthors or be committed. This helper only
-reports such locations; it never moves or writes anything.
+Overleaf project synced through Dropbox, another cloud-synced folder (including
+Box and any macOS File Provider folder under ``~/Library/CloudStorage``), or a
+git work tree, the package would sync to coauthors or be committed. This helper
+only reports such locations; it never moves or writes anything.
 """
 
 from __future__ import annotations
@@ -26,6 +27,31 @@ def _contains_sequence(parts: list[str], sequence: tuple[str, ...]) -> bool:
     return any(tuple(parts[index:index + width]) == sequence for index in range(len(parts) - width + 1))
 
 
+def _file_provider_service(parts: tuple[str, ...]) -> str | None:
+    """Name the macOS File Provider folder after ``Library/CloudStorage``.
+
+    Every File Provider sync client (Box, pCloud, and others) mounts below
+    ``~/Library/CloudStorage/<Provider>[-account]``.
+    """
+
+    for index in range(len(parts) - 2):
+        if parts[index].casefold() == "library" and parts[index + 1].casefold() == "cloudstorage":
+            provider = parts[index + 2]
+            return provider.split("-", 1)[0] or provider
+    return None
+
+
+def _first_part_under(path: Path, homes: tuple[Path, ...]) -> str | None:
+    for home in homes:
+        try:
+            relative = path.relative_to(home)
+        except ValueError:
+            continue
+        if relative.parts:
+            return relative.parts[0]
+    return None
+
+
 def git_work_tree(path: Path) -> Path | None:
     for candidate in (path, *path.parents):
         if (candidate / ".git").exists():
@@ -33,7 +59,7 @@ def git_work_tree(path: Path) -> Path | None:
     return None
 
 
-def location_notices(directory: Path) -> list[str]:
+def location_notices(directory: Path, *, home: Path | None = None) -> list[str]:
     """Return one plain-language notice per sharing risk found for *directory*."""
 
     path = directory.expanduser().absolute()
@@ -59,6 +85,21 @@ def location_notices(directory: Path) -> list[str]:
         synced = "OneDrive"
     elif any(part.startswith("googledrive") or part == "google drive" for part in parts):
         synced = "Google Drive"
+    if synced is None:
+        synced = _file_provider_service(path.parts) or _file_provider_service(resolved.parts)
+    if synced is None:
+        # Box Drive's default folder is ~/Box on macOS and Windows.
+        homes: tuple[Path, ...] = ()
+        try:
+            home_path = (home or Path.home()).expanduser().absolute()
+            homes = (home_path, home_path.resolve())
+        except (OSError, RuntimeError):
+            pass
+        for candidate in (path, resolved):
+            first = _first_part_under(candidate, homes)
+            if first is not None and first.casefold() == "box":
+                synced = "Box"
+                break
     if synced and not notices:
         notices.append(
             f"This folder is synced by {synced}. A review/ folder here would be uploaded and shared with anyone "

@@ -26,6 +26,16 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 
+def markitdown_is_ready() -> bool:
+    """Mirror the doctor: the pinned package in this runtime plus its command."""
+
+    try:
+        compatible = MODULE.markitdown_requirement_status().compatible
+    except MODULE.IngestionError:
+        return False
+    return bool(compatible and MODULE.command_path("markitdown"))
+
+
 def make_pdf(
     path: Path, *, blank_second_page: bool = False, active_content: bool = False,
 ) -> None:
@@ -63,7 +73,20 @@ BT /F1 9 Tf 72 60 Td (Synthetic footer) Tj ET
     if blank_second_page:
         writer.add_blank_page(width=612, height=792)
     if active_content:
-        writer.add_js("app.alert('not executed')")
+        # Document-level JavaScript in /Names /JavaScript, built directly:
+        # PdfWriter.add_js is deprecated, and its add_open_action replacement
+        # is not available at the pypdf floor in requirements-core.txt.
+        javascript = writer._add_object(DictionaryObject({
+            NameObject("/Type"): NameObject("/Action"),
+            NameObject("/S"): NameObject("/JavaScript"),
+            NameObject("/JS"): TextStringObject("app.alert('not executed')"),
+        }))
+        writer._root_object[NameObject("/Names")] = DictionaryObject({
+            NameObject("/JavaScript"): DictionaryObject({
+                NameObject("/Names"): ArrayObject([TextStringObject("ER-JS"), javascript]),
+            }),
+        })
+        # Added after /Names exists, so /EmbeddedFiles joins the same dictionary.
         writer.add_attachment("note.txt", b"attachment is never opened")
         writer._root_object[NameObject("/OpenAction")] = DictionaryObject({
             NameObject("/S"): NameObject("/URI"),
@@ -776,7 +799,7 @@ class PdfIngestionTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("safe and relative", result.stderr)
-            if shutil.which("markitdown") is None:
+            if not markitdown_is_ready():
                 result = self.run_cli(
                     "ingest", str(pdf), str(root / "review-2"), "--review-id", "PDF-MARKITDOWN",
                     "--markitdown-proposal", check=False,
@@ -789,7 +812,10 @@ class PdfIngestionTests(unittest.TestCase):
                 )
         self.assertIn("network: forbidden by default", self.run_cli("doctor").stdout)
 
-    @unittest.skipUnless(shutil.which("markitdown"), "compatible MarkItDown command is not installed")
+    @unittest.skipUnless(
+        markitdown_is_ready(),
+        "the pinned MarkItDown package and its command are not both installed in this runtime",
+    )
     def test_pinned_markitdown_proposal_is_non_authoritative_and_verifiable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

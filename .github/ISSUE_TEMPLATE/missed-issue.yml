@@ -1,0 +1,35 @@
+name: Report a missed issue
+description: The review did not raise a real problem in the paper.
+title: "[Missed issue]: "
+labels: ["missed-issue"]
+body:
+  - type: markdown
+    attributes:
+      value: Redact anything confidential. Do not paste unpublished manuscript text; describe the problem in your own words.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem the review missed
+    validations:
+      required: true
+  - type: input
+    id: location
+    attributes:
+      label: Where it is in the paper
+      placeholder: "Section 4.2, Table 3"
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it matters
+  - type: input
+    id: setup
+    attributes:
+      label: Review mode, client and model
+      placeholder: "full mode, Claude Code (macOS), model name"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Econ Review version (if known)
+      description: "Plugin users: the plugin manager shows it. For a standalone copy, give the date you installed or last updated it."

@@ -23,7 +23,7 @@
 
 ## 你会得到什么
 
-评审完成后，成果会整齐地存放在论文旁边的 `review/` 文件夹中。如果该文件夹处于同步目录（例如 Dropbox 中的 Overleaf 项目、iCloud 云盘、OneDrive）或受 git 管理，智能体会先征求你的意见，因为评审内容属于保密材料：
+评审完成后，成果会整齐地存放在论文旁边的 `review/` 文件夹中。如果该文件夹处于同步目录（例如 Dropbox 中的 Overleaf 项目、iCloud 云盘、OneDrive、Box）或受 git 管理，智能体会先征求你的意见，因为评审内容属于保密材料：
 
 - **`paper-review.pdf`** — 主报告：专业排版、带书签的 PDF，包含审稿报告、全部详细意见、编辑性意见和修改计划。
 - **`reports/`** — 上述报告的 Markdown 版本。其中的修改计划是一份按优先级排序的待办清单，可直接交给你的 AI 智能体去执行。
@@ -59,7 +59,7 @@ exactly one active copy for this client, do not change the other client, and do
 not ask me to run commands. Report completion or the one genuine blocker.
 ```
 
-以后需要更新时，粘贴同一段话即可；安装流程是幂等的，并会复用兼容的运行环境。更新还会修复 v0.3.0 之前安装的独立副本：这些副本带有插件清单，因而在 Claude Code 中显示为 `econ-review@skills-dir`、在 Codex 中显示为 `econ-review:econ-review`。需要本机已有 Python 3.10+（`venv` 与 pip 引导可用）。macOS 自带的 `python3` 是 3.9；请先从 [python.org](https://www.python.org/downloads/macos/) 安装 Python 3.13 或 3.14（3.15 尚未测试），或运行 `brew install python@3.12` 或 `uv python install 3.12`，再粘贴上面的提示。完整解析 PDF 稿件还需要 `PATH` 中有 [Poppler](https://poppler.freedesktop.org/)；不需要 TeX、Pandoc、Node.js，也不需要管理员权限。
+以后需要更新时，粘贴同一段话即可；安装流程是幂等的，并会复用兼容的运行环境。更新还会修复 v0.3.0 之前安装的独立副本：这些副本带有插件清单，因而在 Claude Code 中显示为 `econ-review@skills-dir`、在 Codex 中显示为 `econ-review:econ-review`。需要本机已有 Python 3.10+（`venv` 与 pip 引导可用）。macOS 自带的 `python3` 是 3.9；请先从 [python.org](https://www.python.org/downloads/macos/) 安装 Python 3.13 或 3.14（3.15 在 macOS 测试中可以运行，但部分依赖尚未提供 3.15 预编译包，因此 3.13 或 3.14 更稳妥），或运行 `brew install python@3.12` 或 `uv python install 3.12`，再粘贴上面的提示。完整解析 PDF 稿件还需要 `PATH` 中有 [Poppler](https://poppler.freedesktop.org/)；不需要 TeX、Pandoc、Node.js，也不需要管理员权限。
 
 <details>
 <summary>从代码检出直接安装独立技能</summary>
@@ -70,6 +70,8 @@ cd econ-paper-review-skill
 python3 scripts/install_econ_review.py --dry-run --global --all --with-review-desk
 python3 scripts/install_econ_review.py --global --all --with-review-desk
 ```
+
+在 macOS 上，如果安装新版 Python 后 `python3 --version` 仍显示 3.9，请改用带版本号的解释器运行这些命令，例如用 `python3.12` 代替 `python3`。
 
 只为单个客户端安装时，用 `--claude` 或 `--codex` 替换 `--all`。在原生 Windows 上，请在 PowerShell 中运行 `python scripts\install_econ_review.py --global --all --with-review-desk`。使用本机可用的 Python 3.10+ 命令即可，无需可选的 `py` 启动器。如果本机有可用且兼容的 LuaLaTeX 或 Tectonic 渲染器，报告会优先使用；否则使用持续维护的内置 PDF 渲染器。Review Desk 为预构建版本，不需要 Node.js 或 npm。迁移、更新、源码安装与项目级安装见 [INSTALL.md](INSTALL.md)。
 
@@ -151,7 +153,7 @@ AI 同行评审通常败在两点之一：要么凭空捏造，要么给你一�
 
 ## 它不做什么
 
-它不会代写论文、不会估计录用概率、不会编造引文。遇到无法核实的内容——拿不到的数据集、读不了的图——它会如实说明，而不是装作已经核实。它也不声称胜过人类审稿人：请把它当作投稿前多出的一位严格读者，而不是同行评审的替代品。
+它不会代写论文、不会估计录用概率、不会编造引文。遇到无法核实的内容——拿不到的数据集、读不了的图——它会如实说明，而不是装作已经核实。它也不声称胜过人类审稿人：请把它当作投稿前多出的一位严格读者，而不是同行评审的替代品。它也不会猜测论文是否借助 AI 写成：它评审的是论文本身，而不是写作过程。
 
 正在为期刊审稿？请先查阅该期刊关于审稿人使用 AI 的政策。许多期刊禁止把投稿上传到 AI 工具，或要求披露 AI 的使用；对于并非由你撰写的稿件，本技能会在评审前先向你确认。
 
@@ -219,4 +221,4 @@ Econ Paper Review 以源代码公开的 [PolyForm Noncommercial License 1.0.0](L
 
 ---
 
-如果它抓住了一个本会被审稿人抓住的问题，请为仓库点一颗星，让更多经济学者找到它；如果它说错了什么，请开一个 issue。在这里，糟糕的意见是 bug，不是观点分歧。
+如果它抓住了一个本会被审稿人抓住的问题，请为仓库点一颗星，让更多经济学者找到它；如果它说错了什么或漏掉了什么，请开一个 issue。在这里，糟糕的意见是 bug，不是观点分歧。

@@ -249,6 +249,10 @@ class GeneratePdfReportTests(unittest.TestCase):
         self.assertEqual(windows, mac)
         self.assertEqual(windows.body, "ERBody")
 
+    @unittest.skipUnless(
+        shutil.which("latexmk") and shutil.which("lualatex"),
+        "fixture records renderer latexmk-lualatex; install TeX Live or MacTeX",
+    )
     def test_check_detects_stale_pdf(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             target = self.copy_fixture(temporary)

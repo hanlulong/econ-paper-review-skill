@@ -30,6 +30,8 @@ python3 benchmarks/evaluate.py
 
 The default available-only mode checks parent-level burden routing, selected paper-specific facets, required issue-concept recall, forbidden false positives, and the atomic finalizer's `--check` for review packages that exist. A draft or receipt-less directory never counts as executed benchmark evidence, even when its intermediate JSON happens to validate. Parent states aggregate through each row's stable `parent_id`: active takes precedence over a not-applicable sibling, while an absent parent remains unassessed. A required issue must appear in the reviewer-authored diagnosis fields of one finding; words split across comments or copied only in manuscript evidence cannot satisfy a pattern. Missing packages are reported as `not_run` and do not fail this exploratory command. A present but unreadable or unfinalized package does fail.
 
+Each evaluated case also reports `active_substance_count`, the number of open or challenged referee-report findings (the findings the issue patterns are matched against), and `active_writing_count`, the number of open or challenged editing comments. They are context, not a score: read required-issue recall next to them, because a package with many findings can match more patterns through volume alone.
+
 Use strict mode for CI, release readiness, or any end-to-end performance claim:
 
 ```bash

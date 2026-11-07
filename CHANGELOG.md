@@ -5,6 +5,109 @@ All notable changes to Econ Review are recorded here. Versions follow
 `econ-review--vX.Y.Z`. The version is declared in both
 `econ-review/.claude-plugin/plugin.json` and `econ-review/.codex-plugin/plugin.json`.
 
+## 0.3.1 — 2026-11-07
+
+A patch release: installer messages that say what will actually change, Python
+discovery on macOS, a wider synced-folder check, and documentation and test
+fixes. Rerun the standalone install prompt to pick it up. After a native plugin
+update, ask the agent to run econ-review-setup as usual; the core requirements
+and the Review Desk bundle are unchanged, so it reuses the managed runtime and
+the installed Review Desk. Reviews made with 0.3.0 validate and finalize
+unchanged.
+
+### Fixed
+
+- `scripts/install.sh` finds a supported Python when `python3` is too old. On
+  macOS, `python3` often stays the system 3.9 after a newer Python is installed;
+  the script now tries `python3`, then `python3.14` down to `python3.10`, then
+  the same names in `~/.local/bin` (where `uv python install` puts them), and
+  uses the first 3.10+ interpreter for every step. When none is found, and when
+  `setup_econ_review.py` runs under a too-old Python, the message says to rerun
+  with the versioned interpreter, for example `python3.12` instead of `python3`.
+  README and INSTALL now say that 3.15 worked in a macOS test but that some
+  dependencies do not yet ship ready-made 3.15 packages, so 3.13 or 3.14 is the
+  safer choice.
+- Dry-run and re-run messages say what will actually change. A dry run against a
+  current install said "Would already current" and promised a core-requirements
+  install for a runtime it would reuse. It now says "Would keep current", says
+  when a runtime would be created or replaced, and reports a current runtime
+  record and Review Desk launcher. A re-run still rewrites the runtime record,
+  which restores its private permissions, but reports it as already current.
+  When no skill files changed, the restart hint becomes a note to restart only
+  if the client does not list Econ Review yet, and `install.sh` no longer prints
+  the hint on a dry run. Showing a notice only when there is something to act on
+  is an idea adapted from
+  [Spark-To-Paper-Skills/paperjury](https://github.com/Spark-To-Paper-Skills/paperjury)
+  (MIT; idea only, no code copied).
+- The synced-folder warning now covers Box and any macOS File Provider folder. A
+  folder under `Library/CloudStorage/` (such as `Box-Box` or `pCloudDrive`) is
+  reported with its provider's name, and a top-level `~/Box` folder counts as
+  Box. Before, the confidentiality question was never asked for these folders.
+  An Overleaf project still gets only the Overleaf notice.
+- The delivered `review/README.md` reprints the Review Desk launch command
+  without changing anything. It told the agent to rerun support setup, which
+  takes the setup lock, rewrites the runtime record and can rebuild the runtime.
+  It now adds `--dry-run`, which prints the same command, and tells the agent to
+  offer the real setup if that dry run would create the runtime or install
+  Review Desk or its launcher. `SKILL.md` gives the same rule. A review
+  finalized by 0.3.0 keeps its earlier README until it is finalized again.
+
+### Changed
+
+- The review never judges whether a manuscript, or a passage in it, was written
+  with AI. Prose style is not evidence of how a paper was produced, and
+  automated detectors often misclassify writing by non-native English speakers
+  (Liang et al. 2023, [arXiv:2304.02819](https://arxiv.org/abs/2304.02819)).
+  Formulaic or unclear prose is still raised as an editing comment about its
+  effect on the reader, and verifiable defects, such as a reference that cannot
+  be found or leftover assistant or placeholder text, are still reported as
+  those defects.
+
+### Added
+
+- A "Report a missed issue" form for a real problem the review did not raise,
+  and a "What went wrong" choice plus model and version fields on the
+  bad-comment form. The version field is optional, because a standalone copy
+  does not show its version. The form structure is adapted from
+  [blader/humanizer](https://github.com/blader/humanizer) and
+  [Spark-To-Paper-Skills/paperjury](https://github.com/Spark-To-Paper-Skills/paperjury)
+  (both MIT; idea only, labels written fresh).
+- Benchmarks: each evaluated case reports `active_substance_count` and
+  `active_writing_count`, so that required-issue recall can be read against how
+  many findings a package has. The idea comes from the
+  [Dawes-Institute/ai-peer-review-benchmark](https://github.com/Dawes-Institute/ai-peer-review-benchmark)
+  write-up (MIT; idea only, no code copied).
+- `CITATION.cff`, so GitHub offers "Cite this repository" for researchers who
+  cite the tool. Its `version` and `date-released` are bumped with the plugin
+  manifests, and a test checks that the versions agree.
+
+### Documentation
+
+- INSTALL no longer says that `install.sh` accepts `--check` (only the Python
+  installer does) or that the installer prints the Review Desk integrity check
+  (the printed launch command does, with `--check` appended).
+- The plugin manifests now say to run econ-review-setup after a direct plugin
+  install and again after each plugin update, as README and INSTALL already did.
+- `SKILL.md` links the DiD, IV and RDD gates by file, and `docs/DEVELOPMENT.md`
+  says that the fixture PDF checks need latexmk plus LuaLaTeX.
+
+### Tests
+
+- The fixture finalizer check and the stale-PDF check skip with a reason when
+  latexmk or LuaLaTeX is missing, because the fixture records the
+  latexmk-lualatex renderer. The fixture's validator check still runs without
+  TeX.
+- The MarkItDown tests ask the same question as `pdf_ingestion.py doctor` (the
+  pinned package in this runtime plus its command) instead of only looking for a
+  `markitdown` command on `PATH`, which failed when the command came from
+  another environment.
+- The active-content PDF fixture builds its document JavaScript directly instead
+  of calling the deprecated `PdfWriter.add_js`, so the file runs clean with
+  deprecation warnings treated as errors.
+- New tests cover the `install.sh` Python fallback, the dry-run and re-run
+  messages, the Box and File Provider notice, and the delivered README's dry-run
+  command.
+
 ## 0.3.0 — 2026-11-07
 
 A security, install-layout, PDF-ingestion and report-generator release. Rerun

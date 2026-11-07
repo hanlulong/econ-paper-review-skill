@@ -7,7 +7,7 @@ Deep-dive documentation for contributors and advanced users. For the product ove
 - macOS, Linux, or native Windows; WSL remains supported as Linux. The installer and path contracts have native-Windows tests, while release acceptance should still include a real Windows smoke run when Windows hardware or CI is available.
 - Python 3.10+
 - Poppler utilities (`pdfinfo`, `pdftotext`, `pdftoppm`) for PDF ingestion; local Tesseract OCR optional
-- A compatible LuaLaTeX or Tectonic executable for preferred professional report typesetting; the maintained ReportLab renderer is used only when neither is available
+- A compatible LuaLaTeX or Tectonic executable for preferred professional report typesetting; the maintained ReportLab renderer is used only when neither is available. The fixture PDF checks (`generate_pdf_report.py ... --check`, `finalize_review.py --check`, and the two tests that call them) need latexmk plus LuaLaTeX, because the fixture records the latexmk-lualatex renderer; without them those tests are skipped.
 - Node.js 22.14+ only to change, test, or rebuild Review Desk (`.nvmrc` pins the runtime); installed users run its prebuilt bundle with Python
 
 Check your machine:
@@ -295,7 +295,8 @@ python3 scripts/build_public_release.py --output /path/to/release.zip
 
 The plugin version is declared in `econ-review/.claude-plugin/plugin.json` and
 `econ-review/.codex-plugin/plugin.json`. Bump both to the same semantic version
-for every plugin release; the test suite rejects drift. This source repository
+for every plugin release, together with `version` and `date-released` in the
+root `CITATION.cff`; the test suite rejects drift. This source repository
 ships the native plugin package but no marketplace. Before the release commit,
 validate the package and both client manifests:
 
