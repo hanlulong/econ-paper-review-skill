@@ -5,6 +5,55 @@ All notable changes to Econ Review are recorded here. Versions follow
 `econ-review--vX.Y.Z`. The version is declared in both
 `econ-review/.claude-plugin/plugin.json` and `econ-review/.codex-plugin/plugin.json`.
 
+## 0.3.3 — 2026-11-07
+
+A dependency release. Docling, the optional local proposal backend, moves to
+2.148.0, the fallback PDF renderer moves to ReportLab 5.1.0, and the bundled
+Review Desk moves to KaTeX 0.19.1 and React 19.3.1. In the skill itself, only
+the version number, these two requirement pins and the Review Desk bundle
+change. The instructions, gates and scripts are unchanged, so reviews made with
+0.3.2 validate and finalize unchanged.
+
+### Dependencies
+
+- `requirements-docling.txt` pins Docling 2.148.0 (was 2.102.1). OSV lists 8
+  GitHub security advisories against 2.102.1, one rated high, and none against
+  2.148.0. Econ Review runs Docling only on PDFs. The high-severity advisory
+  concerns Docling's LaTeX backend with the Tectonic TikZ engine, which Econ
+  Review does not use. The update brings docling-parse 7 and docling-ibm-models
+  4, and on macOS it no longer holds transformers below 5.9.0. Docling's
+  RapidOCR engine now defaults to PP-OCRv6 models. Docling output remains a
+  non-authoritative proposal beside the canonical page and block map.
+- `requirements-core.txt` pins ReportLab 5.1.0 (was 4.5.1). The bundled sample
+  review's fallback PDFs, at Letter and A4 sizes, are byte-identical to those
+  made with 4.5.1.
+- The Review Desk bundle is rebuilt with KaTeX 0.19.1 (was 0.18.10) and React
+  and React DOM 19.3.1 (was 19.2.7), plus minor and patch updates to its build
+  tooling. Its KaTeX fonts are unchanged.
+
+### Upgrade notes
+
+- The core requirements changed, so the next setup builds a new managed Python
+  runtime instead of reusing the 0.3.2 one, which needs network access, and
+  installs the new Review Desk. Rerun the standalone install prompt; after a
+  native plugin update, ask the agent to run econ-review-setup as usual.
+- Setup leaves the 0.3.2 runtime in place, but the new runtime does not include
+  Docling, and setup never installs optional backends. To keep using Docling,
+  reinstall it after setup. Here PYTHON is Python 3.10 or newer and SKILL_ROOT
+  is the installed econ-review directory; add `--local PROJECT_DIRECTORY` after
+  `--runtime-path` for a project-only setup:
+
+  ```sh
+  RUNTIME_PY="$(PYTHON SKILL_ROOT/scripts/setup_econ_review.py --runtime-path)"
+  "$RUNTIME_PY" -m pip install -r SKILL_ROOT/requirements-docling.txt
+  ```
+
+  Until you do, `--semantic-backend auto` ingests without a Docling proposal
+  and `--semantic-backend docling` fails. With `--allow-model-downloads`, the
+  first Docling run downloads about 32 MB of PP-OCRv6 OCR weights into the new
+  runtime, plus any Docling layout and table models not already in the Hugging
+  Face cache.
+
 ## 0.3.2 — 2026-11-07
 
 A documentation patch release. In the skill itself, apart from the version

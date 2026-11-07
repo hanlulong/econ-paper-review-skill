@@ -238,8 +238,8 @@ class GeneratePdfReportTests(unittest.TestCase):
         import reportlab
 
         requirements = (ROOT / "econ-review" / "requirements-core.txt").read_text(encoding="utf-8")
-        self.assertIn("reportlab==4.5.1", requirements)
-        self.assertEqual(reportlab.__version__, "4.5.1")
+        self.assertIn("reportlab==5.1.0", requirements)
+        self.assertEqual(reportlab.__version__, "5.1.0")
         packaged = tuple(MODULE._safe_font_file(path) for path in MODULE._packaged_font_paths())
         self.assertTrue(all(packaged))
         with mock.patch.object(MODULE.platform, "system", return_value="Windows"):

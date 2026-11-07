@@ -37,7 +37,7 @@ redistributes the managed Python runtime. The current installer obtains the
 wheel through the declared Python dependency graph and does not copy it into
 the source repository or plugin archive.
 
-ReportLab 4.5.1 is pinned so fallback PDF bytes and line wrapping remain
+ReportLab 5.1.0 is pinned so fallback PDF bytes and line wrapping remain
 reproducible. Its packaged Bitstream Vera fonts provide a fixed cross-platform
 font source. The Vera license permits redistribution and embedding subject to
 its notice and naming conditions; preserve the license file distributed with

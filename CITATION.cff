@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
 title: "Econ Review: source-grounded referee reports and revision plans for economics papers"
-version: "0.3.2"
+version: "0.3.3"
 date-released: "2026-11-07"
 authors:
   - family-names: Han

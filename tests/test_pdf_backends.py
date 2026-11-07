@@ -289,7 +289,7 @@ class PdfBackendTests(unittest.TestCase):
                     mock.patch.object(
                         MODULE, "docling_requirement_status",
                         return_value=MODULE.RequirementStatus(
-                            "docling", "docling==2.102.1", "2.102.1", "compatible",
+                            "docling", "docling==2.148.0", "2.148.0", "compatible",
                         ),
                     ), \
                     mock.patch.object(MODULE.subprocess, "run", side_effect=fake_run):
@@ -333,11 +333,11 @@ class PdfBackendTests(unittest.TestCase):
             pdf = root / "source.pdf"
             pdf.write_bytes(b"%PDF synthetic")
             with mock.patch.object(MODULE.shutil, "which", return_value="/fake/docling"), \
-                    mock.patch.object(MODULE, "docling_version", return_value="2.102.1"), \
+                    mock.patch.object(MODULE, "docling_version", return_value="2.148.0"), \
                     mock.patch.object(
                         MODULE, "docling_requirement_status",
                         return_value=MODULE.RequirementStatus(
-                            "docling", "docling==2.102.1", "2.102.1", "compatible",
+                            "docling", "docling==2.148.0", "2.148.0", "compatible",
                         ),
                     ), \
                     mock.patch.object(MODULE.subprocess, "run", side_effect=fake_run):

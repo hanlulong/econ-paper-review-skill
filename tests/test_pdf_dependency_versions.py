@@ -94,7 +94,7 @@ class RequirementManifestTests(unittest.TestCase):
 
     def test_prerelease_and_unparseable_installed_versions_are_not_supported(self) -> None:
         requirement = VERSIONS.load_manifest(ROOT / "econ-review/requirements-docling.txt")["docling"]
-        for installed in ("2.102.1rc1", "vendor-version"):
+        for installed in ("2.148.0rc1", "vendor-version"):
             with self.subTest(installed=installed):
                 status = VERSIONS.check_requirement(requirement, installed_version=installed)
                 self.assertEqual(status.state, "unsupported")
@@ -213,7 +213,7 @@ class PdfDependencyGateTests(unittest.TestCase):
                 INGESTION.toolchain_for(markitdown_args)
 
         unsupported_docling = BACKENDS.RequirementStatus(
-            "docling", "docling==2.102.1", "2.101.0", "unsupported",
+            "docling", "docling==2.148.0", "2.101.0", "unsupported",
         )
         with mock.patch.object(BACKENDS, "docling_requirement_status", return_value=unsupported_docling):
             with self.assertRaisesRegex(BACKENDS.BackendError, "unsupported"):
