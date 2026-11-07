@@ -295,7 +295,8 @@ python3 scripts/build_public_release.py --output /path/to/release.zip
 
 The plugin version is declared in `econ-review/.claude-plugin/plugin.json` and
 `econ-review/.codex-plugin/plugin.json`. Bump both to the same semantic version
-for every plugin release; the test suite rejects drift. This source repository
+for every plugin release, together with `version` and `date-released` in the
+root `CITATION.cff`; the test suite rejects drift. This source repository
 ships the native plugin package but no marketplace. Before the release commit,
 validate the package and both client manifests:
 

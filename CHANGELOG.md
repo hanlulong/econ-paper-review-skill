@@ -77,6 +77,9 @@ unchanged.
   many findings a package has. The idea comes from the
   [Dawes-Institute/ai-peer-review-benchmark](https://github.com/Dawes-Institute/ai-peer-review-benchmark)
   write-up (MIT; idea only, no code copied).
+- `CITATION.cff`, so GitHub offers "Cite this repository" for researchers who
+  cite the tool. Its `version` and `date-released` are bumped with the plugin
+  manifests, and a test checks that the versions agree.
 
 ### Documentation
 

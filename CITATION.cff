@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "Econ Review: source-grounded referee reports and revision plans for economics papers"
+version: "0.3.1"
+date-released: "2026-11-07"
+authors:
+  - family-names: Han
+    given-names: Lu
+    website: "https://luhan.io/"
+license: PolyForm-Noncommercial-1.0.0
+repository-code: "https://github.com/hanlulong/econ-paper-review-skill"
+url: "https://github.com/hanlulong/econ-paper-review-skill"
