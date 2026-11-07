@@ -103,7 +103,8 @@ and the bundled Review Desk. Do not ask the user to copy or run commands.
      verified managed Python.
    - That interpreter passes
      `INSTALLED_SKILL/scripts/validate_skill_package.py --profile standalone INSTALLED_SKILL`.
-   - The Review Desk launcher's printed integrity check succeeds.
+   - Running the printed Review Desk launch command with `--check` appended
+     prints `Review Desk integrity check passed`.
 8. Only after step 7 passes, remove same-client duplicates. Remove the exact
    native plugin through that client's plugin manager and remove the former
    marketplace plugin if present. Treat an untracked same-client project copy
@@ -209,8 +210,8 @@ The equivalent cross-platform command is:
 python3 scripts/install_econ_review.py --copy-only --global --all
 ```
 
-Both support `--dry-run`. Add `--check` to inspect the current Python and
-Poppler after a copy-only install.
+Both support `--dry-run`. The Python form also accepts `--check` to inspect
+the current Python and Poppler after a copy-only install.
 
 ## Optional native plugin installation
 
