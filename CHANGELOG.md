@@ -7,8 +7,9 @@ All notable changes to Econ Review are recorded here. Versions follow
 
 ## 0.3.2 — 2026-11-07
 
-A documentation patch release. In the skill itself only one citation link in
-the RDD gate changes; the scripts, requirements and Review Desk bundle are
+A documentation patch release. In the skill itself, apart from the version
+number, only one citation in the RDD gate changes: both of its links and its
+verification date. The scripts, requirements and Review Desk bundle are
 unchanged, so reviews made with 0.3.1 validate and finalize unchanged.
 
 ### Documentation
